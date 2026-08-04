@@ -19,21 +19,15 @@ import ReactFlow, {
 import { RefreshCw } from "lucide-react";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import { useT } from "../../i18n";
+import { useRegisterCanvasControls } from "../../lib/canvasControls";
 import {
   COMPOSER_DND_MIME,
+  CATEGORY_COLOR,
   computeAnchoredPipelines,
   findCatalogItem,
-  type ComposerNodeCategory,
+  type ComposerCatalogItem,
 } from "../../composer/composerCatalog";
 import { ComposerFlowNode } from "./ComposerFlowNode";
-
-const CATEGORY_COLOR: Record<ComposerNodeCategory, string> = {
-  input: "rgba(120,200,255,0.9)",
-  routing: "rgba(255,190,120,0.9)",
-  expert: "rgba(77,255,160,0.9)",
-  assistant: "rgba(200,150,255,0.9)",
-  engineer: "rgba(255,235,120,0.9)",
-};
 
 const nodeTypes: NodeTypes = { composerFlow: ComposerFlowNode };
 
@@ -62,6 +56,7 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
   const relayoutComposer = useNarrativeStore((s) => s.relayoutComposer);
   const { project, fitView } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
+  useRegisterCanvasControls();
 
   const isolatedIds = useMemo(() => {
     const anchored = computeAnchoredPipelines(composerNodes, composerEdges);
@@ -154,10 +149,10 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
       e.preventDefault();
       const raw = e.dataTransfer.getData(COMPOSER_DND_MIME);
       if (!raw) return;
-      let catalogId: string | undefined;
-      try { catalogId = JSON.parse(raw).catalogId; } catch { return; }
-      if (!catalogId) return;
-      const item = findCatalogItem(catalogId);
+      let parsed: { catalogId?: string; item?: ComposerCatalogItem };
+      try { parsed = JSON.parse(raw); } catch { return; }
+      // 静态目录项按 id 查回；动态（品类专家）随 payload 内联整份 item。
+      const item = (parsed.catalogId ? findCatalogItem(parsed.catalogId) : undefined) ?? parsed.item;
       if (!item) return;
       // project() 需要「相对画布」坐标：减去画布容器在页面中的偏移，节点才会落在松手处。
       const bounds = wrapperRef.current?.getBoundingClientRect();
@@ -204,19 +199,30 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.1} color="rgba(77,255,160,0.05)" />
-        <Controls showInteractive={false} className="composer-controls">
-          <ControlButton onClick={handleRelayout} title={t("composer.relayout")} aria-label={t("composer.relayout")}>
-            <RefreshCw size={12} aria-hidden />
-          </ControlButton>
-        </Controls>
-        <MiniMap
-          nodeColor={(n) => {
-            const node = composerNodes.find((c) => c.id === n.id);
-            return node ? CATEGORY_COLOR[node.category] : "rgba(77,255,160,0.2)";
-          }}
-          maskColor="rgba(4,8,2,0.8)"
-          style={{ background: "rgba(6,10,4,0.95)" }}
-        />
+        {/* 缩放/复位归浮层的画布控件；这里只留一枚重排，且空画布上什么都不摆（设计稿 01）。 */}
+        {composerNodes.length > 0 && (
+          <>
+            <Controls
+              showInteractive={false}
+              showZoom={false}
+              showFitView={false}
+              className="composer-controls"
+            >
+              <ControlButton onClick={handleRelayout} title={t("composer.relayout")} aria-label={t("composer.relayout")}>
+                <RefreshCw size={12} aria-hidden />
+              </ControlButton>
+            </Controls>
+            <MiniMap
+              position="top-right"
+              nodeColor={(n) => {
+                const node = composerNodes.find((c) => c.id === n.id);
+                return node ? CATEGORY_COLOR[node.category] : "rgba(77,255,160,0.2)";
+              }}
+              maskColor="rgba(4,8,2,0.8)"
+              style={{ background: "rgba(6,10,4,0.95)" }}
+            />
+          </>
+        )}
       </ReactFlow>
     </div>
   );

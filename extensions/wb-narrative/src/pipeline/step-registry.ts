@@ -31,6 +31,14 @@ export interface StepDescriptor {
   // C. 数据依赖
   /** 前置 step ID（用于 Planner 拓扑排序和 rerun 下游计算） */
   dependsOn: string[];
+  /**
+   * 执行前必须已存在的 ctx 字段。
+   * 缺省时由 dependsOn 的主输出字段派生（见 getStepRequiredInputs）——
+   * 只在派生结果不准时才显式声明，避免两份事实源。
+   */
+  requiredInputs?: string[];
+  /** 存在则用、缺失不拦的 ctx 字段。 */
+  optionalInputs?: string[];
   /** 是否支持节点级重跑（多节点进度 step） */
   supportsNodeFilter?: boolean;
 
@@ -76,6 +84,43 @@ export function getExtractOutputKey(stepId: string): string | undefined {
 /** 获取指定 step 的前置依赖 */
 export function getStepDependencies(stepId: string): string[] {
   return STEP_REGISTRY.get(stepId)?.dependsOn ?? [];
+}
+
+/**
+ * 执行前必须存在的 ctx 字段。
+ *
+ * 显式声明优先；否则每个直接前置取**一个**字段——它的主输出。
+ *
+ * 只取主输出而不是前置产出的全部字段，是为了让这条断言不会假阳性：
+ * 「主输出在」等价于「这一步跑过了」，而副产物（validation 结果、target_acts
+ * 这类）本来就可能条件性缺席，拿它们卡单跑会把正常的重跑拦在门外。
+ */
+export function getStepRequiredInputs(stepId: string): string[] {
+  const desc = STEP_REGISTRY.get(stepId);
+  if (!desc) return [];
+  if (desc.requiredInputs) return [...desc.requiredInputs];
+  const fields = new Set<string>();
+  for (const dep of desc.dependsOn) {
+    const primary = STEP_REGISTRY.get(dep)?.outputFields[0];
+    if (primary) fields.add(primary);
+  }
+  return [...fields];
+}
+
+/**
+ * 单步/单席位调用前的输入体检：返回缺失字段名。
+ *
+ * 只报告不抛错——是否放行由调用方决定（前端据此灰置入口并提示"需先跑 X"，
+ * 全量管线因拓扑有序永远不缺）。
+ */
+export function missingStepInputs(
+  stepId: string,
+  ctx: Record<string, unknown>,
+): string[] {
+  return getStepRequiredInputs(stepId).filter((f) => {
+    const v = ctx[f];
+    return v === undefined || v === null;
+  });
 }
 
 /**

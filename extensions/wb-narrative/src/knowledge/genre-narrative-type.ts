@@ -1,7 +1,13 @@
 /**
- * 品类 → 叙事类型映射。
- * narrative_type 决定叙事管线选择哪种模式（linear/branching/fragmented/emergent/minimal）。
+ * 品类 → 管线形态族映射。
+ *
+ * ⚠️ 名字有历史包袱：这里的 `NarrativeType` 指的是**管线形态族**
+ * （该品类的叙事按哪种方式生产：linear/branching/fragmented/emergent/minimal），
  * 按"玩法/叙事生产结构"归类，不含运营视角。
+ *
+ * 它**不是** PRD v1.4 §3.2.2 里那个用户可选的「叙事类型」轴
+ * （剧情/喜剧/悲剧/科幻…）—— 后者在 narrative-axes/story-types.ts，类型名为 `StoryTypeCode`。
+ * 两者不可互相转换，也不要在同一处混用。文档中提到本枚举时一律称"管线形态"。
  */
 
 export type NarrativeType =

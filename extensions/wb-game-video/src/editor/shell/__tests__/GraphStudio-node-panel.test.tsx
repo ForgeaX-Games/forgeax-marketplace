@@ -166,7 +166,7 @@ describe('GraphStudio 节点配置分栏', () => {
       expect(screen.getByTestId('node-preview-column')).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '＋ 添加节点' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '展开预览区' })).toBeTruthy()
       expect(screen.queryByTestId('node-preview-column')).toBeNull()
@@ -378,10 +378,12 @@ describe('GraphStudio 节点配置分栏', () => {
     })
 
     render(<GraphStudio scenario={rootScenario} />)
-    fireEvent.click(screen.getByTitle('双击或点此下钻子流程'))
+    // Figma 14947_83595：子流程/子蓝图下钻改为点击标题栏「进入」按钮。
+    // jsdom 下 xyflow 节点默认 visibility:hidden，用 title 而非 role 查找以避开 visibility 过滤。
+    fireEvent.click(screen.getByTitle('进入子流程'))
     await waitFor(() => expect(screen.getByTestId('rf__node-child-entry')).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('button', { name: '＋ 添加节点' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
     await waitFor(() => {
       const savedRoot = useGraphScenario.getState().graph
       expect(savedRoot.nodes.map((node) => node.id)).toEqual(['process'])
@@ -411,7 +413,9 @@ describe('GraphStudio 节点配置分栏', () => {
     })
 
     render(<GraphStudio scenario={rootScenario} />)
-    fireEvent.click(screen.getByTitle('双击或点此下钻子流程'))
+    // Figma 14947_83595：子流程/子蓝图下钻改为点击标题栏「进入」按钮。
+    // jsdom 下 xyflow 节点默认 visibility:hidden，用 title 而非 role 查找以避开 visibility 过滤。
+    fireEvent.click(screen.getByTitle('进入子流程'))
     await waitFor(() => expect(screen.getByTestId('rf__node-child-play')).toBeTruthy())
     fireEvent.click(screen.getByTestId('rf__node-child-play'))
     fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
@@ -488,10 +492,13 @@ describe('GraphStudio 节点配置分栏', () => {
     })
 
     render(<GraphStudio scenario={{ ...SCENARIO, graph: mainGraph }} />)
-    fireEvent.doubleClick(screen.getByTestId('rf__node-container'))
+    // Figma 14947_83595：子流程/子蓝图下钻改为点击标题栏「进入」按钮，
+    // 不再依赖双击节点（避免与节点选中/打开配置面板的交互冲突）。
+    // jsdom 下 xyflow 节点默认 visibility:hidden，用 title 而非 role 查找以避开 visibility 过滤。
+    fireEvent.click(screen.getByTitle('进入子蓝图'))
     await waitFor(() => expect(useGraphScenario.getState().activeBlueprintId).toBe(child.id))
 
-    fireEvent.click(screen.getByRole('button', { name: '＋ 添加节点' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建节点' }))
     await waitFor(() => expect(useGraphScenario.getState().blueprints[child.id]!.graph.nodes).toHaveLength(3))
     expect(useGraphScenario.getState().blueprints[main.id]!.graph).toEqual(mainGraph)
 

@@ -62,12 +62,28 @@ const SYSTEM_PROMPT = `你是叙事与游戏剧本设计师，请基于L2细纲�
 export const PLOT_GENERATION_COMPOSER: PromptComposer = {
   stepId: "plot_generation",
   blocks: {
+    cot: `## 机制与流程
+本席是整条管线的落点：上游把剧情树的骨架搭好，你负责**填满树上每一个节点的内容**。
+节点内容以剧本的形态呈现，实质只有两样东西——情节描写与对话。描写交代发生了什么、
+在哪里、角色如何反应；对话让角色自己开口。两者之外的东西（机制说明、设计意图、
+旁白式点评）都不属于这一层。
+
+1. 读取本节点给定的目标—障碍—转折—结果，这是本段不可改动的骨架。
+2. 认清本节点的功能位：分支节点要把"玩家即将面临的选择"铺垫到位、让选项各有分量；
+   聚合节点要让来自不同分支的玩家都读得通，不能预设他走过哪一条；
+   结局节点要给出收束感，不留下待续的钩子。
+3. 以角色视角展开动作与内心，让每个转折都由角色的选择导出，而非被作者推着走。
+4. 嵌入环境描写传递世界观气质——环境要参与叙事，不做背景板。
+5. 对话承担本段的关键信息与人物关系变化，不做闲谈填充；每句都要能听出是谁在说。
+6. 用节奏控制服务情感强度：紧张处句短段密，舒缓处句长段松。
+7. 自检：是否忠于骨架？有没有把游戏机制直接写进正文（机制裸露）？
+   角色声音是否与角色档案一致？聚合节点是否不慎假定了玩家的来路？`,
     base: SYSTEM_PROMPT,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints", "cot"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

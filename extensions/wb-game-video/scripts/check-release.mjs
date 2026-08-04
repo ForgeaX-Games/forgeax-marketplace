@@ -251,31 +251,31 @@ async function validateManifest(packageRoot, manifest, errors) {
     errors,
   )
 
-  const skills = Array.isArray(manifest.provides?.skills)
-    ? manifest.provides.skills
+  const skills = Array.isArray(manifest.contributes?.skills)
+    ? manifest.contributes.skills
     : []
   for (const [index, skill] of skills.entries()) {
     await checkPackagePath(
       packageRoot,
-      `provides.skills[${index}].entry`,
+      `contributes.skills[${index}].entry`,
       skill?.entry,
       errors,
     )
   }
 
-  const tools = Array.isArray(manifest.provides?.tools)
-    ? manifest.provides.tools
+  const tools = Array.isArray(manifest.contributes?.tools)
+    ? manifest.contributes.tools
     : []
   for (const [index, tool] of tools.entries()) {
     await checkPackagePath(
       packageRoot,
-      `provides.tools[${index}].args`,
+      `contributes.tools[${index}].args`,
       tool?.args,
       errors,
     )
     await checkPackagePath(
       packageRoot,
-      `provides.tools[${index}].returns`,
+      `contributes.tools[${index}].returns`,
       tool?.returns,
       errors,
     )

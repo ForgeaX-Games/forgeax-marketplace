@@ -423,6 +423,56 @@ body[data-pane="center"] .app-header { display: none; }
   white-space: nowrap;
 }
 
+/* Phase-1：多管线并列轨道 */
+.pipeline-bar-tracks.is-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 0 6px;
+}
+
+.pipeline-bar-lane {
+  border-top: 1px solid color-mix(in srgb, var(--dt-green-dim) 35%, transparent);
+  cursor: pointer;
+}
+
+.pipeline-bar-lane.is-active {
+  background: color-mix(in srgb, var(--dt-green) 6%, transparent);
+}
+
+.pipeline-bar-lane-head {
+  display: flex;
+  align-items: center;
+  padding: 4px 14px 0;
+}
+
+.pipeline-bar-lane-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--dt-text-sec);
+}
+
+.pipeline-bar-lane.is-active .pipeline-bar-lane-title {
+  color: var(--dt-green);
+}
+
+.pipeline-bar-lane-state {
+  margin-left: 6px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dt-text-sec);
+}
+
+.pipeline-bar-lane-state.is-running {
+  color: var(--dt-green);
+}
+
+.pipeline-bar-lane-state.is-failed {
+  color: var(--dt-red, #d9534f);
+}
+
 .pipeline-chip-cell {
   display: inline-flex;
   align-items: center;
@@ -1012,6 +1062,233 @@ body[data-pane="center"] .app-header { display: none; }
   padding: 2px 6px 6px;
   min-width: 0;
 }
+
+/* ── 项目内部：资源库 / 资产库（双击条目进入） ─────────────────────────── */
+.project-inside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 8px 10px 12px;
+  min-width: 0;
+}
+
+.pi-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pi-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px 2px 2px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pi-back:hover { color: var(--color-text-primary); }
+
+.pi-key {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 左栏项目管理：列表态 / 项目内部态共用的外框 ─────────────────────── */
+.project-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.project-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-divider-subtle);
+  min-width: 0;
+}
+
+.project-panel__title {
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+
+.project-panel__count {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+}
+
+.project-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 内容类型分区（资源管理 / 资产管理各一段）。 */
+.pi-section { display: flex; flex-direction: column; gap: 6px; }
+
+.pi-section__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-primary);
+  font-size: 11px;
+}
+
+.pi-section__title { flex-shrink: 0; }
+
+.pi-bucket { display: flex; flex-direction: column; gap: 4px; }
+
+.pi-bucket__title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+
+.pi-bucket__count {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 9px;
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+}
+
+/* 这一跑没产的类别仍占一行：告诉用户"还有这些东西可以生成"，只是压暗。 */
+.pi-bucket.is-empty { opacity: 0.45; }
+
+/* 文件卡与分区标题上的 @：把这份产物 / 这位助手送进宿主平台对话框。 */
+.pi-at {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--color-border-default);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-icon-secondary);
+  cursor: pointer;
+}
+
+.pi-at:hover {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+/* 设计稿 08 的文件卡片网格。 */
+.pi-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 6px;
+}
+
+.pi-card {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 7px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-base);
+  min-width: 0;
+}
+
+.pi-card:hover { border-color: var(--color-border-strong, var(--color-border-default)); }
+.pi-card.is-picked { border-color: var(--primary); }
+
+.pi-card__icon { flex-shrink: 0; opacity: 0.6; }
+
+.pi-card__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pi-empty {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  padding: 6px 2px;
+}
+
+.pi-count {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.pi-hint {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.pi-body { display: flex; flex-direction: column; gap: 8px; }
+
+.pi-group { display: flex; flex-direction: column; gap: 2px; }
+
+.pi-group-title {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.pi-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: var(--prim-radius-4, 4px);
+  min-width: 0;
+}
+
+.pi-file:hover { background: var(--color-background-floating); }
+
+.pi-file-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pi-star {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.pi-star:hover { opacity: 1; }
+.pi-star.picked { color: var(--primary); opacity: 1; }
 .history-loading,
 .history-empty {
   font-size: 11px;
@@ -1075,7 +1352,83 @@ body[data-pane="center"] .app-header { display: none; }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
   margin-bottom: 2px;
+  flex-wrap: wrap;
+}
+
+.hi-pipe-toggle {
+  margin-left: auto;
+  border: 1px solid var(--dt-green-faint);
+  background: transparent;
+  color: var(--dt-green-dim);
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: var(--prim-radius-4);
+  cursor: pointer;
+  line-height: 1.6;
+}
+
+.hi-pipe-toggle:hover {
+  color: var(--dt-green);
+  border-color: var(--dt-green-dim);
+}
+
+.history-pipelines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 6px 10px;
+  padding: 4px 0 2px;
+  border-left: 1px solid var(--dt-green-faint);
+}
+
+.history-pipeline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 4px);
+  margin-left: 4px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--dt-text-sec);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--prim-radius-4);
+}
+
+.history-pipeline-row:hover {
+  background: color-mix(in srgb, var(--dt-green) 8%, transparent);
+}
+
+.history-pipeline-row.is-active {
+  color: var(--dt-green);
+  background: color-mix(in srgb, var(--dt-green) 10%, transparent);
+}
+
+.history-pipeline-row.is-incomplete {
+  opacity: 0.75;
+}
+
+.history-pipeline-row .hp-idx {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--dt-text-dim);
+}
+
+.history-pipeline-row .hp-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.history-pipeline-row .hp-meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--dt-text-dim);
 }
 .hi-time { color: var(--dt-green-dim); font-size: 11px; }
 .hi-badge {
@@ -1807,6 +2160,64 @@ body[data-pane="center"] .app-header { display: none; }
 }
 
 /* =================== Text View =================== */
+
+/* Phase-1：文本视图多管线大框嵌套 */
+.text-pipeline-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.text-pipeline-tab {
+  border: 1px solid var(--dt-green-faint);
+  background: transparent;
+  color: var(--dt-text-sec);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: var(--prim-radius-4);
+  cursor: pointer;
+}
+
+.text-pipeline-tab:hover {
+  color: var(--dt-green);
+  border-color: var(--dt-green-dim);
+}
+
+.text-pipeline-tab.is-active {
+  color: var(--dt-green);
+  border-color: var(--dt-green);
+  background: color-mix(in srgb, var(--dt-green) 10%, transparent);
+}
+
+.text-pipeline-box {
+  border: 1px solid var(--dt-green-faint);
+  border-radius: var(--prim-radius-4);
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.text-pipeline-box__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dt-green);
+  background: color-mix(in srgb, var(--dt-green) 6%, transparent);
+  border-bottom: 1px solid var(--dt-green-faint);
+}
+
+.text-pipeline-box__meta {
+  font-weight: 500;
+  color: var(--dt-text-sec);
+}
+
+.text-pipeline-box__body {
+  padding: 6px 8px 8px;
+}
 
 .text-view {
   height: 100%;

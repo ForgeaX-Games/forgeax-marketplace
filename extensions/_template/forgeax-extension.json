@@ -1,34 +1,118 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/_template",
   "version": "0.0.1",
-  "kind": "workbench",
-  "displayName": { "zh": "插件模板", "en": "Plugin Template" },
+  "displayName": {
+    "zh": "插件模板",
+    "en": "Plugin Template"
+  },
   "description": {
     "zh": "三栏 split-surface 插件最小骨架。新建 plugin 时 cp 一份改名即可。",
     "en": "Minimum split-surface plugin scaffold. Copy & rename to start a new plugin."
   },
-  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
   "icon": "🧩",
   "hidden": true,
-  "keywords": ["template", "scaffold", "split-surface"],
-
-  "provides": {
-    "workbench": {
-      "id": "wb-template",
-      "hidden": true,
-      "lens": "by-category",
-      "icon": "🧩",
-      "position": 999,
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left":   { "width": 320, "scrollable": true  },
-        "center": { "minHeight": 600, "scrollable": false }
+  "keywords": [
+    "template",
+    "scaffold",
+    "split-surface"
+  ],
+  "entry": {
+    "backend": "./server/router.ts",
+    "frontend": "./dist/index.html",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 7820,
+      "readyProbe": "/",
+      "dev": {
+        "watch": true,
+        "hmr": true
       },
-      "bus": { "surfaceId": "template" },
-      "matchProduces": []
-    },
+      "embeddedAlso": true
+    }
+  },
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-template.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-template",
+        "title": {
+          "zh": "插件模板",
+          "en": "Plugin Template"
+        },
+        "icon": "🧩",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              320,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-template.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "width": 320,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-template.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": []
+      }
+    ],
     "skills": [
       {
         "id": "wb-template:author-guide",
@@ -42,20 +126,10 @@
         "args": "./schemas/echo.args.json",
         "returns": "./schemas/echo.returns.json",
         "exposedToAI": true,
-        "description": { "zh": "回显参数 + 写一行到 surface snapshot" }
+        "description": {
+          "zh": "回显参数 + 写一行到 surface snapshot"
+        }
       }
     ]
-  },
-
-  "entry": {
-    "backend":  "./server/router.ts",
-    "frontend": "./dist/index.html",
-    "standalone": {
-      "start": "npm run dev",
-      "port": 7820,
-      "readyProbe": "/",
-      "dev": { "watch": true, "hmr": true },
-      "embeddedAlso": true
-    }
   }
 }

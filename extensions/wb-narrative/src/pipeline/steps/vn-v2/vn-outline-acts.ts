@@ -21,7 +21,7 @@ import type {
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
 import { appendUserInstructions, buildIpSourceReference } from "../design-context-helper.js";
-import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
+import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, STRATEGY_SLOT_BLOCK, type PromptComposer } from "../../prompt-composer.js";
 import { FIVE_ELEMENT_NOTE, getStreamEmit, getVnBudget } from "./_shared.js";
 
 interface CombinedOutput {
@@ -100,9 +100,10 @@ function buildRangeActSpec(min: number, max: number): string {
 export const VN_OUTLINE_ACTS_COMPOSER: PromptComposer = {
   stepId: "vn_outline_acts",
   skillSlots: ["style_guide", "constraints"],
-  systemBlockOrder: ["role", "task", "ip_dna", "output_format"],
+  systemBlockOrder: ["role", "task", "strategy", "ip_dna", "output_format"],
   userBlockOrder: ["context_inputs", "task_instruction"],
   blocks: {
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     role: (ctx: NarrativeContext): string => {
       const { min, max, explicit } = resolveActRange(ctx);

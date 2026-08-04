@@ -1,7 +1,7 @@
 import type { NarrativeContext, GameItem } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
-import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
+import { buildDesignContextSnippet, appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 
@@ -11,6 +11,12 @@ const MAX_ITEMS = 30;
 export const ITEM_DATABASE_COMPOSER: PromptComposer = {
   stepId: "item_database",
   blocks: {
+    cot: `## 机制与流程
+1. 盘点世界观的规则与历史，提取其中值得被"物化"成道具的概念。
+2. 为每件关键道具设计四层：来历 / 当前归属 / 象征意义 / 玩法作用，四层要能互相解释。
+3. 撰写富含 Lore 的描述文本——道具是玩家随身携带的世界观切片。
+4. 自检：道具是否服务叙事而不只是数值载体？归属与出现位置是否与角色、势力咬合？`,
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     role: `你是游戏系统策划，请生成资源型道具数据库 JSON。所有输出使用中文。`,
     task_spec: `要求：
 - 物品数量 ${MIN_ITEMS}~${MAX_ITEMS}
@@ -23,7 +29,7 @@ export const ITEM_DATABASE_COMPOSER: PromptComposer = {
     output_schema: `输出格式（严格 JSON）：
 {"item_database": [ {...}, ... ]}`,
   },
-  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "cot", "ip_source", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-look",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "色彩 / Look",
     "en": "Color & Look-dev"
@@ -11,23 +10,57 @@
     "zh": "色彩 / Look-dev 工作台(规划中)· 目标:管理 colorgrade.toml + theme.json + 后处理栈(palette / LUT / 后处理)统一全局色调。当前为 marketplace 占位,面板实现待后续 sprint 落地。",
     "en": "Color & look-dev workbench (planned) — will manage colorgrade.toml + theme.json + a postprocess stack (palette / LUT / postprocess) for global color grading. Currently a marketplace placeholder; the panel lands in a later sprint."
   },
-  "provides": {
-    "workbench": {
-      "id": "look",
-      "hidden": true,
-      "lens": "by-category",
-      "icon": "🎨",
-      "position": 120,
-      "panelSize": "md",
-      "matchProduces": [
-        "**/colorgrade.toml",
-        "**/theme.json",
-        "**/postprocess/*.json"
-      ]
-    }
-  },
   "entry": {
     "frontend": "./src/panel.tsx"
   },
-  "experimental": true
+  "experimental": true,
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "look.content",
+        "runtime": "inline",
+        "entry": "./src/panel.tsx"
+      }
+    ],
+    "pages": [
+      {
+        "id": "look",
+        "title": {
+          "zh": "色彩 / Look",
+          "en": "Color & Look-dev"
+        },
+        "icon": "🎨",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "tabs",
+            "placements": [
+              "content"
+            ],
+            "active": "content"
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "content",
+            "panelType": {
+              "extension": "self",
+              "id": "look.content"
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/colorgrade.toml",
+          "**/theme.json",
+          "**/postprocess/*.json"
+        ]
+      }
+    ]
+  }
 }

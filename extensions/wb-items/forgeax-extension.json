@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-items",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "道具图标",
     "en": "Items & Icons"
@@ -24,32 +23,122 @@
     "lucide",
     "items.json"
   ],
-  "provides": {
-    "workbench": {
-      "id": "items",
-      "lens": "by-category",
-      "icon": "Backpack",
-      "position": 150,
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left": {
-          "width": 320,
-          "scrollable": true
+  "entry": {
+    "backend": "./server/tool-handlers.ts",
+    "frontend": "./dist/index.html",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15177,
+      "readyProbe": "/",
+      "dev": {
+        "watch": true,
+        "hmr": true
+      },
+      "embeddedAlso": true,
+      "devOnly": false
+    }
+  },
+  "experimental": true,
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  },
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "items.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "items",
+        "title": {
+          "zh": "道具图标",
+          "en": "Items & Icons"
         },
-        "center": {
-          "minHeight": 520,
-          "scrollable": true
+        "icon": "Backpack",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              320,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "items.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "width": 320,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "items.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 520,
+              "scrollable": true
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/items.json",
+          "**/assets/icons/**"
+        ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "items.launcher",
+        "title": {
+          "zh": "道具图标",
+          "en": "Items & Icons"
+        },
+        "icon": "Backpack",
+        "order": 150,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "items"
         }
-      },
-      "bus": {
-        "surfaceId": "items"
-      },
-      "matchProduces": [
-        "**/items.json",
-        "**/assets/icons/**"
-      ]
-    },
+      }
+    ],
     "skills": [
       {
         "id": "wb-items:author-guide",
@@ -158,24 +247,5 @@
         }
       }
     ]
-  },
-  "entry": {
-    "backend": "./server/tool-handlers.ts",
-    "frontend": "./dist/index.html",
-    "standalone": {
-      "start": "npm run dev",
-      "port": 15177,
-      "readyProbe": "/",
-      "dev": {
-        "watch": true,
-        "hmr": true
-      },
-      "embeddedAlso": true,
-      "devOnly": false
-    }
-  },
-  "experimental": true,
-  "compatibleWith": {
-    "forgeax-bus": "^1.0.0"
   }
 }

@@ -5,7 +5,7 @@
  *    仅当某 AgentDef 显式设置 `useNewRunner=true` 时才会被 runner 调用——目前**全仓无一处置 true**
  *    （见 pipeline.ts:1179），故本文件在默认/当前生产路径上**不被执行**。
  *    唯一生产提示词引擎是 prompt-composer.ts 的 `composeSystemPrompt`（run() 与 runWithBlueprint
- *    的 legacy 回退均走它）。改提示词请改 PromptComposer / prompts/agents/*.md，勿改本文件。
+ *    的 legacy 回退均走它）。改提示词请改对应 step 的 PromptComposer.blocks，勿改本文件。
  *
  * 提示词模板解析器。从 .md 模板文件读取 → 按分区解析 → 填充 skill 槽位 →
  * 渲染 ctx 变量 → 输出最终 system / user prompt。
@@ -76,11 +76,14 @@ function resolveDirWithFallback(candidate: string, srcFallback: string): string 
 }
 
 // 统一提示词树根：src/prompts/（agents 骨架 / genres 品类覆盖）。
-// tsx 模式: __dirname = src/pipeline/blueprint/ → ../../prompts/agents
+// tsx 模式: __dirname = src/pipeline/blueprint/ → ../../prompts/_archive/agents-promptresolver
 // 编译模式: __dirname = dist/pipeline/blueprint/ → 回退到 src/ 路径
+//
+// 四期归档：这批 md 只有本实验引擎会读，生产走 PromptComposer 内联块。
+// 详见 src/prompts/_archive/README.md。路径指向归档目录，实验引擎行为不变。
 const TEMPLATES_DIR = resolveDirWithFallback(
-  path.resolve(__dirname, "../../prompts/agents"),
-  path.resolve(__dirname, "../../../src/prompts/agents"),
+  path.resolve(__dirname, "../../prompts/_archive/agents-promptresolver"),
+  path.resolve(__dirname, "../../../src/prompts/_archive/agents-promptresolver"),
 );
 
 // 新品类覆盖目录：prompts/genres/<tier>/<genre>/<step>.md

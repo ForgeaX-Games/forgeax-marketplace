@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-lowpoly-obj",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "方块人编辑器",
     "en": "LowPoly Humanoid Editor"
@@ -27,30 +26,122 @@
     "vibe",
     "blender"
   ],
-  "provides": {
-    "workbench": {
-      "id": "wb-lowpoly-obj",
-      "hidden": true,
-      "lens": "by-category",
-      "icon": "🧱",
-      "position": 110,
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left": {
-          "width": 240,
-          "scrollable": true
-        },
-        "center": {
-          "minHeight": 600,
-          "scrollable": true
-        }
+  "entry": {
+    "backend": "./server/handlers.ts",
+    "frontend": "./dist/index.html",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15174,
+      "readyProbe": "/",
+      "dev": {
+        "watch": true,
+        "hmr": true
       },
-      "matchProduces": [
-        "**/.forgeax/games/*/lowpoly-characters/**"
-      ],
-      "preferredAgent": "@forgeax-extension/agent-cc-coder"
-    },
+      "embeddedAlso": true,
+      "devOnly": false
+    }
+  },
+  "permissions": [
+    "fs:read:.forgeax/games/{slug}/lowpoly-characters/**",
+    "fs:write:.forgeax/games/{slug}/lowpoly-characters/**",
+    "model:text:reasoning",
+    "emit:lowpoly.*"
+  ],
+  "requestedEnv": [
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "FORGEAX_LLM_PROXY_URL",
+    "LITELLM_PROXY_BASE_URL",
+    "LITELLM_PROXY_KEY"
+  ],
+  "hot": false,
+  "experimental": true,
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  },
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-lowpoly-obj.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-lowpoly-obj",
+        "title": {
+          "zh": "方块人编辑器",
+          "en": "LowPoly Humanoid Editor"
+        },
+        "icon": "🧱",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              240,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-lowpoly-obj.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "width": 240,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-lowpoly-obj.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": true
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/.forgeax/games/*/lowpoly-characters/**"
+        ],
+        "preferredAgent": "@forgeax-extension/agent-cc-coder"
+      }
+    ],
     "tools": [
       {
         "id": "lowpoly:list-characters",
@@ -144,40 +235,5 @@
         }
       }
     ]
-  },
-  "entry": {
-    "backend": "./server/handlers.ts",
-    "frontend": "./dist/index.html",
-    "standalone": {
-      "start": "npm run dev",
-      "port": 15174,
-      "readyProbe": "/",
-      "dev": {
-        "watch": true,
-        "hmr": true
-      },
-      "embeddedAlso": true,
-      "devOnly": false
-    }
-  },
-  "permissions": [
-    "fs:read:.forgeax/games/{slug}/lowpoly-characters/**",
-    "fs:write:.forgeax/games/{slug}/lowpoly-characters/**",
-    "model:text:reasoning",
-    "emit:lowpoly.*"
-  ],
-  "requestedEnv": [
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GEMINI_API_KEY",
-    "FORGEAX_LLM_PROXY_URL",
-    "LITELLM_PROXY_BASE_URL",
-    "LITELLM_PROXY_KEY"
-  ],
-  "hot": false,
-  "experimental": true,
-  "compatibleWith": {
-    "forgeax-bus": "^1.0.0"
   }
 }

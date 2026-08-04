@@ -1,28 +1,23 @@
-import { useEffect, useRef, useCallback, useMemo, useState } from "react";
-import { AlignLeft, Network, Download, ArrowLeftRight, Trash2 } from "lucide-react";
+import { useEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
+import { Download, Trash2 } from "lucide-react";
 import { useT } from "./i18n";
 import { NarrativeCanvas } from "./components/NarrativeCanvas";
 import { TextViewPanel } from "./components/panels/TextViewPanel";
 import { StepDetailPanel } from "./components/panels/StepDetailPanel";
 import { RegeneratePanel } from "./components/panels/RegeneratePanel";
-import { TierModeSelector } from "./components/controls/TierModeSelector";
-import { PipelineStatusBar } from "./components/panels/PipelineStatusBar";
+import { ProjectPanel } from "./components/sidebar/ProjectPanel";
+import { CenterTopNav } from "./components/controls/CenterTopNav";
+import { CenterOverlay } from "./components/controls/CenterOverlay";
+import { WorkbenchProvider } from "./components/workbench/WorkbenchProvider";
 import { ComposerView } from "./components/composer/ComposerView";
 import { useNarrativeStore, useNarrativePhase } from "./store/narrativeStore";
 import type { TierId, ModeId } from "./types";
 import { useAutoAttach } from "./hooks/useAutoAttach";
+import { getPaneMode, isWorkbenchOwner } from "./lib/pane";
 import { notifyReady, sendToHost, onHostMessage } from "./lib/bridge";
 import "reactflow/dist/style.css";
 
 export type { ViewMode } from "./store/narrativeStore";
-
-type PaneMode = "left" | "center" | "full";
-
-function getPaneMode(): PaneMode {
-  const p = new URLSearchParams(window.location.search).get("pane");
-  if (p === "left" || p === "center") return p;
-  return "full";
-}
 
 // 侧栏宽度：默认占屏宽 1/5，可拖拽（min/max 夹取），结果记忆到 localStorage。
 const SIDEBAR_WIDTH_KEY = "forgeax.narrative.sidebarW";
@@ -41,29 +36,28 @@ function getInitialSidebarWidth(): number {
   return defaultSidebarWidth();
 }
 
+/**
+ * 只有 owner 那一侧挂 Provider（它负责落盘、拉清单、开 SSE）。
+ * 平台把 viz 嵌成两个 iframe，中栏那份必须是纯消费者，否则同一次生成会被执行两遍。
+ */
+function WorkbenchScope({ children }: { children: ReactNode }) {
+  const owner = useMemo(isWorkbenchOwner, []);
+  return owner ? <WorkbenchProvider>{children}</WorkbenchProvider> : <>{children}</>;
+}
+
 export function App() {
   const t = useT();
   const pane = useMemo(getPaneMode, []);
   const viewMode = useNarrativeStore((s) => s.viewMode);
-  const setViewMode = useNarrativeStore((s) => s.setViewMode);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
-  const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
-  const runningProgress = useNarrativeStore((s) => s.runningProgress);
   const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
   const activeSteps = useNarrativeStore((s) => s.activeSteps);
-  const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
   const activeEntryKey = useNarrativeStore((s) => s.activeEntryKey);
   const tier = useNarrativeStore((s) => s.tier);
   const mode = useNarrativeStore((s) => s.mode);
   const prevStatus = useRef(activeEntryStatus);
   const prevStepsRef = useRef<string>("");
 
-  const isRunning = !!runningRunId;
-  const isIpPreview = !!ipPreviewRunId;
-  const isViewingRunning =
-    activeEntryKey != null &&
-    activeEntryKey === runningEntryKey &&
-    (isRunning || isIpPreview || runningProgress.length > 0);
   // §状态机重构：header/状态灯由单一 phase 派生。generating（SSE run 或 IP DNA 下游 job）→ running；
   // done → completed；其余（含 IP 半自动预处理 input/routed）→ activeEntryStatus（预处理期恒为 STANDBY，
   // 不再因 useAutoAttach 误设 runningRunId 而闪成 GENERATING）。
@@ -209,6 +203,7 @@ export function App() {
   }, []);
 
   return (
+    <WorkbenchScope>
     <div className="app-root">
       {pane === "full" && (
         <header className="app-header">
@@ -232,13 +227,13 @@ export function App() {
             style={resizable ? { width: sidebarWidth } : undefined}
           >
             <header className="workbench-pane-header">
-              <span className="workbench-pane-title">{t("app.title")}</span>
+              <span className="workbench-pane-title">{t("tms.project.title")}</span>
               <span className={`workbench-pane-pill ${displayStatus === "running" ? "running" : ""}`}>
                 {statusLabel}
               </span>
             </header>
             <div className="tool-left-panel__body">
-              <TierModeSelector />
+              <ProjectPanel />
             </div>
           </aside>
         )}
@@ -263,32 +258,9 @@ export function App() {
                 {statusLabel}
               </span>
             </header>
-            <PipelineStatusBar />
             <div className="cw-toolbar">
-              <div className="cw-toolbar-row">
-                <div className="fx-segmented" role="tablist" aria-label={t("app.previewModeAria")}>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={viewMode === "text"}
-                    className={`fx-segmented-btn ${viewMode === "text" ? "is-selected" : ""}`}
-                    onClick={() => setViewMode("text")}
-                  >
-                    <AlignLeft size={14} aria-hidden />
-                    {t("app.view.text")}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={viewMode === "graph"}
-                    className={`fx-segmented-btn ${viewMode === "graph" ? "is-selected" : ""}`}
-                    onClick={() => setViewMode("graph")}
-                  >
-                    <Network size={14} aria-hidden />
-                    {t("app.view.graph")}
-                  </button>
-                </div>
-              </div>
+              {/* 视图切换并入顶栏第四段「视图模式」，这里不再单列一排 segmented。 */}
+              <CenterTopNav />
 
               {hasEntry && (
                 <div className="cw-toolbar-row">
@@ -301,14 +273,6 @@ export function App() {
                     <button type="button" className="fx-btn" onClick={handleExport}>
                       <Download size={13} aria-hidden />
                       {t("app.export")}
-                    </button>
-                    <button
-                      type="button"
-                      className="fx-btn"
-                      onClick={() => setViewMode(viewMode === "text" ? "graph" : "text")}
-                    >
-                      <ArrowLeftRight size={13} aria-hidden />
-                      {t("app.switchView")}
                     </button>
                     <button
                       type="button"
@@ -339,10 +303,13 @@ export function App() {
                   <StepDetailPanel />
                 </div>
               )}
+              {/* 浮层压在主体之上：主体永远整片铺开，输入卡与操作条只是盖上去。 */}
+              <CenterOverlay />
             </div>
           </div>
         )}
       </main>
     </div>
+    </WorkbenchScope>
   );
 }

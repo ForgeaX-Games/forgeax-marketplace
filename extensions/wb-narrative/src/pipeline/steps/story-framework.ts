@@ -5,7 +5,12 @@ import { extractJSON } from "../llm-client.js";
 import { getNodeFilter } from "../node-merge.js";
 import { appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { buildCharacterDigest, buildItemDigest } from "./context-helpers.js";
-import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
+import {
+  composeSystemPrompt,
+  IP_DNA_SLOT_BLOCK,
+  STRATEGY_SLOT_BLOCK,
+  type PromptComposer,
+} from "../prompt-composer.js";
 import {
   repairIntraGroupConnections,
   filterCrossBranchConnections,
@@ -174,10 +179,26 @@ const STEP2_SYSTEM = `你是专业的叙事架构师。根据用户需求和框�
 export const STORY_FRAMEWORK_PLAN_COMPOSER: PromptComposer = {
   stepId: "story_framework",
   skillSlots: ["style_guide", "examples", "constraints"],
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "examples", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "examples", "constraints", "cot"],
   userBlockOrder: [],
   blocks: {
+    cot: `## 机制与流程
+本席定的是**叙事单元**，不是幕。幕是影视的分法，游戏里玩家是按"一段可玩的体验"
+来经历剧情的——一次潜入、一场审讯、一段旅途，都是一个单元。你要产出的是这些单元
+本身，以及单元之间的联系；单元**内部**的剧情树交给下游结构席展开，此处不要下钻。
+
+1. 提炼故事主题——一个能被剧情反复叩问的命题，而不是一句标签。
+2. 确立主角的总弧光：从什么缺陷出发，到什么蜕变收束。
+3. 切分叙事单元：每个单元是一段自身完整的游戏体验，要说清它的叙事功能
+   （推进主线／揭示真相／制造代价／收束）与它在这段体验里给玩家的核心内容。
+   单元的粒度以"玩家能感到这一段结束了"为准，不按时长也不按幕数硬凑。
+4. 铺清单元之间的联系：谁接在谁之后、哪些单元并列可选、哪些单元汇回主干。
+   这层联系决定了整部作品的宏观形态，下游会据此在每个单元内长出剧情树。
+5. 标记关键转折落在哪个单元：开场钩子、中途翻转、最低谷、高潮。
+6. 自检：主题是否贯穿各单元？单元的划分是否服务本品类的节奏习惯？
+   单元之间的联系是否自洽（没有孤岛、没有无来由的跳转）？`,
     base: STEP1_SYSTEM,
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     examples: "{{SKILL.examples}}",
@@ -188,10 +209,11 @@ export const STORY_FRAMEWORK_PLAN_COMPOSER: PromptComposer = {
 export const STORY_FRAMEWORK_FILL_COMPOSER: PromptComposer = {
   stepId: "story_framework",
   skillSlots: ["style_guide", "examples", "constraints"],
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "examples", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "examples", "constraints"],
   userBlockOrder: [],
   blocks: {
     base: STEP2_SYSTEM,
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     examples: "{{SKILL.examples}}",

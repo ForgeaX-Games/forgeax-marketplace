@@ -482,7 +482,7 @@ const UI = {
     noOwnTool: 'No bundled tools',
     noProduces: 'No produces declared',
     wbPluginsTitle: 'Matching workbench plugins',
-    wbNoMatch: 'No workbench plugin lists this agent as preferredAgent. To auto-select this agent in a workbench, add to its forgeax-extension.json under provides.workbench:',
+    wbNoMatch: 'No workbench Page lists this agent as preferredAgent. To auto-select this agent, add preferredAgent to that Page in forgeax-extension.json under contributes.pages:',
     wbMatchCount: 'Matching workbench plugins ({n})',
     diaryHint: 'Long-term memory from {owner}, shown as a diary. Read-only — switch to Source mode above to edit.',
     memFallback: 'No {lang} memory yet — showing the other language. Saving creates the {lang} copy.',
@@ -550,7 +550,7 @@ const UI = {
     noOwnTool: '无自带 tool',
     noProduces: '未声明 produces',
     wbPluginsTitle: '配套 workbench 插件',
-    wbNoMatch: '没有 workbench 插件在 manifest 里把这个 agent 标为 preferredAgent。要让某个 workbench 自动选中这个 agent，给它的 forgeax-extension.json 的 provides.workbench 加一行：',
+    wbNoMatch: '没有 workbench Page 在 manifest 里把这个 agent 标为 preferredAgent。要自动选中这个 agent，请在 forgeax-extension.json 的 contributes.pages 对应 Page 中添加：',
     wbMatchCount: '配套 workbench 插件 ({n})',
     diaryHint: '这是 {owner} 在与你协作中沉淀下来的长期记忆，以日记口吻呈现。只读 —— 要改请点上方「源码模式」。',
     memFallback: '暂无{lang}记忆，显示另一种语言的原文。保存后会生成{lang}副本。',
@@ -1577,7 +1577,7 @@ function renderSkills() {
     </div>
 
     <div class="info-card">
-      <div class="info-card-title">Default skills (manifest provides.agent.defaultSkills)</div>
+      <div class="info-card-title">Default skills (manifest contributes.agents[].defaultSkills)</div>
       <div class="info-card-body">
         ${defaultSkills.length === 0
           ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noDefaultSkill'))}</span>`
@@ -1586,7 +1586,7 @@ function renderSkills() {
     </div>
 
     <div class="info-card">
-      <div class="info-card-title">Plugin's own skills (provides.skills)</div>
+      <div class="info-card-title">Plugin's own skills (contributes.skills)</div>
       <div class="info-card-body">
         ${ownSkills.length === 0
           ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noOwnSkill'))}</span>`
@@ -1595,7 +1595,7 @@ function renderSkills() {
     </div>
 
     <div class="info-card">
-      <div class="info-card-title">Plugin's own tools (provides.tools)</div>
+      <div class="info-card-title">Plugin's own tools (contributes.tools)</div>
       <div class="info-card-body">
         ${ownTools.length === 0
           ? `<span class="empty" style="padding:0;font-size:12px">${escapeHtml(t('noOwnTool'))}</span>`

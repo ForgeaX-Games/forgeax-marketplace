@@ -60,13 +60,15 @@ function createFixture(name: string, options: FixtureOptions = {}): string {
     writeFileSync(resolve(root, 'forgeax-extension.json'), '{ invalid manifest JSON\n')
   } else {
     writeJson(resolve(root, 'forgeax-extension.json'), {
+      schemaVersion: 2,
       id: '@forgeax-extension/wb-game-video',
       version: options.manifestVersion ?? '0.1.3',
       entry: {
         frontend: './dist/index.html',
         backend: './dist/server/tool-handlers.js',
       },
-      provides: {
+      categories: ['workbench'],
+      contributes: {
         skills: [
           {
             id: 'wb-game-video:author-guide',

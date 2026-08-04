@@ -43,6 +43,9 @@ type ArchetypeName = "epic" | "branching" | "fragmented" | "emergent" | "lightwe
  * 覆盖大部分品类；未命中的走 category + tier 规则。
  */
 const TEMPLATE_ARCHETYPE_MAP: Partial<Record<string, ArchetypeName>> = {
+  // JRPG 三个代号同族：tpl-jrpg(V1) / tpl-jrpg-v2(V2) / tpl-rpg(v2 别名)。
+  "tpl-jrpg":           "epic",
+  "tpl-jrpg-v2":        "epic",
   "tpl-rpg":            "epic",
   "tpl-open-world":     "epic",
   "tpl-vn":             "branching",

@@ -577,12 +577,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     setDrillStack([])
     setSelected(null)
   }
-  const leaveOneLevel = () => {
-    if (drillStack.length > 0) {
-      setDrillStack((s) => s.slice(0, -1))
-      setSelected(null)
-    }
-  }
   return (
     <div
       onPointerDownCapture={clearPreviewFocusFromPointer}
@@ -619,29 +613,41 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative', zIndex: 0, overflow: 'hidden', isolation: 'isolate' }}>
       {/* 左：可编辑画布 + 运行时高亮（点节点=选中编辑；双击子流程容器下钻） */}
       <div ref={canvasHostRef} className="gv-canvas-host" style={{ flex: 1, minWidth: 0, borderRight: '1px solid #2e2924', position: 'relative', overflow: 'hidden', contain: 'paint' }}>
-        {drillStack.length > 0 && (
-          <div
-            style={{
-              position: 'absolute', top: 8, left: 8, zIndex: 5, display: 'flex', gap: 6, alignItems: 'center',
-              padding: '4px 10px', borderRadius: 999, fontSize: 12, background: 'rgba(27,23,19,0.92)',
-              border: '1px solid #403830', color: '#c9d1e0', boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-            }}
-          >
-            <button onClick={leaveToRoot} style={{ background: 'none', border: 'none', color: '#f08840', cursor: 'pointer', padding: 0 }}>根</button>
-            {drillLabels.map((item, i) => (
-              <span key={item.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ opacity: 0.5 }}>›</span>
-                <button
-                  onClick={() => setDrillStack(drillStack.slice(0, i + 1))}
-                  style={{ background: 'none', border: 'none', color: i === drillStack.length - 1 ? '#e8eaed' : '#f08840', cursor: 'pointer', padding: 0, fontWeight: i === drillStack.length - 1 ? 700 : 400 }}
-                >
-                  {item.name}
-                </button>
-              </span>
-            ))}
-            <button onClick={leaveOneLevel} title="返回上一层" style={{ marginLeft: 4, color: '#c9d1e0', background: '#2a2d33', border: '1px solid #3a3d44', borderRadius: 6, cursor: 'pointer', fontSize: 11 }}>← 返回</button>
-          </div>
-        )}
+        {/* Figma 15195_74423：画布顶部 bar（58px，#2C2C2C）常驻。左侧面包屑；
+  右侧三按钮由 GraphCanvas 的 .gv-canvas-chrome 用 CSS 定位到本 bar 右侧对齐。 */}
+        <div
+  style={{
+            position: 'absolute', top: 0, left: 0, right: 0, height: 58, zIndex: 5,
+            display: 'flex', gap: 8, alignItems: 'center', padding: '0 10px',
+     background: '#2C2C2C',
+   fontSize: 14, pointerEvents: 'none',
+          }}
+        >
+          {/* 面包屑本体需要可点击；bar 整体 pointerEvents:none 让空白区不挡画布，交互元素单独开启。
+       Figma 15229_78005：以「当前蓝图名」开头（无「根」字），每层用 › 分隔，最后一层用品牌橙 #FF9C2A。 */}
+   <span style={{ display: 'flex', gap: 8, alignItems: 'center', pointerEvents: 'auto' }}>
+            <button
+          onClick={leaveToRoot}
+    style={{ background: 'none', border: 'none', color: drillStack.length === 0 ? '#FF9C2A' : '#FFFFFF', cursor: 'pointer', padding: 0, fontSize: 14, fontWeight: 400 }}
+      >
+        {blueprints[activeBlueprintId]?.title ?? '主蓝图'}
+      </button>
+            {drillLabels.map((item, i) => {
+          const isLast = i === drillStack.length - 1
+              return (
+       <span key={item.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+  <span style={{ color: 'rgba(255,255,255,0.40)' }}>›</span>
+      <button
+          onClick={() => setDrillStack(drillStack.slice(0, i + 1))}
+                    style={{ background: 'none', border: 'none', color: isLast ? '#FF9C2A' : '#FFFFFF', cursor: 'pointer', padding: 0, fontSize: 14, fontWeight: 400 }}
+>
+  {item.name}
+          </button>
+        </span>
+   )
+            })}
+          </span>
+        </div>
         {isDraft && (
           <div
             title="当前显示的是 localStorage 未保存草稿，尚未写入权威 blueprint.json。点右侧「💾 保存」提交。"

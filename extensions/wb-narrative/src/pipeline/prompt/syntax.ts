@@ -78,3 +78,12 @@ export function hasPlaceholders(text: string): boolean {
 export function hasIpDnaPlaceholders(text: string): boolean {
   return /\{\{IP_DNA\.[\w_]+\}\}/.test(text) || /\{\{slot:(operators|relations|ledger|objective_truth|synthesis)\}\}/.test(text);
 }
+
+/**
+ * 是否包含叙事策略结构化占位。
+ * 与 IP DNA 分开判断：只声明策略段、不声明 IP DNA 段的 step（如需求清单、策划文档）
+ * 也必须走占位渲染，否则策略卡会连同占位符一起留在提示词里。
+ */
+export function hasStrategyPlaceholders(text: string): boolean {
+  return /\{\{slot:strategy_(genre|type|theme|structure)\}\}/.test(text);
+}

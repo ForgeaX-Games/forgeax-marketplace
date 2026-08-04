@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-plugin/wb-2d-scene-asset-generator",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "2D 场景资产生成器",
     "en": "2D Scene Asset Generator"
@@ -12,29 +11,124 @@
     "en": "2D Scene Asset Generator (node-programming plugin built on @forgeax/node-runtime)"
   },
   "icon": "🖼️",
-  "provides": {
-    "workbench": {
-      "id": "wb-2d-scene-asset-generator",
-      "icon": "🖼️",
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left": {
-          "minWidth": 280,
-          "scrollable": true
+  "compatibleWith": {
+    "forgeax-node-runtime": "^0.3.0"
+  },
+  "requestedEnv": [
+    "FORGEAX_PLUGIN_DEV_PORTS_FILE",
+    "FORGEAX_ASSET2D_BACKEND_URL",
+    "FORGEAX_STUDIO_API_BASE_URL",
+    "FORGEAX_SERVER_URL"
+  ],
+  "entry": {
+    "frontend": "./frontend/dist/index.html",
+    "backend": "./backend/src/tool-handlers.ts",
+    "standalone": {
+      "start": "pnpm serve",
+      "port": 9575,
+      "readyProbe": "/",
+      "embeddedAlso": false
+    }
+  },
+  "experimental": true,
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-2d-scene-asset-generator.content",
+        "runtime": "iframe",
+        "entry": "./frontend/dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-2d-scene-asset-generator",
+        "title": {
+          "zh": "2D 场景资产生成器",
+          "en": "2D Scene Asset Generator"
         },
-        "center": {
-          "minHeight": 600,
-          "scrollable": false
+        "icon": "🖼️",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              280,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-2d-scene-asset-generator.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "minWidth": 280,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-2d-scene-asset-generator.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/assets/generated/**",
+          "**/generated/**.png",
+          "**/generated/**.webp"
+        ],
+        "preferredAgent": "@forgeax-plugin/agent-mira"
+      }
+    ],
+    "activities": [
+      {
+        "id": "wb-2d-scene-asset-generator.launcher",
+        "title": {
+          "zh": "2D 场景资产生成器",
+          "en": "2D Scene Asset Generator"
+        },
+        "icon": "🖼️",
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "wb-2d-scene-asset-generator"
         }
-      },
-      "matchProduces": [
-        "**/assets/generated/**",
-        "**/generated/**.png",
-        "**/generated/**.webp"
-      ],
-      "preferredAgent": "@forgeax-plugin/agent-mira"
-    },
+      }
+    ],
     "skills": [
       {
         "id": "wb-2d-scene-asset-generator:author-guide",
@@ -233,7 +327,9 @@
         "id": "asset2d:templates.get",
         "args": {
           "type": "object",
-          "required": ["id"],
+          "required": [
+            "id"
+          ],
           "properties": {
             "id": {
               "type": "string"
@@ -242,7 +338,10 @@
           "additionalProperties": false
         },
         "returns": {
-          "type": ["object", "null"]
+          "type": [
+            "object",
+            "null"
+          ]
         },
         "exposedToAI": true,
         "description": {
@@ -254,7 +353,9 @@
         "id": "asset2d:groups.instantiateTemplate",
         "args": {
           "type": "object",
-          "required": ["templateId"],
+          "required": [
+            "templateId"
+          ],
           "properties": {
             "templateId": {
               "type": "string",
@@ -263,8 +364,12 @@
             "position": {
               "type": "object",
               "properties": {
-                "x": { "type": "number" },
-                "y": { "type": "number" }
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
               },
               "additionalProperties": false,
               "description": "顶层组影子节点的画布坐标 / canvas position of the top-level group shadow node"
@@ -276,8 +381,12 @@
             "opts": {
               "type": "object",
               "properties": {
-                "actor": { "type": "string" },
-                "label": { "type": "string" }
+                "actor": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -286,13 +395,30 @@
         "returns": {
           "type": "object",
           "properties": {
-            "status": { "type": "string" },
-            "newHash": { "type": "string" },
-            "groupId": { "type": "string", "description": "新建顶层组的影子节点 id（接线/触发时作为 nodeId/连线目标用）/ shadow node id of the new top-level group (use when wiring)" },
-            "name": { "type": "string" },
-            "exposedInputs": { "type": "array", "description": "对外输入端口清单 [{portName:in_N, portType}]" },
-            "exposedOutputs": { "type": "array", "description": "对外输出端口清单 [{portName:out_N, portType}]" },
-            "opCount": { "type": "number" }
+            "status": {
+              "type": "string"
+            },
+            "newHash": {
+              "type": "string"
+            },
+            "groupId": {
+              "type": "string",
+              "description": "新建顶层组的影子节点 id（接线/触发时作为 nodeId/连线目标用）/ shadow node id of the new top-level group (use when wiring)"
+            },
+            "name": {
+              "type": "string"
+            },
+            "exposedInputs": {
+              "type": "array",
+              "description": "对外输入端口清单 [{portName:in_N, portType}]"
+            },
+            "exposedOutputs": {
+              "type": "array",
+              "description": "对外输出端口清单 [{portName:out_N, portType}]"
+            },
+            "opCount": {
+              "type": "number"
+            }
           }
         },
         "exposedToAI": true,
@@ -371,9 +497,15 @@
             "opts": {
               "type": "object",
               "properties": {
-                "actor": { "type": "string" },
-                "label": { "type": "string" },
-                "batchId": { "type": "string" },
+                "actor": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "batchId": {
+                  "type": "string"
+                },
                 "expectedPrevHash": {
                   "type": "string",
                   "description": "Optimistic lock: hash from pipeline.get; rejects with 409 on concurrent edit"
@@ -394,8 +526,13 @@
       },
       {
         "id": "asset2d:templates.list",
-        "args": { "type": "object", "additionalProperties": false },
-        "returns": { "type": "array" },
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "array"
+        },
         "exposedToAI": true,
         "description": {
           "zh": "列出可实例化的成组电池模板（如建筑贴图模板 dechouse_gen），含 id / name / category 及对外 in_N/out_N 端口。用它发现模板——batteries.get 查不到模板组（那查的是静态 op）。",
@@ -406,12 +543,21 @@
         "id": "asset2d:templates.get",
         "args": {
           "type": "object",
-          "required": ["id"],
-          "properties": { "id": { "type": "string" } },
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         },
         "returns": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "description": "完整 NodeGroup 定义（nodes/edges/exposedInputs/exposedOutputs/_nestedGroups）；exposedInputs/exposedOutputs 的 portName 即对外 in_N/out_N 端口 / Full NodeGroup definition; exposedInputs/exposedOutputs portName are the outward in_N/out_N ports"
         },
         "exposedToAI": true,
@@ -424,28 +570,49 @@
         "id": "asset2d:pipeline.instantiateTemplate",
         "args": {
           "type": "object",
-          "required": ["templateId"],
+          "required": [
+            "templateId"
+          ],
           "properties": {
-            "templateId": { "type": "string", "description": "模板组 id 或文件 basename（如 dechouse_gen） / template group id or file basename (e.g. dechouse_gen)" },
+            "templateId": {
+              "type": "string",
+              "description": "模板组 id 或文件 basename（如 dechouse_gen） / template group id or file basename (e.g. dechouse_gen)"
+            },
             "position": {
               "type": "object",
-              "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
               "additionalProperties": false,
               "description": "顶层组影子节点的画布坐标 / canvas position of the top-level group shadow node"
             },
-            "groupId": { "type": "string", "description": "可选：给顶层组一个稳定句柄（= 顶层影子节点 id）；省略则自动生成且不冲突 / optional stable handle for the top-level group (= its shadow node id); omitted → auto-generated, collision-free" },
+            "groupId": {
+              "type": "string",
+              "description": "可选：给顶层组一个稳定句柄（= 顶层影子节点 id）；省略则自动生成且不冲突 / optional stable handle for the top-level group (= its shadow node id); omitted → auto-generated, collision-free"
+            },
             "opts": {
               "type": "object",
               "properties": {
-                "actor": { "type": "string" },
-                "label": { "type": "string" }
+                "actor": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
               },
               "description": "actor 透传到历史记录；label 为历史面板可读标签 / actor forwarded to history; label is a human-readable history row"
             }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
         "description": {
           "zh": "一键把一个成组电池模板实例化为画布上的单个组节点（如 dechouse_gen 建筑贴图模板）。内部子节点由内核一次性建好，无需手搭等价链；返回 groupId + 对外 in_N/out_N 端口。",
@@ -592,21 +759,61 @@
         "id": "asset2d:publishToGame",
         "args": {
           "type": "object",
-          "required": ["alias", "gameSlug", "assetName", "assetType"],
+          "required": [
+            "alias",
+            "gameSlug",
+            "assetName",
+            "assetType"
+          ],
           "properties": {
-            "alias": { "type": "string", "description": "要发布的 2D 成品 alias（assets.list / 产图返回）" },
-            "gameSlug": { "type": "string", "description": "目标游戏 slug（落到 <projectRoot>/.forgeax/games/<gameSlug>/textures/）" },
-            "assetName": { "type": "string", "description": "field4 语义名 / 渲染器匹配名" },
-            "assetType": { "type": "string", "enum": ["tile", "object"] },
-            "autotileKind": { "type": "string", "description": "tile 必填的 autotile rule（如 common_16 / floor_1）；发布时校验 atlas PNG 尺寸与 rule 对齐（common_16 允许 64×64 或 64×80）" },
-            "anchorX": { "type": ["number", "null"] },
-            "anchorY": { "type": ["number", "null"] },
-            "geometryJson": { "type": "string" },
-            "projectRoot": { "type": "string", "description": "场景侧 host 项目根（从 scene:library.useGameTextures 返回的 dir 反推）。跨 workbench 发布时必填——2D 与 scene 默认 cwd 不同，裸传 gameSlug 会落错目录。" }
+            "alias": {
+              "type": "string",
+              "description": "要发布的 2D 成品 alias（assets.list / 产图返回）"
+            },
+            "gameSlug": {
+              "type": "string",
+              "description": "目标游戏 slug（落到 <projectRoot>/.forgeax/games/<gameSlug>/textures/）"
+            },
+            "assetName": {
+              "type": "string",
+              "description": "field4 语义名 / 渲染器匹配名"
+            },
+            "assetType": {
+              "type": "string",
+              "enum": [
+                "tile",
+                "object"
+              ]
+            },
+            "autotileKind": {
+              "type": "string",
+              "description": "tile 必填的 autotile rule（如 common_16 / floor_1）；发布时校验 atlas PNG 尺寸与 rule 对齐（common_16 允许 64×64 或 64×80）"
+            },
+            "anchorX": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "anchorY": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "geometryJson": {
+              "type": "string"
+            },
+            "projectRoot": {
+              "type": "string",
+              "description": "场景侧 host 项目根（从 scene:library.useGameTextures 返回的 dir 反推）。跨 workbench 发布时必填——2D 与 scene 默认 cwd 不同，裸传 gameSlug 会落错目录。"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
         "description": {
           "zh": "把 2D 成品发布进共享游戏沙箱 <projectRoot>/.forgeax/games/<gameSlug>/textures/（字节 + index.json 描述符）。跨 workbench 时必须先 scene:library.useGameTextures 拿 dir 反推 projectRoot，再带同一 projectRoot 调用本工具——否则 2D 与 scene 默认 cwd 不同，场景读不到。字节由 2D 后端本地写入，agent 不搬 base64。",
@@ -678,7 +885,12 @@
             },
             "imageSize": {
               "type": "string",
-              "enum": ["512", "1K", "2K", "4K"]
+              "enum": [
+                "512",
+                "1K",
+                "2K",
+                "4K"
+              ]
             }
           },
           "additionalProperties": false
@@ -772,28 +984,5 @@
         ]
       }
     ]
-  },
-  "compatibleWith": {
-    "forgeax-node-runtime": "^0.3.0"
-  },
-  "registeredOps": [],
-  "registeredAssetTypes": [],
-  "requestedPathSlots": [],
-  "requestedEnv": [
-    "FORGEAX_PLUGIN_DEV_PORTS_FILE",
-    "FORGEAX_ASSET2D_BACKEND_URL",
-    "FORGEAX_STUDIO_API_BASE_URL",
-    "FORGEAX_SERVER_URL"
-  ],
-  "entry": {
-    "frontend": "./frontend/dist/index.html",
-    "backend": "./backend/src/tool-handlers.ts",
-    "standalone": {
-      "start": "pnpm serve",
-      "port": 9575,
-      "readyProbe": "/",
-      "embeddedAlso": false
-    }
-  },
-  "experimental": true
+  }
 }

@@ -1,23 +1,28 @@
 /**
  * 叙事无限画布编排 — 角色调色板目录（五大类 agent）。
  *
- * 五类角色：
+ * 四类角色：
  *  - input     输入节点（适配 INPUT）：一次需求的锚点，一条管线以一个输入节点为起点。
- *  - routing   路由节点（适配 ROUTING）：承载 tier/细分类/品类/复杂度，决定下游生成管线。
- *  - expert    叙事策划专家（按游戏品类，预制管线；对应 4 个原型专家）。
- *  - assistant 叙事策略助手（按叙事策略/结构，作为可插拔提示词加载进相应环节）。
- *  - engineer  叙事单品工程师（复刻某一生成环节，对应后端 PIPELINE_STEPS 里的单步）。
+ *  - routing   路由节点（适配 ROUTING）：承载三轴（叙事类型/题材/体量）与品类，决定下游生成管线。
+ *  - expert    叙事策划专家组（按游戏类型两级展开：15 个游戏类型 → 该类型下的品类专家）。
+ *  - engineer  叙事单品助手（复刻某一生成环节，对应后端 PIPELINE_STEPS 里的单步）。
+ *
+ * 三期起 12 种故事结构不再是 agent：它们降为 strategy/structure/<code>.md 策略卡，
+ * 由「叙事结构」轴综合推导后自动装进提示词的叙事策略段，用户不再手动拖一个"结构助手"节点。
+ * 旧条目里可能存着 category="assistant" 的节点，故类型联合保留该值，只是目录里不再供货。
  *
  * 说明：本目录仅驱动前端自由编排（拖拽/连线/配置同步）。真正"开始生成"仍以输入节点为锚点，
  * 用路由节点配置调用现有整条管线（startRun），自定义步序的后端执行延后。
  */
 import type { TierId } from "../types";
 import type { PipelineTemplateId } from "../pipeline-templates";
+import { ASSISTANT_SEATS, seatPrimaryStep } from "./seats.generated";
 
 export type ComposerNodeCategory =
   | "input"
   | "routing"
   | "expert"
+  /** @deprecated 三期起结构改由策略卡承载，目录不再供货；仅为反序列化旧条目保留。 */
   | "assistant"
   | "engineer";
 
@@ -34,9 +39,13 @@ export interface ComposerCatalogItem {
   pipelineTemplate?: PipelineTemplateId;
   tier?: TierId;
   routeGroup?: "planning" | "narrative";
-  /** 助手：对应叙事策略/生成模式（mode）。工程师：对应 PIPELINE_STEPS 单步 id。 */
+  /** 单品助手：对应 PIPELINE_STEPS 单步 id；modeId 对应生成模式。 */
   stepId?: string;
   modeId?: string;
+  /** 单品助手：所属席位（feature list 2.3.x）。 */
+  seatId?: string;
+  /** 席位契约已立但后端实现待建：可拖可 @，不可单跑。 */
+  planned?: boolean;
   /** 拖入画布时写到节点 config 的默认值。 */
   defaultConfig?: Record<string, unknown>;
 }
@@ -52,14 +61,14 @@ export interface ComposerCategoryDef {
 }
 
 /**
- * 五大类调色板目录。顺序即调色板从左到右的展示顺序。
+ * 四大类调色板目录。顺序即调色板从左到右的展示顺序。
  *
- * 与左侧栏对齐（feature list §1/§2）：
- *  - input   拆为三个入口：直接输入 / 标签选择 / 文件上传（对应 §1 三入口，节点内完全复刻其编辑面板）。
- *  - routing 拆为两个入口：叙事全量 / 叙事单品（对应 §2 routeGroup=planning/narrative）。
- *  - expert  §2.1.2 四类品类叙事专家（JRPG / ORPG(含GTA) / 影游 / 其他），各预制一条管线。
- *  - assistant §2.2.1 十一类"故事结构"叙事策略助手（可插拔 prompt，前端编排用）。
- *  - engineer  §2.2.2 叙事单品工程师团队（2.2.2.0–2.2.2.12）。
+ * 与创作空间顶栏对齐（PRD v1.4 §5.2）：
+ *  - input   三个入口：直接输入 / 标签选择 / 文件上传（节点内完全复刻其编辑面板）。
+ *  - routing 两个入口：叙事全量 / 叙事单品（routeGroup=planning/narrative）。
+ *  - expert  叙事策划专家组：这里只列四个原型模板，具体品类专家由 /genres 动态展开
+ *            （15 游戏类型 → 品类），见 ComposerPalette 的中层。
+ *  - engineer 叙事单品助手团队（全量二十席）。
  */
 export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
   {
@@ -141,7 +150,7 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
         labelKey: "composer.item.expert.jrpg",
         label: "JRPG 品类叙事专家",
         icon: "◆",
-        pipelineTemplate: "tpl-rpg",
+        pipelineTemplate: "tpl-jrpg",
         tier: "tier1",
         routeGroup: "planning",
       },
@@ -178,44 +187,22 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
     ],
   },
   {
-    category: "assistant",
-    labelKey: "composer.cat.assistant",
-    label: "叙事策略助手",
-    icon: "❖",
-    items: [
-      { id: "assistant.linear", category: "assistant", labelKey: "composer.item.assistant.linear", label: "线性结构叙事助手", icon: "❖" },
-      { id: "assistant.fishbone", category: "assistant", labelKey: "composer.item.assistant.fishbone", label: "鱼骨结构叙事助手", icon: "❖" },
-      { id: "assistant.tree", category: "assistant", labelKey: "composer.item.assistant.tree", label: "树状结构叙事助手", icon: "❖" },
-      { id: "assistant.multiline", category: "assistant", labelKey: "composer.item.assistant.multiline", label: "多线交织叙事助手", icon: "❖" },
-      { id: "assistant.network", category: "assistant", labelKey: "composer.item.assistant.network", label: "网状结构叙事助手", icon: "❖" },
-      { id: "assistant.loop", category: "assistant", labelKey: "composer.item.assistant.loop", label: "循环结构叙事助手", icon: "❖" },
-      { id: "assistant.fragmented", category: "assistant", labelKey: "composer.item.assistant.fragmented", label: "碎片化叙事助手", icon: "❖" },
-      { id: "assistant.emergent", category: "assistant", labelKey: "composer.item.assistant.emergent", label: "涌现性叙事助手", icon: "❖" },
-      { id: "assistant.nested", category: "assistant", labelKey: "composer.item.assistant.nested", label: "嵌套结构叙事助手", icon: "❖" },
-      { id: "assistant.stream", category: "assistant", labelKey: "composer.item.assistant.stream", label: "意识流叙事助手", icon: "❖" },
-      { id: "assistant.hybrid", category: "assistant", labelKey: "composer.item.assistant.hybrid", label: "混合结构叙事助手", icon: "❖" },
-    ],
-  },
-  {
     category: "engineer",
     labelKey: "composer.cat.engineer",
-    label: "叙事单品工程师",
+    label: "叙事单品助手",
     icon: "▣",
-    items: [
-      { id: "engineer.encyclopedia", category: "engineer", labelKey: "composer.item.engineer.encyclopedia", label: "百科娘", icon: "▣" },
-      { id: "engineer.req_list", category: "engineer", labelKey: "composer.item.engineer.req_list", label: "需求清单工程师", icon: "▣", stepId: "preference_summary" },
-      { id: "engineer.design_doc", category: "engineer", labelKey: "composer.item.engineer.design_doc", label: "策划文档工程师", icon: "▣", stepId: "initial_plan" },
-      { id: "engineer.worldview", category: "engineer", labelKey: "composer.item.engineer.worldview", label: "世界观设定工程师", icon: "▣", stepId: "worldview" },
-      { id: "engineer.character", category: "engineer", labelKey: "composer.item.engineer.character", label: "角色档案工程师", icon: "▣", stepId: "character_enrichment" },
-      { id: "engineer.item", category: "engineer", labelKey: "composer.item.engineer.item", label: "道具清单工程师", icon: "▣", stepId: "item_database" },
-      { id: "engineer.scene_list", category: "engineer", labelKey: "composer.item.engineer.scene_list", label: "场景列表工程师", icon: "▣", stepId: "scene_generation" },
-      { id: "engineer.outline", category: "engineer", labelKey: "composer.item.engineer.outline", label: "故事大纲工程师", icon: "▣", stepId: "outline_batch" },
-      { id: "engineer.structure", category: "engineer", labelKey: "composer.item.engineer.structure", label: "故事结构工程师", icon: "▣", stepId: "detailed_outline" },
-      { id: "engineer.plot", category: "engineer", labelKey: "composer.item.engineer.plot", label: "故事情节工程师", icon: "▣", stepId: "plot_generation" },
-      { id: "engineer.quest", category: "engineer", labelKey: "composer.item.engineer.quest", label: "任务工程师", icon: "▣", stepId: "quest_generation" },
-      { id: "engineer.storyboard", category: "engineer", labelKey: "composer.item.engineer.storyboard", label: "分镜工程师", icon: "▣", stepId: "script_generation" },
-      { id: "engineer.narrative_card", category: "engineer", labelKey: "composer.item.engineer.narrative_card", label: "叙事卡工程师", icon: "▣", stepId: "narrative_card" },
-    ],
+    // 二十席不再手抄：由后端席位注册表投影而来，改席位跑 npm run gen:seats
+    items: ASSISTANT_SEATS.map((seat) => ({
+      id: `engineer.${seat.id}`,
+      category: "engineer" as const,
+      labelKey: `composer.item.engineer.${seat.id}`,
+      label: seat.name,
+      icon: "▣",
+      seatId: seat.id,
+      // 单节点试跑打到席位的第一步；planned 席位没有实现，前端据此禁用试跑
+      stepId: seatPrimaryStep(seat.id),
+      planned: seat.status === "planned",
+    })),
   },
 ];
 
@@ -234,6 +221,56 @@ export function findCatalogItem(id: string): ComposerCatalogItem | undefined {
 /** 拖拽 payload 的 MIME 键（HTML5 dataTransfer）。 */
 export const COMPOSER_DND_MIME = "application/x-forgeax-composer-role";
 
+/**
+ * 由 `/genres` 的一条品类现造一个专家角色项。
+ * 15 个游戏类型下的品类是后端数据，写不进静态目录，所以按需现造；
+ * id 带 code，拖进画布后仍能溯源到具体品类。
+ */
+export function genreExpertItem(g: {
+  code: string;
+  name: string;
+  tier: TierId;
+  pipeline_template: string;
+}): ComposerCatalogItem {
+  return {
+    id: `expert.genre.${g.code}`,
+    category: "expert",
+    labelKey: "",
+    label: `${g.name} 品类叙事专家`,
+    icon: "◆",
+    pipelineTemplate: g.pipeline_template as PipelineTemplateId,
+    tier: g.tier,
+    routeGroup: "planning",
+    defaultConfig: { genreCode: g.code, routeGroup: "planning", tier: g.tier },
+  };
+}
+
+/**
+ * 由一条叙事单品路由现造一个路由角色项（顶栏「叙事工具 → 叙事单品助手」可拖进画布）。
+ * 拖进去就是一枚预置好 mode 的路由节点，配合输入节点即可成一条可跑的单品管线。
+ */
+export function narrativeRouteItem(modeId: string, label: string): ComposerCatalogItem {
+  return {
+    id: `routing.narrative.${modeId}`,
+    category: "routing",
+    labelKey: "",
+    label,
+    icon: "◈",
+    routeGroup: "narrative",
+    modeId,
+    defaultConfig: { routeGroup: "narrative", mode: modeId, complexity: undefined },
+  };
+}
+
+/** 角色主题色（节点边框/把手/小地图统一取此）。assistant 仅供旧节点回放着色。 */
+export const CATEGORY_COLOR: Record<ComposerNodeCategory, string> = {
+  input: "rgba(120,200,255,0.9)",
+  routing: "rgba(255,190,120,0.9)",
+  expert: "rgba(77,255,160,0.9)",
+  assistant: "rgba(200,150,255,0.9)",
+  engineer: "rgba(255,235,120,0.9)",
+};
+
 // ── 运行期编排数据（store composer 切片使用） ──────────────────────────────
 
 export interface ComposerNodeData {
@@ -244,7 +281,7 @@ export interface ComposerNodeData {
   label: string;
   icon: string;
   position: { x: number; y: number };
-  /** 节点级配置（输入文本 / 路由参数 / 专家助手工程师选项）。 */
+  /** 节点级配置（输入文本 / 路由参数 / 专家与单品助手选项）。 */
   config: Record<string, unknown>;
   pipelineTemplate?: PipelineTemplateId;
   tier?: TierId | null;

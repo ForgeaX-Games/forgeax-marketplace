@@ -2,6 +2,8 @@ import type { TierId } from "../types/index.js";
 import type { NarrativeType } from "./genre-narrative-type.js";
 import { getNarrativeType } from "./genre-narrative-type.js";
 import type { PipelineTemplateId } from "../pipeline/templates.js";
+import type { NarrativePipelineId } from "../pipeline/narrative-pipelines.js";
+import { resolveNarrativePipeline } from "../pipeline/narrative-pipelines.js";
 import { GENRE_NAME_EN } from "./genre-names-en.js";
 
 export type ContentLocale = "en" | "zh";
@@ -65,6 +67,14 @@ export function getGenreDisplayName(entry: GenreEntry, locale: ContentLocale = "
 export interface GenreEntry {
   code: string;
   name: string;
+  /**
+   * 叙事层级，**品类自带的只读派生属性**（PRD v1.4 §3.2.2）。
+   *
+   * 用户不再直接选择层级：选定某位叙事策划专家即选定品类，tier 由品类查表得到。
+   * 它仍是模板选择、needs 兜底、skill 目录与断点续跑的输入，所以字段保留、语义不变，
+   * 只是不再出现在路由 UI 上。注意本表的 tier1 是**叙事最重**的一档，
+   * 与专家组表格里 T4=重度叙事 的编号方向相反。
+   */
   tier: TierId;
   /** A2-1: 二级品类大类（用于前端 UI 折叠分组） */
   category: GenreCategory;
@@ -72,11 +82,23 @@ export interface GenreEntry {
   needs: Record<string, 0 | 1 | 2 | 3>;
   keywords: string[];
   narrative_type: NarrativeType;
-  /** 该品类应使用的管线模板（B2） */
+  /**
+   * @deprecated 旧架构的按品类家族切分的 step 模板（B2）。
+   * 四期起路由目标是 narrativePipeline（席位序列），本字段只为历史 checkpoint
+   * 与归档管线（tpl-jrpg-v2 / tpl-vn-v2 / tpl-narrative-card）保留可解析性。
+   */
   pipelineTemplate: PipelineTemplateId;
+  /**
+   * 新架构管线（四期）：由二十席组合而成的四条之一，按叙事层级归类。
+   * 事实源见 pipeline/narrative-pipelines.ts 与专家组 CSV 第 7 列。
+   */
+  narrativePipeline: NarrativePipelineId;
 }
 
-type RawGenreEntry = Omit<GenreEntry, "narrative_type" | "pipelineTemplate">;
+type RawGenreEntry = Omit<
+  GenreEntry,
+  "narrative_type" | "pipelineTemplate" | "narrativePipeline"
+>;
 
 /**
  * 从 GENRE_TAXONOMY_FULL.md 转化的结构化品类知识库。
@@ -291,7 +313,8 @@ const GENRE_TEMPLATE_OVERRIDES: Record<string, PipelineTemplateId> = {
 
   // tier1 但更适合 light 的（解谜/侦探/线性已在 tpl-vn 处理；其余 tier1 默认走 tpl-rpg）
   // tier2 强叙事但是 RPG 思路 → 保持 tpl-rpg 默认
-  "rpg-jrpg":          "tpl-rpg",
+  // Phase-1：JRPG 走新架构朴素代号 tpl-jrpg（V1）；其余 RPG 暂仍走归档族 tpl-rpg(=tpl-jrpg-v2)
+  "rpg-jrpg":          "tpl-jrpg",
   "rpg-crpg":          "tpl-rpg",
   "rpg-arpg":          "tpl-rpg",
   "rpg-mmorpg":        "tpl-rpg",
@@ -331,6 +354,7 @@ export const GENRE_TAXONOMY: GenreEntry[] = RAW_TAXONOMY.map((raw) => ({
   ...raw,
   narrative_type: getNarrativeType(raw.code),
   pipelineTemplate: resolvePipelineTemplate(raw.code, raw.tier),
+  narrativePipeline: resolveNarrativePipeline(raw.code, raw.tier).id,
 }));
 
 /** A2-2: 根据 genre_code 精确查找品类条目；找不到返回 null */

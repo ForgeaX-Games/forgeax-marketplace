@@ -16,9 +16,11 @@
 import { STEP_IDS as S } from "./modes.js";
 
 export type PipelineTemplateId =
-  | "tpl-rpg"             // RPG 标准管线（L0-L5 全量）
+  | "tpl-jrpg"            // 新架构 JRPG 预制管线（V1 槽位化提示词库）
+  | "tpl-jrpg-v2"         // 归档：原精调 RPG/JRPG 管线（V2 整体提示词）
+  | "tpl-rpg"             // [DEPRECATED alias] = tpl-jrpg-v2；历史 checkpoint 兼容
   | "tpl-vn"              // [DEPRECATED] 视觉小说/互动影游（分支树+对话脚本）— 仅兼容历史数据
-  | "tpl-vn-v2"           // 互动影游 v2 专属管线（E1+E2+G，场号后处理导出/双向拓扑/H/B/O/双轨 QTE）
+  | "tpl-vn-v2"           // 互动影游归档精调（V2）；新架构朴素代号 tpl-vn 二期再建
   | "tpl-open-world"      // 开放世界 RPG（区域+涌现事件）
   | "tpl-card-game"       // 卡牌游戏（卡牌 Lore + 事件池）
   | "tpl-fragmented"      // 碎片化叙事（Souls-like / Metroidvania）
@@ -45,27 +47,48 @@ const PREF = [S.PREFERENCE_SUMMARY, S.PREFERENCE_ANALYSIS];
 const BASE = [...PREF, S.INITIAL_PLAN, S.WORLDVIEW];
 const ENTITIES = [S.CHARACTER_ENRICHMENT, S.ITEM_DATABASE];
 
+/** JRPG 全量步序（新架构 tpl-jrpg 与归档 tpl-jrpg-v2 共享；差异在提示词库版本）。 */
+export const JRPG_PIPELINE_STEPS: Array<string | string[]> = [
+  ...BASE,
+  ...ENTITIES,
+  S.STORY_FRAMEWORK,
+  S.OUTLINE_BATCH,
+  S.DETAILED_OUTLINE,
+  S.PLOT_GENERATION,
+  S.SCRIPT_GENERATION,
+  [S.QUEST_GENERATION, S.SCENE_GENERATION],
+];
+
 // ─────────────────────────────────────────────────────────────────
-// 8 个模板
+// 管线模板
 // ─────────────────────────────────────────────────────────────────
 
 export const PIPELINE_TEMPLATES: Record<PipelineTemplateId, PipelineTemplate> = {
+  "tpl-jrpg": {
+    id: "tpl-jrpg",
+    label: "tpl-jrpg",
+    description:
+      "新架构 JRPG 预制管线（V1）：由单品工程师组合而成的工作流；提示词从三轴槽位库按需组装。",
+    tiers: ["tier1"],
+    steps: [...JRPG_PIPELINE_STEPS],
+  },
+
+  "tpl-jrpg-v2": {
+    id: "tpl-jrpg-v2",
+    label: "tpl-jrpg-v2",
+    description:
+      "归档精调 JRPG/RPG 管线（V2）：原 tpl-rpg 整体提示词；legacy 与对照基线保留可跑。",
+    tiers: ["tier1"],
+    steps: [...JRPG_PIPELINE_STEPS],
+  },
+
   "tpl-rpg": {
     id: "tpl-rpg",
-    label: "RPG 标准管线",
-    description: "JRPG / CRPG / ARPG：偏好 → 初步方案 → 世界观 → 角色 → 道具 → L0-L5 → 场景（Lore 由通用叙事 agent 内嵌产出）",
+    label: "tpl-jrpg-v2",
+    description:
+      "[DEPRECATED alias → tpl-jrpg-v2] 历史 checkpoint / genre 映射兼容；新代码请用 tpl-jrpg 或 tpl-jrpg-v2。",
     tiers: ["tier1"],
-    steps: [
-      ...BASE,
-      ...ENTITIES,
-      S.STORY_FRAMEWORK,
-      S.OUTLINE_BATCH,
-      S.DETAILED_OUTLINE,
-      S.PLOT_GENERATION,
-      S.SCRIPT_GENERATION,
-      [S.QUEST_GENERATION, S.SCENE_GENERATION], // 并行组
-      // Lore (L) 已由通用叙事 agent 在角色/道具/剧情等步骤中内嵌产出，不再驱动独立 step
-    ],
+    steps: [...JRPG_PIPELINE_STEPS],
   },
 
   "tpl-vn": {

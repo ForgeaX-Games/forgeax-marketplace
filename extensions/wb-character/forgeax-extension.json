@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-character",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "角色编辑",
     "en": "Character Editor"
@@ -23,29 +22,178 @@
     "concept-design",
     "image-gen"
   ],
-  "provides": {
-    "workbench": {
-      "id": "wb-character",
-      "lens": "by-category",
-      "icon": "⚒️",
-      "position": 100,
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left": {
-          "width": 320,
-          "scrollable": true
-        },
-        "center": {
-          "minHeight": 600,
-          "scrollable": false
-        }
+  "consumes": {
+    "models": [
+      {
+        "channel": "image",
+        "role": "concept-art"
       },
-      "matchProduces": [
-        "**/.forgeax/games/*/characters/**"
-      ],
-      "preferredAgent": "@forgeax-extension/agent-character-designer-2d"
-    },
+      {
+        "channel": "image",
+        "role": "sprite-frame"
+      },
+      {
+        "channel": "image",
+        "role": "pixel-art"
+      },
+      {
+        "channel": "video",
+        "role": "character-clip"
+      },
+      {
+        "channel": "text",
+        "role": "reasoning"
+      }
+    ]
+  },
+  "entry": {
+    "backend": "./server/tool-handlers.ts",
+    "frontend": "./dist/index.html",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15173,
+      "readyProbe": "/",
+      "dev": {
+        "watch": true,
+        "hmr": true
+      },
+      "embeddedAlso": true
+    }
+  },
+  "permissions": [
+    "fs:read:.forgeax/games/{slug}/characters/**",
+    "fs:write:.forgeax/games/{slug}/characters/**",
+    "fs:read:.forgeax/games/{slug}/playground/**",
+    "fs:write:.forgeax/games/{slug}/playground/**",
+    "model:image:concept-art",
+    "model:image:sprite-frame",
+    "model:image:pixel-art",
+    "model:video:character-clip",
+    "model:text:reasoning",
+    "net:ark.cn-beijing.volces.com",
+    "net:generativelanguage.googleapis.com",
+    "emit:character.*"
+  ],
+  "requestedEnv": [
+    "GEMINI_API_KEY",
+    "GOOGLE_GEN_AI_KEY",
+    "CLAUDE_API_KEY",
+    "CLAUDE_API_BASE",
+    "FORGEAX_LLM_PROXY_URL",
+    "AZURE_GPT_IMAGE_API_KEY",
+    "AZURE_GPT_IMAGE_KEY",
+    "AZURE_GPT_IMAGE_ENDPOINT",
+    "AZURE_GPT_IMAGE_DEPLOYMENT",
+    "AZURE_GPT_IMAGE_API_VERSION",
+    "AZURE_GPT_IMAGE_EDIT_API_VERSION",
+    "ARK_IMAGE_KEY",
+    "SEEDREAM_API_KEY",
+    "LITELLM_PROXY_BASE_URL",
+    "LITELLM_PROXY_KEY",
+    "LITELLM_PROXY_IMAGE_MODEL"
+  ],
+  "hot": false,
+  "experimental": true,
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  },
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-character.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-character",
+        "title": {
+          "zh": "角色编辑",
+          "en": "Character Editor"
+        },
+        "icon": "⚒️",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              320,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-character.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "width": 320,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-character.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/.forgeax/games/*/characters/**"
+        ],
+        "preferredAgent": "@forgeax-extension/agent-character-designer-2d"
+      }
+    ],
+    "activities": [
+      {
+        "id": "wb-character.launcher",
+        "title": {
+          "zh": "角色编辑",
+          "en": "Character Editor"
+        },
+        "icon": "⚒️",
+        "order": 100,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "wb-character"
+        }
+      }
+    ],
     "skills": [
       {
         "id": "wb-character:author-guide",
@@ -224,80 +372,5 @@
         ]
       }
     ]
-  },
-  "consumes": {
-    "models": [
-      {
-        "channel": "image",
-        "role": "concept-art"
-      },
-      {
-        "channel": "image",
-        "role": "sprite-frame"
-      },
-      {
-        "channel": "image",
-        "role": "pixel-art"
-      },
-      {
-        "channel": "video",
-        "role": "character-clip"
-      },
-      {
-        "channel": "text",
-        "role": "reasoning"
-      }
-    ]
-  },
-  "entry": {
-    "backend": "./server/tool-handlers.ts",
-    "frontend": "./dist/index.html",
-    "standalone": {
-      "start": "npm run dev",
-      "port": 15173,
-      "readyProbe": "/",
-      "dev": {
-        "watch": true,
-        "hmr": true
-      },
-      "embeddedAlso": true
-    }
-  },
-  "permissions": [
-    "fs:read:.forgeax/games/{slug}/characters/**",
-    "fs:write:.forgeax/games/{slug}/characters/**",
-    "fs:read:.forgeax/games/{slug}/playground/**",
-    "fs:write:.forgeax/games/{slug}/playground/**",
-    "model:image:concept-art",
-    "model:image:sprite-frame",
-    "model:image:pixel-art",
-    "model:video:character-clip",
-    "model:text:reasoning",
-    "net:ark.cn-beijing.volces.com",
-    "net:generativelanguage.googleapis.com",
-    "emit:character.*"
-  ],
-  "requestedEnv": [
-    "GEMINI_API_KEY",
-    "GOOGLE_GEN_AI_KEY",
-    "CLAUDE_API_KEY",
-    "CLAUDE_API_BASE",
-    "FORGEAX_LLM_PROXY_URL",
-    "AZURE_GPT_IMAGE_API_KEY",
-    "AZURE_GPT_IMAGE_KEY",
-    "AZURE_GPT_IMAGE_ENDPOINT",
-    "AZURE_GPT_IMAGE_DEPLOYMENT",
-    "AZURE_GPT_IMAGE_API_VERSION",
-    "AZURE_GPT_IMAGE_EDIT_API_VERSION",
-    "ARK_IMAGE_KEY",
-    "SEEDREAM_API_KEY",
-    "LITELLM_PROXY_BASE_URL",
-    "LITELLM_PROXY_KEY",
-    "LITELLM_PROXY_IMAGE_MODEL"
-  ],
-  "hot": false,
-  "experimental": true,
-  "compatibleWith": {
-    "forgeax-bus": "^1.0.0"
   }
 }

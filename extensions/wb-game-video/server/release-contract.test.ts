@@ -28,11 +28,15 @@ describe('release identity', () => {
     expect(pkg.version).toBe('0.1.5')
     expect(manifest.id).toBe(pkg.name)
     expect(manifest.version).toBe(pkg.version)
-    expect(manifest.provides.workbench.id).toBe('wb-game-video')
-    expect(manifest.provides.skills.every(
+    expect(manifest.schemaVersion).toBe(2)
+    expect(manifest.contributes.pages[0].id).toBe('wb-game-video')
+    expect(manifest.contributes.pages[0].panels.map(
+      (entry: { id: string }) => entry.id,
+    )).toEqual(['sidebar', 'workspace'])
+    expect(manifest.contributes.skills.every(
       (entry: { id: string }) => entry.id.startsWith('wb-game-video:'),
     )).toBe(true)
-    expect(manifest.provides.tools.map(
+    expect(manifest.contributes.tools.map(
       (entry: { id: string }) => entry.id,
     )).toEqual(expectedTools)
     expect(Object.keys(tools)).toEqual(expectedTools)

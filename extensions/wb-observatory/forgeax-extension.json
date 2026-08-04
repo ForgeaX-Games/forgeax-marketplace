@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-observatory",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "Observatory · 轨迹观察台",
     "en": "Observatory"
@@ -26,15 +25,6 @@
     "context",
     "system-prompt"
   ],
-  "provides": {
-    "workbench": {
-      "id": "wb-observatory",
-      "icon": "🔭",
-      "position": 150,
-      "panelSize": "lg",
-      "surface": "single"
-    }
-  },
   "entry": {
     "frontend": "./dist/index.html",
     "standalone": {
@@ -51,5 +41,65 @@
   "experimental": true,
   "compatibleWith": {
     "forgeax-bus": "^1.0.0"
+  },
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-observatory.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-observatory",
+        "title": {
+          "zh": "Observatory · 轨迹观察台",
+          "en": "Observatory"
+        },
+        "icon": "🔭",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "tabs",
+            "placements": [
+              "content"
+            ],
+            "active": "content"
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "content",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-observatory.content"
+            }
+          }
+        ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "wb-observatory.launcher",
+        "title": {
+          "zh": "Observatory · 轨迹观察台",
+          "en": "Observatory"
+        },
+        "icon": "🔭",
+        "order": 150,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "wb-observatory"
+        }
+      }
+    ]
   }
 }

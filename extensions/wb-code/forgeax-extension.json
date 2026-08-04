@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-code",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "代码 / Code",
     "en": "Code Workbench"
@@ -11,24 +10,58 @@
     "zh": "代码工作台(规划中)· 目标:在 Studio 内浏览 + 跳转游戏 src/ 文件,与 cc-coder 跨对话线程协作改代码。当前为 marketplace 占位,面板实现待后续 sprint 落地。",
     "en": "Code workbench (planned) — will browse and jump through a game's src/ files inside Studio and collaborate with cc-coder across chat threads. Currently a marketplace placeholder; the panel lands in a later sprint."
   },
-  "provides": {
-    "workbench": {
-      "id": "code",
-      "hidden": true,
-      "lens": "by-category",
-      "icon": "</>",
-      "position": 200,
-      "panelSize": "lg",
-      "matchProduces": [
-        "**/*.ts",
-        "**/*.tsx",
-        "**/*.js",
-        "**/*.css"
-      ]
-    }
-  },
   "entry": {
     "frontend": "./src/panel.tsx"
   },
-  "experimental": true
+  "experimental": true,
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "code.content",
+        "runtime": "inline",
+        "entry": "./src/panel.tsx"
+      }
+    ],
+    "pages": [
+      {
+        "id": "code",
+        "title": {
+          "zh": "代码 / Code",
+          "en": "Code Workbench"
+        },
+        "icon": "</>",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "tabs",
+            "placements": [
+              "content"
+            ],
+            "active": "content"
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "content",
+            "panelType": {
+              "extension": "self",
+              "id": "code.content"
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/*.ts",
+          "**/*.tsx",
+          "**/*.js",
+          "**/*.css"
+        ]
+      }
+    ]
+  }
 }

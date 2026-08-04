@@ -24,7 +24,7 @@ afterEach(() => {
 describe('ToolRegistry lowpoly handlers', () => {
   it('keeps legacy pipeline/battery tools out of the AI manifest', () => {
     const manifest = JSON.parse(readFileSync(new URL('../../forgeax-plugin.json', import.meta.url), 'utf8'))
-    const entries = manifest.provides.tools as Array<{ id: string; exposedToAI: boolean }>
+    const entries = manifest.contributes.tools as Array<{ id: string; exposedToAI: boolean }>
     const legacy = entries.filter((entry) => /lowpoly:(?:batteries|pipeline)\./u.test(entry.id))
     expect(legacy.length).toBeGreaterThan(0)
     expect(legacy.every((entry) => entry.exposedToAI === false)).toBe(true)

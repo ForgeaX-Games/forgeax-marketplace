@@ -15,6 +15,8 @@ import { registerValidator } from "./processor-registry.js";
 import type { AgentDef } from "./types.js";
 import { extractJSON } from "../llm-client.js";
 import type { NarrativeCard, VnLogline } from "../../types/index.js";
+import { makeCompositeAgentDef } from "./runners/composite-runner.js";
+import { JRPG_PIPELINE_STEPS } from "../templates.js";
 
 // ════════════════════════════════════════════════════════
 // narrative_card — 叙事卡（Tier4 最简步骤）
@@ -99,3 +101,52 @@ const vnLoglineDef: AgentDef = {
 };
 
 registerAgentDef(vnLoglineDef);
+
+// ════════════════════════════════════════════════════════
+// tpl-jrpg — JRPG 品类专家（nested composite · Phase-1 垂直样例）
+// ════════════════════════════════════════════════════════
+
+const JRPG_CHILDREN = JRPG_PIPELINE_STEPS.flatMap((g) =>
+  Array.isArray(g) ? g : [g],
+);
+
+/** 串行边 + quest/scene 并行组。 */
+const jrpgEdges: Array<{ source: string; target: string }> = [];
+for (let i = 0; i < JRPG_PIPELINE_STEPS.length - 1; i++) {
+  const cur = JRPG_PIPELINE_STEPS[i]!;
+  const next = JRPG_PIPELINE_STEPS[i + 1]!;
+  const sources = Array.isArray(cur) ? cur : [cur];
+  const targets = Array.isArray(next) ? next : [next];
+  for (const s of sources) {
+    for (const t of targets) jrpgEdges.push({ source: s, target: t });
+  }
+}
+
+registerAgentDef(
+  makeCompositeAgentDef("tpl-jrpg", "JRPG 品类叙事专家", {
+    children: JRPG_CHILDREN,
+    edges: jrpgEdges,
+    parallelGroups: [["quest_generation", "scene_generation"]],
+  }, {
+    prompts: { templateId: "tpl-jrpg", skillSlots: ["style_guide"] },
+    io: {
+      requiredInputs: ["user_input"],
+      outputField: "tpl_jrpg",
+    },
+  }),
+);
+
+/** 画布 expert 节点 catalogId 别名。 */
+registerAgentDef(
+  makeCompositeAgentDef("expert.jrpg", "JRPG 品类叙事专家", {
+    children: JRPG_CHILDREN,
+    edges: jrpgEdges,
+    parallelGroups: [["quest_generation", "scene_generation"]],
+  }, {
+    prompts: { templateId: "tpl-jrpg", skillSlots: ["style_guide"] },
+    io: {
+      requiredInputs: ["user_input"],
+      outputField: "tpl_jrpg",
+    },
+  }),
+);

@@ -13,6 +13,7 @@ export type {
   SequenceConfig,
   ConditionalConfig,
   DeterministicConfig,
+  CompositeConfig,
   AgentStructure,
   AgentIOContract,
   AgentPromptConfig,

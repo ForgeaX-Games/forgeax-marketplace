@@ -20,7 +20,9 @@ export type AgentStructureType =
   | "chunked"
   | "sequence"
   | "conditional"
-  | "deterministic";
+  | "deterministic"
+  /** nested 子 DAG：专家 = 工程师组合；Phase-1 M1 新增。 */
+  | "composite";
 
 export interface SingleTurnConfig {
   temperature?: number;
@@ -69,12 +71,20 @@ export interface DeterministicConfig {
   processor: string;
 }
 
+/** nested 子 DAG：children + 依赖边 + 可选并行组。 */
+export interface CompositeConfig {
+  children: string[];
+  edges?: Array<{ source: string; target: string }>;
+  parallelGroups?: string[][];
+}
+
 export type AgentStructure =
   | { type: "single-turn"; config: SingleTurnConfig }
   | { type: "chunked"; config: ChunkedConfig }
   | { type: "sequence"; config: SequenceConfig }
   | { type: "conditional"; config: ConditionalConfig }
-  | { type: "deterministic"; config: DeterministicConfig };
+  | { type: "deterministic"; config: DeterministicConfig }
+  | { type: "composite"; config: CompositeConfig };
 
 // ════════════════════════════════════════════════════════
 // 二、Agent 定义（纯数据配置，无函数引用）
@@ -127,6 +137,11 @@ export interface AgentDef {
   id: string;
   /** 人类可读名称（前端显示用） */
   name: string;
+  /**
+   * 架构原型（4 类）。缺省时由 structure.type 推导（见 agent-contract.prototypeFromStructure）。
+   * 声明即激发对应连接/嵌套能力。
+   */
+  prototype?: import("../agent-contract.js").AgentPrototype;
   /** 结构化执行类型 */
   structure: AgentStructure;
   /** 提示词配置 */
@@ -193,6 +208,11 @@ export interface StepBlueprint {
   agentDef: AgentDef;
   /** 预解析的提示词（system 部分已注入 skill） */
   resolvedPrompts: ResolvedPrompts;
+  /**
+   * nested 展开链（不含本步），由 composite 逐层追加。
+   * 仅用于子 DAG 环检测，普通管线步为 undefined。
+   */
+  nestAncestors?: readonly string[];
   /** 综合 complexity/genre 后的执行参数 */
   executionParams: {
     temperature: number;
@@ -238,6 +258,11 @@ import type { LLMClient } from "../llm-client.js";
 export interface AgentRunnerCallbacks {
   /** 步骤级进度上报 */
   onProgress?: (stepId: string, message: string) => void;
+  /**
+   * 单 agent 执行完成（Phase-2 M9）。由 agent-exec 在两条执行路径的收尾统一发出，
+   * composite 子步也会各发一次 —— 单 agent 的 SSE 据此把子 DAG 波次转成 step 帧。
+   */
+  onAgentComplete?: (stepId: string, output: unknown) => void;
   /** LLM 流式输出 */
   onStream?: (chunk: string, accumulated: string) => void;
   /** 子节点进度 */

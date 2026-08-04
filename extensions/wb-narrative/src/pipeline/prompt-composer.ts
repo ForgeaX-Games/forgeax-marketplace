@@ -6,10 +6,13 @@
  *
  * ⚠️ 历史修订：早期注释曾标 @deprecated 并建议"改用 blueprint/prompt-resolver.ts +
  *    prompts/agents/*.md"——此为**名实不符**：PromptResolver 是 useNewRunner 实验引擎，
- *    生产从不执行（见其文件头 + pipeline.ts:1179）。**新增/修改 step 提示词请改本文件的
- *    PromptComposer.blocks**（含逻辑的块用 (ctx)=>string 函数；静态文案直接写字符串），
- *    IP DNA 段统一用 IP_DNA_SLOT_BLOCK（段序派生自 skeleton.PROMPT_SLOT_ORDER）。
- *    prompts/agents/*.md 仅属实验引擎 PromptResolver，与本文件内联块**互不同步**，勿混用。
+ *    生产从不执行（见其文件头 + pipeline.ts:1179）。那批 md 已于四期吸收并归档到
+ *    src/prompts/_archive/（见该目录 README）。
+ *
+ *    **提示词只有这一个落点**：新增或修改 step 提示词，改对应 step 文件里的
+ *    PromptComposer.blocks（含逻辑的块用 (ctx)=>string 函数；静态文案直接写字符串）。
+ *    IP DNA 段统一用 IP_DNA_SLOT_BLOCK、叙事策略段统一用 STRATEGY_SLOT_BLOCK，
+ *    两者的段序都派生自 skeleton.PROMPT_SLOT_ORDER，不要在 step 里手写。
  *
  * 设计要点：
  *   1. 每个 step 用一份纯数据 PromptComposer 描述 prompt 结构
@@ -27,7 +30,7 @@ import type { NarrativeContext } from "../types/index.js";
 import { getStepSkill } from "../knowledge/game-narrative/skill-loader.js";
 import type { StepSkillBlock } from "../knowledge/game-narrative/skill-types.js";
 import { getInjectedFragment } from "../ip-dna/injection/operator-injection.js";
-import { hasIpDnaPlaceholders, renderPlaceholders } from "./prompt/syntax.js";
+import { hasIpDnaPlaceholders, hasStrategyPlaceholders, renderPlaceholders } from "./prompt/syntax.js";
 import { buildSlotMap, buildDataHelpers } from "./prompt/providers.js";
 import { PROMPT_SLOT_ORDER, type PromptSlot } from "./prompt/skeleton.js";
 
@@ -48,6 +51,29 @@ const IP_DNA_SLOTS: readonly PromptSlot[] = ["objective_truth", "operators", "re
 
 export const IP_DNA_SLOT_BLOCK = PROMPT_SLOT_ORDER.filter((slot) =>
   IP_DNA_SLOTS.includes(slot),
+)
+  .map((slot) => `{{slot:${slot}}}`)
+  .join("\n\n");
+
+/**
+ * 骨架第 ③ 段「叙事策略」的四子槽块（品类→类型→题材→结构，段序固定）。
+ *
+ * 用法与 IP_DNA_SLOT_BLOCK 对称：吃策略卡的 step 把本块加进 blocks，并在
+ * systemBlockOrder 中置于「身份/任务」之后、「IP DNA」之前。
+ *
+ * 只有 STEP_TO_STRATEGY_STAGE 里登记的四个环节会拿到内容（需求清单 / 策划文档 /
+ * 故事大纲 / 故事结构）；其余 step 即便声明也全部渲染为空、整块塌缩，行为与未声明一致。
+ * 四轴中任一轴缺策略卡同样只是该子槽为空，不影响其余三轴。
+ */
+const STRATEGY_SLOTS: readonly PromptSlot[] = [
+  "strategy_genre",
+  "strategy_type",
+  "strategy_theme",
+  "strategy_structure",
+];
+
+export const STRATEGY_SLOT_BLOCK = PROMPT_SLOT_ORDER.filter((slot) =>
+  STRATEGY_SLOTS.includes(slot),
 )
   .map((slot) => `{{slot:${slot}}}`)
   .join("\n\n");
@@ -140,12 +166,16 @@ export function composeSystemPrompt(
   //   - 模板声明了结构化插槽（{{slot:operators}} 等）→ provider 按骨架插槽精确填充
   //     （§7.2b：客观真相→三视角算子→关系→账本，位置与 step 角色融合）；
   //   - 未声明 → 退回"末尾 append"兼容旧行为。
-  if (hasIpDnaPlaceholders(sp)) {
+  // 只声明策略段的 step 也要走渲染，否则 {{slot:strategy_*}} 会原样留在提示词里；
+  // 但"末尾 append"的判定仍只看 IP DNA，避免这类 step 的 IP DNA 行为被顺带改掉。
+  const hadIpDnaSlots = hasIpDnaPlaceholders(sp);
+  if (hadIpDnaSlots || hasStrategyPlaceholders(sp)) {
     const slots = buildSlotMap(ctx, composer.stepId);
     sp = renderPlaceholders(sp, { ctx, slots, data: buildDataHelpers(ctx) })
       .replace(/\n{3,}/g, "\n\n")
       .trim();
-  } else {
+  }
+  if (!hadIpDnaSlots) {
     const injected = getInjectedFragment(ctx, composer.stepId);
     if (injected) sp += `\n\n${injected}`;
   }

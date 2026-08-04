@@ -1,7 +1,7 @@
 /**
  * Phase D3 — wb-character `entry.backend` for ToolRegistry.
  *
- * The forgeax-plugin manifest's `provides.tools[]` lists 12 tool ids; this
+ * The extension manifest's `contributes.tools[]` lists 12 tool ids; this
  * file is the dispatch map ToolRegistry dynamic-imports to resolve them
  * (`packages/server/src/tools/registry.ts` calls `mod.tools` or
  * `mod.default`). Each handler receives `(args, { caller, toolId })` and

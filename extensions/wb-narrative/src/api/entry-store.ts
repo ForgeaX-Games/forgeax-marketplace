@@ -19,9 +19,15 @@ export interface EntryConfig {
   tags?: { selections?: Record<string, string>; customTexts?: Record<string, string> };
   uploadedFileNames?: string[];
   routeGroup?: "planning" | "narrative";
+  /** 叙事层级：三期起由 genreCode 派生的只读值，不再是用户选择项。 */
   tier?: string;
   mode?: string;
   genreCode?: string;
+  /** 三轴路由（PRD v1.4 §3.2.2）；旧条目无这三个字段，读取端一律按可空处理。 */
+  storyType?: string;
+  storyTheme?: string;
+  narrativeStructure?: string;
+  /** 叙事体量档位（1-5）。 */
   complexity?: number;
   /** UI locale for generated narrative content (en/zh). */
   locale?: "en" | "zh";
@@ -29,6 +35,24 @@ export interface EntryConfig {
   ipRunKey?: string;
   /** 完成态分叉来源条目键（本条目由某已完成条目改配置后新建）。 */
   parentKey?: string;
+  /**
+   * Phase-1 多管线条目：一条目 = 一组 RunManifest（按独立开始节点切分）。
+   * 形状与 types/run-manifest.RunManifest 对齐；旧条目无此字段时视为单管线。
+   */
+  pipelines?: unknown[];
+  /** 当前聚焦的管线 id（状态栏/文本视图默认展示）。 */
+  activePipelineId?: string;
+  /** LIST 是否展开显示多管线子行。 */
+  listExpanded?: boolean;
+  /**
+   * 资产库（PRD v1.4 §5.1）：作者确认、可供下游生成引用的产物。
+   * 元素是 `<group>/<相对路径>`，与 GET /api/narrative/files/:key 返回的分组路径同形；
+   * 不在此列表里的落盘文件都只是资源库里的原料/中间产物。
+   */
+  assets?: string[];
+  /** 画布编排拓扑快照（nodes/edges），供刷新恢复。 */
+  compositionNodes?: unknown[];
+  compositionEdges?: unknown[];
   createdAt?: string;
   updatedAt?: string;
 }

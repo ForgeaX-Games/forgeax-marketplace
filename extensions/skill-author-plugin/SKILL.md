@@ -25,12 +25,12 @@ manifest 字段总览(本次只用前 6 项,其他字段在 [docs/v2-vision/arch
 
 | 字段 | 说明 |
 | --- | --- |
-| `schemaVersion` | 永远填 `1` |
+| `schemaVersion` | 永远填 `2` |
 | `id` | `@your-namespace/plugin-name`,全局唯一 |
 | `version` | semver,首版 `0.1.0` |
-| `kind` | `tool` / `workbench` / `skill` / `agent` / `cli-provider` / `model-binding` 之一 |
+| `categories` | 插件能力分类数组；本例填 `["tool"]` |
 | `displayName` | `{ zh, en }` 双语,菜单显示用 |
-| `provides` | 声明输出的能力(本指南只用 `provides.tools`) |
+| `contributes` | 声明输出的能力(本指南只用 `contributes.tools`) |
 
 ## 流程(逐步引导)
 
@@ -52,10 +52,10 @@ manifest 字段总览(本次只用前 6 项,其他字段在 [docs/v2-vision/arch
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@me/hello-plugin",
   "version": "0.1.0",
-  "kind": "tool",
+  "categories": ["tool"],
   "displayName": { "zh": "Hello 插件", "en": "Hello Plugin" },
   "description": {
     "zh": "我的第一个 Forgeax 插件 · 暴露一个 hello:say 工具",
@@ -64,7 +64,7 @@ manifest 字段总览(本次只用前 6 项,其他字段在 [docs/v2-vision/arch
   "author": { "name": "<USER>", "email": "<USER@example.com>" },
   "icon": "👋",
   "keywords": ["hello", "demo"],
-  "provides": {
+  "contributes": {
     "tools": [
       {
         "id": "hello:say",
@@ -128,7 +128,7 @@ manifest 字段总览(本次只用前 6 项,其他字段在 [docs/v2-vision/arch
  * hello-plugin · ToolRegistry entry.
  *
  * forgeax-server 启动时 dynamic-import 这个文件,期望拿到一个
- * `tools` 对象(或 default export),key 是 manifest 里 provides.tools[].id。
+ * `tools` 对象(或 default export),key 是 manifest 里 contributes.tools[].id。
  * 每个 handler 接 `(args, ctx)` 返回 plain object —— ToolRegistry 自动
  * 套上 `{ ok: true, result }` 信封,异常会变 `{ ok: false, code: 'invoke_error', error }`。
  */
@@ -191,14 +191,14 @@ curl -s -X POST http://localhost:18900/api/tools/call \
 
 跟用户确认要不要继续:
 
-- **加更多 tools** — 在 `provides.tools[]` 追加条目,handler 在 `tools` 对象里加 key,reload 即可
-- **暴露事件** — 在 `provides.events` 声明 `{ name: "hello.greeted" }`,handler 里通过 ToolRegistry 注入的 ctx emit(进阶)
-- **升级到 workbench** — kind 改成 `workbench`,多写 `provides.workbench` + `entry.frontend`,得到一个 iframe 嵌入式工作面板。看 [`packages/marketplace/extensions/wb-character/`](../wb-character/) 的 manifest 当模板
+- **加更多 tools** — 在 `contributes.tools[]` 追加条目,handler 在 `tools` 对象里加 key,reload 即可
+- **暴露事件** — 在 `contributes.events` 声明 `{ name: "hello.greeted" }`,handler 里通过 ToolRegistry 注入的 ctx emit(进阶)
+- **升级为 Page 插件** — 使用 manifest v2，在 `contributes` 中声明 `panelTypes`、`pages`、`activities`，由 Page 的 `panels + layout` 指定可用面板及位置；`entry.frontend` 继续作为 iframe 入口。以 [`packages/marketplace/extensions/_template/`](../_template/) 为模板。
 - **打包分发** — 用 `/export-pack` 把这个目录导出成 `.fxpack` 给别人
 
 ## 反模式 — 这些坑别踩
 
-1. **不要把 manifest id 改名后忘了改 handler 的 key** — `provides.tools[i].id` 必须跟 `tools` 对象的 key 一一对应,差一个字符 ToolRegistry 就 `not_found`
+1. **不要把 manifest id 改名后忘了改 handler 的 key** — `contributes.tools[i].id` 必须跟 `tools` 对象的 key 一一对应,差一个字符 ToolRegistry 就 `not_found`
 2. **不要在 backend handler 里 import 浏览器专属模块**(`window`, `document`, vite 的 `import.meta.glob`)— 这个文件跑在 forgeax-server 进程
 3. **不要 require 相对路径外的 `node_modules`** — 当前 sandbox 不会把 host 的依赖拍平给插件,如果非要用第三方包,放 plugin 自己的 `package.json` + 安装(目前还在 roadmap,先别用)
 4. **schemas 里写 `additionalProperties: false`** — 避免 AI 多塞参数过来你 silently 丢掉

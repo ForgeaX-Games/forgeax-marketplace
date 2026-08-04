@@ -76,16 +76,58 @@ export function appendUserInstructions(prompt: string, ctx: NarrativeContext): s
 }
 
 /**
- * IP 原文参考块（§B2）：当存在 IP 改编范围内的原文切片（ctx.uploaded_script.content，
- * 由 IP DNA 编排在 buildGenerationInput 时注入）时，给结构规划/情节点生成步骤一个显式、
- * 高优先级的"忠实改编基准"指令。原文正文已由管线 M1.6 拼接到 user_input 末尾，
- * 此处不重复倾倒全文（避免 token 膨胀），仅显式声明其权威性与改编约束。
- * 无上传原文时返回空串（忠实/纯生成行为不变）。
+ * 原文参考块的两种语气，对应 feature list 里两类席位对上传原作的不同处置：
+ *   - "adapt"（结构层：大纲 / 结构 / 情节）——原作的情节顺序与因果为准，
+ *     只在游戏化结构层面重组；
+ *   - "extract"（设定层：需求清单 / 策划文档 / 世界观 / 角色 / 道具 / 场景 / 设定集）——
+ *     feature list 逐条写的是「上传的是文件，则直接提炼文件里的内容即可」，
+ *     职责是**抽取归档**而非再创作，套用 adapt 的"重组"口径会诱导模型改写原作设定。
  */
-export function buildIpSourceReference(ctx: NarrativeContext): string {
+export type IpSourceMode = "adapt" | "extract";
+
+/**
+ * IP 原文参考块（§B2）：当存在 IP 改编范围内的原文切片（ctx.uploaded_script.content，
+ * 由 IP DNA 编排在 buildGenerationInput 时注入）时，给本步一个显式、高优先级的
+ * "原文权威性"指令。原文正文已由管线 M1.6 拼接到 user_input 末尾，此处不重复倾倒
+ * 全文（避免 token 膨胀），仅声明其权威性与处置口径。
+ * 无上传原文时返回空串（纯生成行为不变）。
+ */
+export function buildIpSourceReference(
+  ctx: NarrativeContext,
+  mode: IpSourceMode = "adapt",
+): string {
   const u = ctx.uploaded_script;
   if (!u?.content?.trim()) return "";
+  if (ctx.content_locale === "en") {
+    const metaEn = u.description ?? `${u.format ?? "prose"} format, ~${u.char_count ?? u.content.length} chars`;
+    if (mode === "extract") {
+      return [
+        "\n## 📖 Source material (extraction baseline, highest priority)",
+        `This work adapts an existing IP. The source material (${metaEn}) is appended to the end of "user requirements". Your job here is to **extract** what this layer needs from it, not to invent afresh:`,
+        "- Reuse names and meanings exactly as the source states them (characters, places, factions, items, locations) — no renaming, no embellishment;",
+        "- Only extrapolate where this layer requires something the source never covers, and keep it compatible with established source facts;",
+        "- Where the source contradicts itself, follow the version that recurs more often and sits closer to the main line; do not invent a third reading.",
+      ].join("\n");
+    }
+    return [
+      "\n## 📖 Source material (faithful-adaptation baseline, highest priority)",
+      `This work adapts an existing IP. The source material (${metaEn}) is appended to the end of "user requirements"; treat it as the authoritative basis for this step:`,
+      "- Keep the source's names for characters, places, factions and locations, plus its key lines; invent nothing that contradicts its core setting;",
+      "- Event order, causality and character motivation follow the source; restructure only at the game layer (nodes / branches / units);",
+      "- If the source is larger than this layer needs, condense per this layer's remit without dropping its pivotal turns or standout passages.",
+    ].join("\n");
+  }
   const meta = u.description ?? `${u.format ?? "prose"} 格式（约 ${u.char_count ?? u.content.length} 字）`;
+  if (mode === "extract") {
+    return [
+      "\n## 📖 IP 原文参考（提炼基准，最高优先级）",
+      `本作品改编自既有 IP，原文素材（${meta}）已附在「用户需求」末尾。本步的职责是**从原文中提炼**本层级需要的设定，不是另起炉灶重写：`,
+      "- 原作已经写明的，直接沿用其名称与原义（人名、地名、势力、物品、场景），不改写、不美化、不换名；",
+      "- 原作未涉及而本层级必须补全的，才允许推演补写，且必须与原文既有设定相容，并在措辞上与原作风格一致；",
+      "- 原作中相互矛盾或语焉不详之处，以出现频次更高、与主线关系更紧的那一版为准，不擅自裁定成新设定；",
+      "- 若原文体量大于本层级所需，按本层级职责取舍，但不得遗漏原文反复强调的核心设定。",
+    ].join("\n");
+  }
   return [
     "\n## 📖 IP 原文参考（忠实改编基准，最高优先级）",
     `本作品改编自既有 IP，原文素材（${meta}）已附在「用户需求」末尾，请将其作为本步创作的权威依据：`,

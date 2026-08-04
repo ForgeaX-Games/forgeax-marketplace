@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-agent-persona",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "Agent Persona 编辑器",
     "en": "Agent Persona Editor"
@@ -22,25 +21,6 @@
     "editor",
     "prompt"
   ],
-  "provides": {
-    "workbench": {
-      "id": "wb-agent-persona",
-      "icon": "📝",
-      "position": 200,
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left": {
-          "width": 240,
-          "scrollable": true
-        },
-        "center": {
-          "minHeight": 600,
-          "scrollable": true
-        }
-      }
-    }
-  },
   "entry": {
     "frontend": "./index.html",
     "standalone": {
@@ -59,5 +39,99 @@
   "experimental": true,
   "compatibleWith": {
     "forgeax-bus": "^1.0.0"
+  },
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-agent-persona.content",
+        "runtime": "iframe",
+        "entry": "./index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-agent-persona",
+        "title": {
+          "zh": "Agent Persona 编辑器",
+          "en": "Agent Persona Editor"
+        },
+        "icon": "📝",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              240,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-agent-persona.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "width": 240,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-agent-persona.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": true
+            }
+          }
+        ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "wb-agent-persona.launcher",
+        "title": {
+          "zh": "Agent Persona 编辑器",
+          "en": "Agent Persona Editor"
+        },
+        "icon": "📝",
+        "order": 200,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "wb-agent-persona"
+        }
+      }
+    ]
   }
 }

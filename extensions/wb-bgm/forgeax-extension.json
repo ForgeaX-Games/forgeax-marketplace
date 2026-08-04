@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-bgm",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "音乐音效",
     "en": "BGM & SFX"
@@ -24,19 +23,97 @@
     "sound",
     "asset-library"
   ],
-  "provides": {
-    "workbench": {
-      "id": "bgm",
-      "lens": "by-category",
-      "icon": "🔊",
-      "position": 170,
-      "panelSize": "lg",
-      "surface": "single",
-      "matchProduces": [
-        "**/audio/**",
-        "**/audio/manifest.json"
-      ]
-    },
+  "entry": {
+    "frontend": "./dist/index.html",
+    "backend": "./server/tool-handlers.ts",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 5173,
+      "readyProbe": "/",
+      "dev": {
+        "watch": true,
+        "hmr": true
+      },
+      "embeddedAlso": true,
+      "devOnly": false
+    }
+  },
+  "permissions": [
+    "emit:bgm.*"
+  ],
+  "requestedEnv": [
+    "WB_BGM_BACKEND_BASE",
+    "WB_BGM_SANDBOX_KEY",
+    "WB_BGM_DEPOT",
+    "FORGEAX_PROJECT_ROOT"
+  ],
+  "experimental": true,
+  "compatibleWith": {
+    "forgeax-bus": "^1.0.0"
+  },
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "bgm.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "bgm",
+        "title": {
+          "zh": "音乐音效",
+          "en": "BGM & SFX"
+        },
+        "icon": "🔊",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "tabs",
+            "placements": [
+              "content"
+            ],
+            "active": "content"
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "content",
+            "panelType": {
+              "extension": "self",
+              "id": "bgm.content"
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/audio/**",
+          "**/audio/manifest.json"
+        ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "bgm.launcher",
+        "title": {
+          "zh": "音乐音效",
+          "en": "BGM & SFX"
+        },
+        "icon": "🔊",
+        "order": 170,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "bgm"
+        }
+      }
+    ],
     "tools": [
       {
         "id": "search-audio",
@@ -75,33 +152,5 @@
         }
       }
     ]
-  },
-  "entry": {
-    "frontend": "./dist/index.html",
-    "backend": "./server/tool-handlers.ts",
-    "standalone": {
-      "start": "npm run dev",
-      "port": 5173,
-      "readyProbe": "/",
-      "dev": {
-        "watch": true,
-        "hmr": true
-      },
-      "embeddedAlso": true,
-      "devOnly": false
-    }
-  },
-  "permissions": [
-    "emit:bgm.*"
-  ],
-  "requestedEnv": [
-    "WB_BGM_BACKEND_BASE",
-    "WB_BGM_SANDBOX_KEY",
-    "WB_BGM_DEPOT",
-    "FORGEAX_PROJECT_ROOT"
-  ],
-  "experimental": true,
-  "compatibleWith": {
-    "forgeax-bus": "^1.0.0"
   }
 }

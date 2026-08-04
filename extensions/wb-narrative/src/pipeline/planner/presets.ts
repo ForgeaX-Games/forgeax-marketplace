@@ -22,22 +22,27 @@ const VN_V2_STEPS = [
   "vn_storyboard",
 ] as const;
 
-export const PIPELINE_PRESETS: Partial<Record<PipelineTemplateId, PresetConfig>> = {
-  "tpl-rpg": {
-    baseSteps: [],
-    optional: {
-      worldview: { W: 1 },
-      character_enrichment: { C: 2 },
-      item_database: { I: 2 },
-      story_framework: { S: 2 },
-      outline_batch: { S: 2 },
-      detailed_outline: { S: 3 },
-      plot_generation: { S: 3 },
-      script_generation: { D: 3 },
-      quest_generation: { Q: 2 },
-      scene_generation: { E: 2 },
-    },
+/** JRPG / 历史 RPG 共用的 needs 可选步（tpl-jrpg / tpl-jrpg-v2 / tpl-rpg）。 */
+const JRPG_OPTIONAL: PresetConfig = {
+  baseSteps: [],
+  optional: {
+    worldview: { W: 1 },
+    character_enrichment: { C: 2 },
+    item_database: { I: 2 },
+    story_framework: { S: 2 },
+    outline_batch: { S: 2 },
+    detailed_outline: { S: 3 },
+    plot_generation: { S: 3 },
+    script_generation: { D: 3 },
+    quest_generation: { Q: 2 },
+    scene_generation: { E: 2 },
   },
+};
+
+export const PIPELINE_PRESETS: Partial<Record<PipelineTemplateId, PresetConfig>> = {
+  "tpl-jrpg": { ...JRPG_OPTIONAL },
+  "tpl-jrpg-v2": { ...JRPG_OPTIONAL },
+  "tpl-rpg": { ...JRPG_OPTIONAL },
 
   "tpl-narrative-card": {
     fixedSteps: ["narrative_card"],

@@ -9,6 +9,7 @@ import type {
 import { LLMClient } from "./llm-client.js";
 import { getDefaultModel } from "../utils/plugin-env.js";
 import { getModeConfig, TIER_DEFAULT_MODE, STEP_IDS, STEP_OUTPUT_FIELDS } from "./modes.js";
+import { injectVnV2E2Steps } from "./vn-v2-e2.js";
 import { detectTier, buildDemandAnalysis } from "./tier-router.js";
 import { findGenreByCode } from "../knowledge/genre-taxonomy.js";
 import { partialClearNodes, snapshotStepNodes, mergeNodesBack } from "./node-merge.js";
@@ -86,6 +87,7 @@ import { prepareInjection } from "../ip-dna/injection/operator-injection.js";
 import type { PipelineBlueprint, StepBlueprint } from "./blueprint/types.js";
 import { assembleBlueprint } from "./blueprint/assembler.js";
 import { hasAgentDef } from "./blueprint/agent-def-registry.js";
+import { shouldSkipAgent } from "./run-manifest-runtime.js";
 import { getRunnerForStructure } from "./blueprint/runners/index.js";
 // Side-effect: register AgentDefs + validators
 import "./blueprint/agent-def-registrations.js";
@@ -235,77 +237,12 @@ const ALL_STEPS = new Map<string, { name: string; fn: PipelineStep }>([
   [S.STRUCTURE_VALIDATION_L3, { name: "L3 结构验证（旧）", fn: structureValidationL3 }],
 ]);
 
-/**
- * tpl-vn-v2 E2 旁路：用户上传剧本时，**替换**（不是叠加）E1 中下层步骤。
- *
- * 与 MyFile/提示词/影游叙事生成提示词/00_README.md §四 调用顺序对齐：
- *   入口一（用户输入）：vn_logline → vn_outline_acts → vn_beats → G-01...（场号由 G-01 末尾导出）
- *   入口二（上传剧本）：vn_logline → vn_script_normalize → vn_segment_confirm → G-01...
- *
- * 也就是 E2 路径下 vn_outline_acts / vn_beats 步被 vn_script_normalize + vn_segment_confirm
- * 替代——后者产出 vn_outline_acts / vn_beats / vn_character_bios，让 G-01~G-03 无差别消费；
- * vn_scenes 已降级为 G-01 拓扑定稿后的派生数据（§4.6c）。
- *
- * 共享同一 mode（vn_full / design_vn_full），路由由 ctx.uploaded_script 是否存在决定。
- */
-function injectVnV2E2Steps(
+/** E2 旁路由「是否有上传剧本」决定；规则实现见 vn-v2-e2.ts（与 /plan 预览同源）。 */
+function injectVnV2E2StepsForCtx(
   stepGroups: Array<string | string[]>,
   ctx: NarrativeContext,
 ): Array<string | string[]> {
-  const hasUploadedScript = !!ctx.uploaded_script?.content;
-  if (!hasUploadedScript) return stepGroups;
-
-  const isFlatBeat = (entry: string | string[], target: string): boolean =>
-    Array.isArray(entry) ? entry.includes(target) : entry === target;
-
-  // 防御：避免重复处理（rerun 场景）
-  const alreadyInjected = stepGroups.some(
-    (e) => isFlatBeat(e, S.VN_SCRIPT_NORMALIZE) || isFlatBeat(e, S.VN_SEGMENT_CONFIRM),
-  );
-  if (alreadyInjected) return stepGroups;
-
-  // 要被替换的 E1 中下层 step（不再保留）
-  const REPLACED: ReadonlySet<string> = new Set([
-    S.VN_OUTLINE_ACTS,
-    S.VN_SCENES,
-    S.VN_BEATS,
-  ]);
-
-  const containsAnyReplaced = stepGroups.some((e) =>
-    Array.isArray(e) ? e.some((s) => REPLACED.has(s)) : REPLACED.has(e),
-  );
-  if (!containsAnyReplaced) return stepGroups;
-
-  // 替换策略：
-  //   - 单个 step 命中 REPLACED → 移除该 entry
-  //   - 数组 step 部分命中 REPLACED → 过滤掉命中的元素，保留其他
-  //   - 第一次遇到 REPLACED 时插入 [VN_SCRIPT_NORMALIZE, VN_SEGMENT_CONFIRM] 替代
-  const out: Array<string | string[]> = [];
-  let injected = false;
-  for (const entry of stepGroups) {
-    if (Array.isArray(entry)) {
-      const remaining = entry.filter((s) => !REPLACED.has(s));
-      const hadReplaced = remaining.length !== entry.length;
-      if (remaining.length > 0) out.push(remaining);
-      if (hadReplaced && !injected) {
-        out.push(S.VN_SCRIPT_NORMALIZE);
-        out.push(S.VN_SEGMENT_CONFIRM);
-        injected = true;
-      }
-    } else {
-      if (REPLACED.has(entry)) {
-        if (!injected) {
-          out.push(S.VN_SCRIPT_NORMALIZE);
-          out.push(S.VN_SEGMENT_CONFIRM);
-          injected = true;
-        }
-        // 命中则跳过（被 normalize+confirm 取代）
-        continue;
-      }
-      out.push(entry);
-    }
-  }
-  return out;
+  return injectVnV2E2Steps(stepGroups, !!ctx.uploaded_script?.content);
 }
 
 export class NarrativePipeline {
@@ -335,6 +272,10 @@ export class NarrativePipeline {
     // 复杂度档位注入：让不跑 preference_analysis 的管线（tpl-vn-v2 等）也能拿到 UI 选的档位派生节点预算。
     if (this.config.complexity != null && ctx.complexity == null) {
       ctx.complexity = this.config.complexity;
+    }
+    // 三轴路由注入：策略段 provider 只认 ctx.narrative_axes，resume 时以 checkpoint 里的为准。
+    if (this.config.narrativeAxes && !ctx.narrative_axes) {
+      ctx.narrative_axes = { ...this.config.narrativeAxes };
     }
     if (this.config.locale && !ctx.content_locale) {
       ctx.content_locale = this.config.locale;
@@ -479,7 +420,7 @@ export class NarrativePipeline {
 
     // tpl-vn-v2 E2 旁路：用户上传剧本时，把 VN_SCRIPT_NORMALIZE / VN_SEGMENT_CONFIRM
     // 替换 E1 的 VN_OUTLINE_ACTS / VN_SCENES / VN_BEATS。无上传剧本则不插，走纯 E1 路径。
-    stepGroups = injectVnV2E2Steps(stepGroups, ctx);
+    stepGroups = injectVnV2E2StepsForCtx(stepGroups, ctx);
 
     type ResolvedStep = { id: string; name: string; fn: PipelineStep };
     type ResolvedGroup = ResolvedStep | ResolvedStep[];
@@ -504,7 +445,12 @@ export class NarrativePipeline {
     const getTotal = () => flatStepIds().length;
 
     const resumeAfter = this.config.resumeAfterStep;
-    let skipping = resuming && !!resumeAfter;
+    const agentLifecycle = this.config.agentLifecycle;
+    // lifecycle 在场时逐 agent 判定；否则退回一期的线性前缀跳过。
+    const useLifecycleSkip = resuming && !!agentLifecycle;
+    let skipping = resuming && !useLifecycleSkip && !!resumeAfter;
+    const shouldSkip = (stepId: string): boolean =>
+      useLifecycleSkip ? shouldSkipAgent(agentLifecycle, stepId) : skipping;
 
     const initTotal = getTotal();
     const dynamicHint = modeConfig.isDynamic && usePlanner
@@ -517,7 +463,11 @@ export class NarrativePipeline {
       totalSteps: initTotal,
       status: "completed",
       message: resuming
-        ? `Tier=${tier}, Mode=${mode}(${modeConfig.label}), 共 ${initTotal} 步${dynamicHint} — 从 ${resumeAfter} 之后恢复`
+        ? `Tier=${tier}, Mode=${mode}(${modeConfig.label}), 共 ${initTotal} 步${dynamicHint} — ${
+            useLifecycleSkip
+              ? `按 lifecycle 恢复（跳过 ${flatStepIds().filter((id) => shouldSkipAgent(agentLifecycle, id)).length} 步）`
+              : `从 ${resumeAfter} 之后恢复`
+          }`
         : `Tier=${tier}, Mode=${mode}(${modeConfig.label}), 共 ${initTotal} 步${dynamicHint}`,
     });
 
@@ -542,7 +492,7 @@ export class NarrativePipeline {
     let stepCounter = 0;
 
     const executeStep = async (step: ResolvedStep, stepNum: number) => {
-      if (skipping) {
+      if (shouldSkip(step.id)) {
         this.emit({
           stage: step.name, stepId: step.id, step: stepNum, totalSteps: getTotal(),
           status: "completed", message: `${step.name} (已恢复)`,
@@ -769,7 +719,7 @@ export class NarrativePipeline {
     }
 
     // tpl-vn-v2 E2 旁路（重跑路径同样要镜像 run() 的插入逻辑）
-    stepGroups = injectVnV2E2Steps(stepGroups, ctx);
+    stepGroups = injectVnV2E2StepsForCtx(stepGroups, ctx);
 
     type ResolvedStep = { id: string; name: string; fn: PipelineStep };
     type ResolvedGroup = ResolvedStep | ResolvedStep[];
@@ -1021,7 +971,7 @@ export class NarrativePipeline {
     }
     // tpl-vn-v2 E2 旁路：与 run/rerun 镜像
     if (ctx) {
-      const grouped = injectVnV2E2Steps(allIds, ctx);
+      const grouped = injectVnV2E2StepsForCtx(allIds, ctx);
       allIds = grouped.flatMap((entry) => (Array.isArray(entry) ? entry : [entry]));
     }
     const fromIndex = allIds.indexOf(fromStepId);
@@ -1053,6 +1003,10 @@ export class NarrativePipeline {
 
     if (this.config.complexity != null && ctx.complexity == null) {
       ctx.complexity = this.config.complexity;
+    }
+    // 三轴路由注入：策略段 provider 只认 ctx.narrative_axes，resume 时以 checkpoint 里的为准。
+    if (this.config.narrativeAxes && !ctx.narrative_axes) {
+      ctx.narrative_axes = { ...this.config.narrativeAxes };
     }
 
     if (options?.uploadedScript && !resuming) {
@@ -1158,10 +1112,14 @@ export class NarrativePipeline {
 
     // Execute steps
     const resumeAfter = this.config.resumeAfterStep;
-    let skipping = resuming && !!resumeAfter;
+    const agentLifecycle = this.config.agentLifecycle;
+    const useLifecycleSkip = resuming && !!agentLifecycle;
+    let skipping = resuming && !useLifecycleSkip && !!resumeAfter;
+    const shouldSkip = (stepId: string): boolean =>
+      useLifecycleSkip ? shouldSkipAgent(agentLifecycle, stepId) : skipping;
 
     const executeStepBlueprint = async (step: StepBlueprint, stepNum: number) => {
-      if (skipping) {
+      if (shouldSkip(step.stepId)) {
         this.emit({
           stage: step.agentDef.name, stepId: step.stepId, step: stepNum, totalSteps: total,
           status: "completed", message: `${step.agentDef.name} (已恢复)`,

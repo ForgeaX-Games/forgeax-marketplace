@@ -42,6 +42,11 @@
 
 ### Changed
 
+- **Workbench manifest migrated to the Page contract.** `forgeax-plugin.json`
+  now contributes one Page, one reusable panel type, explicit sidebar/workspace
+  placements, and a horizontal left/right Page layout. *Why:* panel availability and
+  position must have one Page-owned SSOT instead of legacy split metadata.
+
 - **The AI authoring surface is now DSL-only and bounded.** Legacy
   `batteries.*`/`pipeline.*` tools are hidden from AI, persona/skill routing is
   shorter, QC returns top-K aggregates with a persisted full report, and old

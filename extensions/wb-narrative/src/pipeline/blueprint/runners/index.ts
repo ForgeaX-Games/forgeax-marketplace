@@ -7,6 +7,7 @@ import { ChunkedRunner } from "./chunked-runner.js";
 import { SequenceRunner } from "./sequence-runner.js";
 import { ConditionalRunner } from "./conditional-runner.js";
 import { DeterministicRunner } from "./deterministic-runner.js";
+import { CompositeRunner } from "./composite-runner.js";
 
 const runners = new Map<AgentStructureType, AgentRunner>();
 
@@ -15,6 +16,7 @@ runners.set("chunked", new ChunkedRunner());
 runners.set("sequence", new SequenceRunner());
 runners.set("conditional", new ConditionalRunner());
 runners.set("deterministic", new DeterministicRunner());
+runners.set("composite", new CompositeRunner());
 
 export function getRunnerForStructure(type: AgentStructureType): AgentRunner {
   const runner = runners.get(type);
@@ -22,4 +24,11 @@ export function getRunnerForStructure(type: AgentStructureType): AgentRunner {
   return runner;
 }
 
-export { SingleTurnRunner, ChunkedRunner, SequenceRunner, ConditionalRunner, DeterministicRunner };
+export {
+  SingleTurnRunner,
+  ChunkedRunner,
+  SequenceRunner,
+  ConditionalRunner,
+  DeterministicRunner,
+  CompositeRunner,
+};

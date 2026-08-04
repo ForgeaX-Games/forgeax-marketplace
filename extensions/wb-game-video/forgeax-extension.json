@@ -1,14 +1,19 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-game-video",
   "version": "0.1.5",
-  "kind": "workbench",
-  "displayName": { "zh": "视频游戏", "en": "Video Game Studio" },
+  "displayName": {
+    "zh": "视频游戏",
+    "en": "Video Game Studio"
+  },
   "description": {
     "zh": "视频游戏（玩法优先）蓝图编辑器与运行时 · 演出节点图 + Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点热点，新引擎 GameGraph 为唯一 SSOT",
     "en": "Video-game (gameplay-on-video) blueprint editor & runtime — a graph of performance nodes with boss battles, HP bars, QTE, timed/pause choices, clickable hotspots. The GameGraph engine is the single source of truth."
   },
-  "author": { "name": "forgeax", "email": "dev@forgeax.local" },
+  "author": {
+    "name": "forgeax",
+    "email": "dev@forgeax.local"
+  },
   "icon": "🎮",
   "keywords": [
     "game-video",
@@ -19,24 +24,132 @@
     "blueprint",
     "graph"
   ],
-  "provides": {
-    "workbench": {
-      "id": "wb-game-video",
-      "lens": "by-category",
-      "icon": "🎮",
-      "position": 161,
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left":   { "minWidth": 320, "scrollable": true },
-        "center": { "minHeight": 600, "scrollable": false }
-      },
-      "matchProduces": [
-        "**/blueprint.json",
-        "**/assets/manifest.json"
-      ],
-      "preferredAgent": "@forgeax-extension/agent-nodia"
-    },
+  "entry": {
+    "frontend": "./dist/index.html",
+    "backend": "./dist/server/tool-handlers.js",
+    "standalone": {
+      "start": "bun run dev",
+      "port": 15185,
+      "readyProbe": "/",
+      "embeddedAlso": false
+    }
+  },
+  "permissions": [
+    "fs:read:{gameRoot}/blueprint.json",
+    "fs:write:{gameRoot}/blueprint.json",
+    "fs:read:{gameRoot}/project.json",
+    "fs:write:{gameRoot}/project.json",
+    "fs:read:{gameRoot}/assets/**",
+    "fs:write:{gameRoot}/assets/**",
+    "fs:read:{gameRoot}/characters/**",
+    "fs:read:{gameRoot}/textures/**",
+    "model:text:reasoning",
+    "model:image:still",
+    "model:video:kinetic"
+  ],
+  "requestedEnv": [
+    "FORGEAX_SERVER_URL",
+    "FORGEAX_SERVER_PORT"
+  ],
+  "experimental": true,
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-game-video.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-game-video",
+        "title": {
+          "zh": "视频游戏",
+          "en": "Video Game Studio"
+        },
+        "icon": "🎮",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              320,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-game-video.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "minWidth": 320,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-game-video.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/blueprint.json",
+          "**/assets/manifest.json"
+        ],
+        "preferredAgent": "@forgeax-extension/agent-nodia"
+      }
+    ],
+    "activities": [
+      {
+        "id": "wb-game-video.launcher",
+        "title": {
+          "zh": "视频游戏",
+          "en": "Video Game Studio"
+        },
+        "icon": "🎮",
+        "order": 161,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "wb-game-video"
+        }
+      }
+    ],
     "skills": [
       {
         "id": "wb-game-video:author-guide",
@@ -156,33 +269,5 @@
         }
       }
     ]
-  },
-  "entry": {
-    "frontend": "./dist/index.html",
-    "backend": "./dist/server/tool-handlers.js",
-    "standalone": {
-      "start": "bun run dev",
-      "port": 15185,
-      "readyProbe": "/",
-      "embeddedAlso": false
-    }
-  },
-  "permissions": [
-    "fs:read:{gameRoot}/blueprint.json",
-    "fs:write:{gameRoot}/blueprint.json",
-    "fs:read:{gameRoot}/project.json",
-    "fs:write:{gameRoot}/project.json",
-    "fs:read:{gameRoot}/assets/**",
-    "fs:write:{gameRoot}/assets/**",
-    "fs:read:{gameRoot}/characters/**",
-    "fs:read:{gameRoot}/textures/**",
-    "model:text:reasoning",
-    "model:image:still",
-    "model:video:kinetic"
-  ],
-  "requestedEnv": [
-    "FORGEAX_SERVER_URL",
-    "FORGEAX_SERVER_PORT"
-  ],
-  "experimental": true
+  }
 }

@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-reel",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "影游工坊",
     "en": "Reel Studio"
@@ -26,33 +25,167 @@
     "video",
     "seedance"
   ],
-  "provides": {
-    "workbench": {
-      "id": "reel",
-      "lens": "by-category",
-      "icon": "🎬",
-      "position": 160,
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left": {
-          "minWidth": 320,
-          "scrollable": true
-        },
-        "center": {
-          "minHeight": 600,
-          "scrollable": false
-        }
+  "consumes": {
+    "models": [
+      {
+        "channel": "text",
+        "role": "reasoning"
       },
-      "matchProduces": [
-        "**/*.scenario.json",
-        "**/scenarios/**",
-        "**/reels/**",
-        ".reel-workbench/**",
-        ".reel-scenarios/**"
-      ],
-      "preferredAgent": "reia"
-    },
+      {
+        "channel": "image",
+        "role": "still"
+      },
+      {
+        "channel": "video",
+        "role": "kinetic"
+      }
+    ]
+  },
+  "entry": {
+    "frontend": "./dist/index.html",
+    "backend": "./server/tool-handlers.ts",
+    "standalone": {
+      "start": "npm run dev",
+      "port": 15175,
+      "readyProbe": "/",
+      "embeddedAlso": false
+    }
+  },
+  "permissions": [
+    "fs:read:.reel-scenarios/**",
+    "fs:write:.reel-scenarios/**",
+    "fs:read:.reel-workbench/**",
+    "fs:write:.reel-workbench/**",
+    "fs:read:.forgeax/games/{slug}/assets/**",
+    "fs:write:.forgeax/games/{slug}/assets/**",
+    "fs:read:.forgeax/games/{slug}/workbench/**",
+    "fs:write:.forgeax/games/{slug}/workbench/**",
+    "fs:read:.forgeax/reel/**",
+    "fs:write:.forgeax/reel/**",
+    "model:text:reasoning",
+    "model:image:still",
+    "model:video:kinetic",
+    "net:openspeech.bytedance.com",
+    "net:api.minimaxi.com",
+    "net:ark.cn-beijing.volces.com",
+    "emit:reel.*"
+  ],
+  "requestedEnv": [
+    "GEMINI_API_KEY",
+    "CLAUDE_API_KEY",
+    "GPT_IMAGE_API_KEY",
+    "ARK_API_KEY",
+    "VIDEO_ENDPOINT_ID",
+    "DOUBAO_TTS_KEY",
+    "MINIMAX_MUSIC_KEY",
+    "FORGEAX_SERVER_URL",
+    "FORGEAX_SERVER_PORT",
+    "FACE_MASK_SERVICE_URL",
+    "PORT_REEL_STUDIO",
+    "KS_LLM_KEY_PATH"
+  ],
+  "experimental": true,
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "reel.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "reel",
+        "title": {
+          "zh": "影游工坊",
+          "en": "Reel Studio"
+        },
+        "icon": "🎬",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              320,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "reel.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "minWidth": 320,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "reel.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/*.scenario.json",
+          "**/scenarios/**",
+          "**/reels/**",
+          ".reel-workbench/**",
+          ".reel-scenarios/**"
+        ],
+        "preferredAgent": "reia"
+      }
+    ],
+    "activities": [
+      {
+        "id": "reel.launcher",
+        "title": {
+          "zh": "影游工坊",
+          "en": "Reel Studio"
+        },
+        "icon": "🎬",
+        "order": 160,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "reel"
+        }
+      }
+    ],
     "skills": [
       {
         "id": "wb-reel:author-guide",
@@ -536,65 +669,5 @@
         "multiInstance": false
       }
     ]
-  },
-  "consumes": {
-    "models": [
-      {
-        "channel": "text",
-        "role": "reasoning"
-      },
-      {
-        "channel": "image",
-        "role": "still"
-      },
-      {
-        "channel": "video",
-        "role": "kinetic"
-      }
-    ]
-  },
-  "entry": {
-    "frontend": "./dist/index.html",
-    "backend": "./server/tool-handlers.ts",
-    "standalone": {
-      "start": "npm run dev",
-      "port": 15175,
-      "readyProbe": "/",
-      "embeddedAlso": false
-    }
-  },
-  "permissions": [
-    "fs:read:.reel-scenarios/**",
-    "fs:write:.reel-scenarios/**",
-    "fs:read:.reel-workbench/**",
-    "fs:write:.reel-workbench/**",
-    "fs:read:.forgeax/games/{slug}/assets/**",
-    "fs:write:.forgeax/games/{slug}/assets/**",
-    "fs:read:.forgeax/games/{slug}/workbench/**",
-    "fs:write:.forgeax/games/{slug}/workbench/**",
-    "fs:read:.forgeax/reel/**",
-    "fs:write:.forgeax/reel/**",
-    "model:text:reasoning",
-    "model:image:still",
-    "model:video:kinetic",
-    "net:openspeech.bytedance.com",
-    "net:api.minimaxi.com",
-    "net:ark.cn-beijing.volces.com",
-    "emit:reel.*"
-  ],
-  "requestedEnv": [
-    "GEMINI_API_KEY",
-    "CLAUDE_API_KEY",
-    "GPT_IMAGE_API_KEY",
-    "ARK_API_KEY",
-    "VIDEO_ENDPOINT_ID",
-    "DOUBAO_TTS_KEY",
-    "MINIMAX_MUSIC_KEY",
-    "FORGEAX_SERVER_URL",
-    "FORGEAX_SERVER_PORT",
-    "FACE_MASK_SERVICE_URL",
-    "PORT_REEL_STUDIO",
-    "KS_LLM_KEY_PATH"
-  ],
-  "experimental": true
+  }
 }

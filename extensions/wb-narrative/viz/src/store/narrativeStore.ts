@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { PIPELINE_STEPS } from "../types";
 import { sendToHost } from "../lib/bridge";
+import type { UploadedItem } from "../lib/uploads";
 import type { EntryStatus, DraftState } from "../utils/stepDisplay";
 import { computePhase, type NarrativePhase } from "./phase";
 import { t as tGlobal, tStepLabel } from "../i18n";
@@ -26,6 +27,79 @@ export type { NarrativePhase };
 
 export type ViewMode = "text" | "graph";
 
+/** 需求输入的三个入口（PRD v1.4 §5.2.1）。 */
+export type InputTab = "text" | "tags" | "file";
+
+/** 顶栏四段（PRD v1.4 §5.2）：需求输入 / 叙事路由 / 叙事工具 / 视图模式。 */
+export type NavTab = "input" | "routing" | "tools" | "view";
+
+/**
+ * 路由选择草稿：创作空间顶栏「叙事路由 / 叙事工具」写的就是这一份。
+ *
+ * 与 activeConfig 的分工：activeConfig 是**某个条目**的启动快照，切条目/取消选中会被清空；
+ * 这份是**当前正在配的**参数，属于 UI 配置，和 tier/mode 一样跨条目存活。
+ *
+ * 全量放 store（而非组件本地 useState）是布局重构的硬要求：路由 UI 在中栏 iframe，
+ * 执行启动的 WorkbenchProvider 在左栏 iframe，两者只能靠 BroadcastChannel 同步的 store 通信。
+ */
+export interface RoutingDraft {
+  /** 叙事全量（planning，走游戏品类专家）/ 叙事单品（narrative，走单品助手）。 */
+  routeGroup: "planning" | "narrative";
+  /** 叙事层级选择；"auto" = 交给后端检测。层级已降级为品类只读属性，这里仅作品类筛选用。 */
+  tierChoice: TierId | "auto";
+  /** 叙事单品路由。 */
+  narrativeRoute: ModeId;
+  genreCode: string | null;
+  /** 叙事体量档位 1-5。 */
+  complexity: number;
+  /** 用户是否手改过体量（改过就不再按层级套默认值）。 */
+  complexityTouched: boolean;
+  storyType: string | null;
+  storyTheme: string | null;
+}
+
+/**
+ * 需求输入原料草稿：直接输入 / 标签选择 / 文件上传三个入口共写这一份。
+ * 同样因为编辑面板在中栏、落盘执行在左栏而必须放 store。
+ */
+export interface InputDraft {
+  userInput: string;
+  tagSelections: Record<string, string>;
+  tagCustomTexts: Record<string, string>;
+  uploadedFiles: UploadedItem[];
+}
+
+/** IP DNA 异步任务（重需求路径）的前端镜像。 */
+export interface IpDnaJobState {
+  jobId: string;
+  status: import("../hooks/useNarrativeStream").IpDnaJobStatus["status"];
+  stage?: string;
+  progress?: number;
+  message?: string;
+  error?: string;
+  result?: import("../hooks/useNarrativeStream").IpDnaJobStatus["result"];
+}
+
+/**
+ * 跨 pane 命令信道的动作集。
+ *
+ * 中栏底部的操作条和输入面板只写命令槽，真正执行落在 owner（左栏/独立）那一侧的
+ * WorkbenchProvider —— 否则两个 iframe 各跑一遍 startRun / saveEntry 会重复落盘。
+ */
+export type WorkbenchCommandKind =
+  | "start"
+  | "cancel"
+  | "resume"
+  | "regenerate"
+  | "confirmInput"
+  | "saveEntry";
+
+export interface WorkbenchCommand {
+  kind: WorkbenchCommandKind;
+  /** 单调递增序号：owner 侧据此去重，避免同一条命令被重复消费。 */
+  nonce: number;
+}
+
 export interface EditDraft {
   content?: unknown;
   userInput?: string;
@@ -39,6 +113,27 @@ export interface StepState {
   status: StepStatus;
   message?: string;
   data?: unknown;
+}
+
+/**
+ * Phase-2 M8：一条管线的运行 lane。
+ * 同条目多管线并发时每条各有 runId 与 SSE 流，进度互不覆盖。
+ */
+export interface PipelineRunLane {
+  pipelineId: string;
+  runId: string;
+  /** 该管线落盘目录（主管线 = 条目名；次管线 = `<key>/pipelines/<pipelineId>`）。 */
+  sourceDir: string;
+  /** 主管线走 runningRunId 主轨；次管线由 useSecondaryPipelineStreams 独立消费。 */
+  primary: boolean;
+  status: "running" | "completed" | "failed";
+  /** 本轨已完成的 step id（按到达序）。 */
+  completedSteps: string[];
+  /** 本轨当前正在跑的 step id。 */
+  runningStepId: string | null;
+  /** 本轨失败时停在哪一步（失败帧不带 stepId，取失败瞬间的 runningStepId）。 */
+  failedStepId?: string | null;
+  error?: string;
 }
 
 /**
@@ -72,8 +167,13 @@ export interface ActiveConfig {
   routeGroup?: "planning" | "narrative";
   tier?: TierId | null;
   mode?: ModeId | null;
+  /** 叙事体量档位（1-5）；UI 上叫「叙事体量」，字段名沿用 complexity。 */
   complexity?: number;
   genreCode?: string | null;
+  /** 三轴路由（PRD v1.4 §3.2.2）：叙事类型 / 叙事题材；结构由后端综合推导后回填。 */
+  storyType?: string | null;
+  storyTheme?: string | null;
+  narrativeStructure?: string | null;
   /** Phase 1 持久化的"权威步骤序"，给 PipelineStatus 在非 running 时也能展示完整管线 */
   pipelineOrder?: string[];
   routingMode?: "auto" | "semi" | "manual";
@@ -142,6 +242,23 @@ interface NarrativeState {
   /** 编排态自由连线（活连接）。 */
   composerEdges: ComposerEdgeData[];
 
+  // ---- Phase-1 多管线条目（O 侧） ----
+  /**
+   * 当前条目下的多管线清单（RunManifest 子集）。
+   * 旧条目为空 → UI 退化为单轨 pipelineOrder。
+   */
+  entryPipelines: import("../hooks/useNarrativeStream").RunManifestDto[];
+  /** 当前聚焦管线；状态栏/文本视图默认展示该轨。 */
+  activePipelineId: string | null;
+  /** LIST 中哪些条目展开了多管线子行（本地 UI，不必持久化到每条）。 */
+  listExpandedKeys: string[];
+  /**
+   * Phase-2 M8：每条管线各自的运行 lane（pipelineId → run 状态 + 该轨进度）。
+   * 主管线同时也在 runningRunId 里（驱动 phase / 取消 / auto-attach 不变）；
+   * 次管线只活在这里，由 useSecondaryPipelineStreams 各开一条 SSE 消费。
+   */
+  pipelineRuns: Record<string, PipelineRunLane>;
+
   // ---- Local drafts (bound to activeEntry) ----
   editDrafts: Record<string, EditDraft>;
 
@@ -153,6 +270,50 @@ interface NarrativeState {
 
   // ---- UI state ----
   viewMode: ViewMode;
+  /**
+   * 需求输入入口（PRD v1.4 §5：直接输入 / 标签选择 / 文件上传）。
+   * 提到 store 是因为顶栏「需求输入」tab 与左栏输入区要双向同步：
+   * 任一处切入口，另一处立刻跟随，两边不各持一份 useState。
+   */
+  inputTab: InputTab;
+  /**
+   * 需求输入编辑卡是否浮在创作空间上（设计稿 01 vs 03：空态只有水印，
+   * 点过顶栏「需求输入 → 某个入口」之后编辑卡才浮出来）。
+   */
+  inputEditorOpen: boolean;
+  /**
+   * 顶栏当前展开的级联菜单；null 表示全收起。
+   * 放 store 而非组件内，是为了让「点条目/选完品类就自动收起」这类跨组件动作可达。
+   */
+  openNavTab: NavTab | null;
+  /**
+   * 左栏被双击"进入"的项目条目键（PRD v1.4 §5.1）。
+   * 非空 = 左栏从项目列表切到项目内部（资源库 / 资产库）；单击选中条目不改这个值。
+   */
+  openedProjectKey: string | null;
+  routing: RoutingDraft;
+  input: InputDraft;
+  /**
+   * ROUTING「确认保存」脏态。true=有未保存改动（按钮亮）；false=已落盘（按钮灰）。
+   * 建立条目/任一 INPUT|ROUTING 参数变更时置 true；确认保存或开始生成（兜底落盘）后置 false。
+   */
+  entryDirty: boolean;
+  ipDnaJob: IpDnaJobState | null;
+  /** IpStageFlow 上报的「改编范围已确认、可以生成」。重需求路径的开始生成前置条件。 */
+  ipCanGenerate: boolean;
+  /** 启动/续跑/重生成正在提交（按钮转圈）。 */
+  workbenchBusy: boolean;
+  /** 输入/路由/启动链路的错误提示，左右两栏共用一处展示。 */
+  workbenchError: string | null;
+  /** 待 owner 执行的命令；执行后由 owner 清空。 */
+  pendingCommand: WorkbenchCommand | null;
+  /**
+   * 磁盘条目已变更的通知计数。
+   *
+   * 落盘动作（建条目 / 保存配置 / 取消 job）可能发生在任一 pane，而项目清单只由 owner 持有；
+   * 改动方 bump 一下，owner 侧看到计数变化就重拉 /history，不必知道谁改的。
+   */
+  historyRevision: number;
   focusedStepId: string | null;
   focusedChildNodeId: string | null;
   expandedStepId: string | null;
@@ -171,6 +332,39 @@ interface NarrativeState {
 
   // ---- Actions: config ----
   setConfig: (tier: TierId | null, mode: ModeId | null, autoDetect: boolean) => void;
+  setInputTab: (tab: InputTab) => void;
+  setInputEditorOpen: (open: boolean) => void;
+  setOpenNavTab: (tab: NavTab | null) => void;
+  openProject: (entryKey: string) => void;
+  closeProject: () => void;
+  setRouting: (patch: Partial<RoutingDraft>) => void;
+  setInput: (patch: Partial<InputDraft>) => void;
+  setUploadedFiles: (next: UploadedItem[] | ((prev: UploadedItem[]) => UploadedItem[])) => void;
+  setEntryDirty: (v: boolean) => void;
+  setIpDnaJob: (next: IpDnaJobState | null | ((prev: IpDnaJobState | null) => IpDnaJobState | null)) => void;
+  setIpCanGenerate: (v: boolean) => void;
+  setWorkbenchBusy: (v: boolean) => void;
+  setWorkbenchError: (msg: string | null) => void;
+  /**
+   * 统一的"用户改了 INPUT/ROUTING 配置"钩子。
+   *
+   * 状态机契约：配置 = 因 / 管线状态 = 果 / 历史条目 = 书签。
+   *  1) 确认前（无独立条目）：纯内存自由编辑，无副作用。
+   *  2) config 阶段（已确认输入、未投产）：改 INPUT 置 pendingFork(input) 重新点亮「确认」；
+   *     改 ROUTING 只置脏态，由「确认保存」或「开始生成」提交。
+   *  3) 已投产：任何改参都是新需求 → 懒 fork，真正铸新键发生在提交动作。
+   *
+   * 只在 onClick / onChange 里调；回填路径（loadEntry / hydrate）直接写草稿，不经这里。
+   */
+  notifyConfigChange: (kind: "input" | "routing") => void;
+  /** §取消选中：把 INPUT/ROUTING 草稿清回初始默认。 */
+  resetFormDraft: () => void;
+  /** 中栏发起动作：只写命令槽，由 owner 侧 Provider 消费。 */
+  requestCommand: (kind: WorkbenchCommandKind) => void;
+  /** owner 执行完后清槽（带 nonce 防止清掉后来的新命令）。 */
+  clearCommand: (nonce: number) => void;
+  /** 通知 owner：磁盘条目变了，重拉项目清单。 */
+  bumpHistory: () => void;
   setAvailableModes: (modes: TierModeInfo[]) => void;
 
   // ---- Actions: 顶层状态机信号 ----
@@ -293,6 +487,26 @@ interface NarrativeState {
   /** 按分层（左→右）布局算法重排全部节点位置（仅手动触发，不自动刷新）。 */
   relayoutComposer: () => void;
 
+  /** 写入当前条目的多管线清单；可选同步 activePipelineId 与 previewOrder。 */
+  setEntryPipelines: (
+    pipelines: import("../hooks/useNarrativeStream").RunManifestDto[],
+    activePipelineId?: string | null,
+  ) => void;
+  setActivePipelineId: (id: string | null) => void;
+  /** Phase-2 M8：登记本次条目级批量启动的全部 lane。 */
+  setPipelineRuns: (lanes: PipelineRunLane[]) => void;
+  /** 单 lane 增量更新（SSE 帧驱动）。 */
+  updatePipelineRun: (pipelineId: string, patch: Partial<PipelineRunLane>) => void;
+  /** 记录某 lane 的 step 进度。 */
+  markPipelineRunStep: (
+    pipelineId: string,
+    stepId: string,
+    status: "running" | "completed",
+  ) => void;
+  toggleListExpanded: (entryKey: string) => void;
+  /** 显式设置 LIST 多管线展开态（加载条目 / 编排落盘时用，避免 toggle 误收起）。 */
+  setListExpanded: (entryKey: string, expanded: boolean) => void;
+
   // ---- Derived helpers ----
   hasDrafts: () => boolean;
   /** 以输入节点为锚点拆分出的可提交管线（孤立节点忽略）。 */
@@ -300,6 +514,24 @@ interface NarrativeState {
 }
 
 const STORAGE_KEY = "narrative-viz-snapshot";
+
+const INITIAL_ROUTING: RoutingDraft = {
+  routeGroup: "planning",
+  tierChoice: "auto",
+  narrativeRoute: "narrative_auto",
+  genreCode: null,
+  complexity: 2,
+  complexityTouched: false,
+  storyType: null,
+  storyTheme: null,
+};
+
+const INITIAL_INPUT: InputDraft = {
+  userInput: "",
+  tagSelections: {},
+  tagCustomTexts: {},
+  uploadedFiles: [],
+};
 
 const STEP_RESULT_MAP: Array<{ id: string; label: string; key: keyof NarrativeContext }> = [
   { id: "core_concept", label: "D0 核心概念", key: "core_concept" },
@@ -558,6 +790,11 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   composerNodes: [],
   composerEdges: [],
 
+  entryPipelines: [],
+  activePipelineId: null,
+  listExpandedKeys: [],
+  pipelineRuns: {},
+
   // ---- Drafts ----
   editDrafts: {},
 
@@ -568,7 +805,20 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   availableModes: [],
 
   // ---- UI state ----
-  viewMode: "text",
+  viewMode: "graph",
+  inputTab: "text",
+  inputEditorOpen: false,
+  openNavTab: null,
+  openedProjectKey: null,
+  routing: { ...INITIAL_ROUTING },
+  input: { ...INITIAL_INPUT },
+  entryDirty: false,
+  ipDnaJob: null,
+  ipCanGenerate: false,
+  workbenchBusy: false,
+  workbenchError: null,
+  pendingCommand: null,
+  historyRevision: 0,
   focusedStepId: null,
   focusedChildNodeId: null,
   expandedStepId: null,
@@ -1024,6 +1274,9 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         activeSteps: [],
         activeResult: null,
         activeConfig: null,
+        entryPipelines: [],
+        activePipelineId: null,
+        pipelineRuns: {},
         editDrafts: {},
         // 离开条目 → 回落 fresh/idle：清输入确认标记（routingConfigured 保留，UI 选择仍在）。
         inputConfirmed: false,
@@ -1047,6 +1300,9 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       activeSteps: [],
       activeResult: null,
       activeConfig: null,
+      entryPipelines: [],
+      activePipelineId: null,
+      pipelineRuns: {},
       inputConfirmed: false,
       pendingFork: false,
       pendingForkKind: null,
@@ -1109,6 +1365,64 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
 
   // ---- Actions: UI ----
   setViewMode: (mode) => set({ viewMode: mode }),
+  setInputTab: (tab) => set({ inputTab: tab }),
+  setInputEditorOpen: (open) => set({ inputEditorOpen: open }),
+  setOpenNavTab: (tab) => set((s) => ({ openNavTab: s.openNavTab === tab ? null : tab })),
+  openProject: (entryKey) => set({ openedProjectKey: entryKey }),
+  closeProject: () => set({ openedProjectKey: null }),
+  setRouting: (patch) => set((s) => ({ routing: { ...s.routing, ...patch } })),
+  setInput: (patch) => set((s) => ({ input: { ...s.input, ...patch } })),
+  setUploadedFiles: (next) =>
+    set((s) => ({
+      input: {
+        ...s.input,
+        uploadedFiles: typeof next === "function" ? next(s.input.uploadedFiles) : next,
+      },
+    })),
+  setEntryDirty: (v) => set({ entryDirty: v }),
+  setIpDnaJob: (next) =>
+    set((s) => ({ ipDnaJob: typeof next === "function" ? next(s.ipDnaJob) : next })),
+  setIpCanGenerate: (v) => set({ ipCanGenerate: v }),
+  setWorkbenchBusy: (v) => set({ workbenchBusy: v }),
+  setWorkbenchError: (msg) => set({ workbenchError: msg }),
+
+  notifyConfigChange: (kind) => {
+    const st = get();
+    // 1) 确认前（无独立条目）：纯内存自由编辑，无副作用。
+    if (!st.inputConfirmed || !st.activeEntryKey) return;
+
+    const produced =
+      st.activeEntryStatus === "running" ||
+      st.activeEntryStatus === "interrupted" ||
+      st.activeEntryStatus === "completed";
+
+    if (!produced) {
+      if (kind === "input") {
+        // INPUT 在「确认」时已冻结 → 改原料 = fork（懒提交）：置 pendingFork(input) 重新点亮「确认」，
+        // 预览仍锚旧条目；重点「确认」时铸新键（原 config 条目作为不可变原料快照保留）。
+        set({ pendingFork: true, pendingForkKind: "input" });
+      } else {
+        set({ entryDirty: true });
+      }
+      return;
+    }
+    set({ pendingFork: true, pendingForkKind: kind });
+  },
+
+  resetFormDraft: () =>
+    set({
+      inputTab: "text",
+      inputEditorOpen: false,
+      routing: { ...INITIAL_ROUTING },
+      input: { ...INITIAL_INPUT },
+      entryDirty: false,
+      workbenchError: null,
+    }),
+
+  requestCommand: (kind) => set({ pendingCommand: { kind, nonce: Date.now() } }),
+  clearCommand: (nonce) =>
+    set((s) => (s.pendingCommand?.nonce === nonce ? { pendingCommand: null } : {})),
+  bumpHistory: () => set((s) => ({ historyRevision: s.historyRevision + 1 })),
 
   setPreviewOrder: (order, isAuto = false) =>
     set((s) =>
@@ -1227,7 +1541,19 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       pendingFork: false,
       composerNodes: [],
       composerEdges: [],
+      entryPipelines: [],
+      activePipelineId: null,
+      listExpandedKeys: [],
+      pipelineRuns: {},
       editDrafts: {},
+      routing: { ...INITIAL_ROUTING },
+      input: { ...INITIAL_INPUT },
+      entryDirty: false,
+      ipDnaJob: null,
+      ipCanGenerate: false,
+      workbenchBusy: false,
+      workbenchError: null,
+      pendingCommand: null,
       focusedStepId: null,
       focusedChildNodeId: null,
       expandedStepId: null,
@@ -1254,6 +1580,9 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       mode: s.mode,
       viewMode: s.viewMode,
       editDrafts: s.editDrafts,
+      routing: s.routing,
+      // uploadedFiles 带 base64 正文，可能是几十 MB，进 localStorage 必爆配额 → 只存文本三件套。
+      input: { ...s.input, uploadedFiles: [] },
     };
     const json = JSON.stringify(data);
     try {
@@ -1290,8 +1619,10 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         routingConfigured: data.routingConfigured ?? false,
         tier: data.tier ?? null,
         mode: data.mode ?? null,
-        viewMode: data.viewMode ?? "text",
+        viewMode: data.viewMode ?? "graph",
         editDrafts: data.editDrafts ?? {},
+        routing: { ...INITIAL_ROUTING, ...(data.routing ?? {}) },
+        input: { ...INITIAL_INPUT, ...(data.input ?? {}), uploadedFiles: [] },
       });
       return true;
     } catch {
@@ -1338,6 +1669,92 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
     })),
 
   clearComposer: () => set({ composerNodes: [], composerEdges: [] }),
+
+  setEntryPipelines: (pipelines, activePipelineId) => {
+    const activeId =
+      activePipelineId !== undefined
+        ? activePipelineId
+        : pipelines[0]?.pipelineId ?? null;
+    const active = pipelines.find((p) => p.pipelineId === activeId) ?? pipelines[0];
+    const order = active?.agents?.map((a) => a.agentId) ?? [];
+    set((state) => ({
+      entryPipelines: pipelines,
+      activePipelineId: activeId,
+      previewOrder: order.length > 0 ? order : state.previewOrder,
+      activeConfig: state.activeConfig
+        ? { ...state.activeConfig, pipelineOrder: order.length > 0 ? order : state.activeConfig.pipelineOrder }
+        : state.activeConfig,
+    }));
+  },
+
+  setActivePipelineId: (id) =>
+    set((state) => {
+      const active = state.entryPipelines.find((p) => p.pipelineId === id);
+      const order = active?.agents?.map((a) => a.agentId) ?? [];
+      return {
+        activePipelineId: id,
+        previewOrder: order.length > 0 ? order : state.previewOrder,
+        activeConfig: state.activeConfig
+          ? { ...state.activeConfig, pipelineOrder: order.length > 0 ? order : state.activeConfig.pipelineOrder }
+          : state.activeConfig,
+      };
+    }),
+
+  setPipelineRuns: (lanes) =>
+    set(() => ({
+      pipelineRuns: Object.fromEntries(lanes.map((l) => [l.pipelineId, l])),
+    })),
+
+  updatePipelineRun: (pipelineId, patch) =>
+    set((state) => {
+      const cur = state.pipelineRuns[pipelineId];
+      if (!cur) return {};
+      return { pipelineRuns: { ...state.pipelineRuns, [pipelineId]: { ...cur, ...patch } } };
+    }),
+
+  markPipelineRunStep: (pipelineId, stepId, status) =>
+    set((state) => {
+      const cur = state.pipelineRuns[pipelineId];
+      if (!cur) return {};
+      const completedSteps =
+        status === "completed" && !cur.completedSteps.includes(stepId)
+          ? [...cur.completedSteps, stepId]
+          : cur.completedSteps;
+      return {
+        pipelineRuns: {
+          ...state.pipelineRuns,
+          [pipelineId]: {
+            ...cur,
+            completedSteps,
+            runningStepId: status === "running" ? stepId : cur.runningStepId,
+          },
+        },
+      };
+    }),
+
+  toggleListExpanded: (entryKey) =>
+    set((state) => {
+      const has = state.listExpandedKeys.includes(entryKey);
+      return {
+        listExpandedKeys: has
+          ? state.listExpandedKeys.filter((k) => k !== entryKey)
+          : [...state.listExpandedKeys, entryKey],
+      };
+    }),
+
+  setListExpanded: (entryKey, expanded) =>
+    set((state) => {
+      const has = state.listExpandedKeys.includes(entryKey);
+      if (expanded && !has) {
+        return { listExpandedKeys: [...state.listExpandedKeys, entryKey] };
+      }
+      if (!expanded && has) {
+        return {
+          listExpandedKeys: state.listExpandedKeys.filter((k) => k !== entryKey),
+        };
+      }
+      return {};
+    }),
 
   relayoutComposer: () =>
     set((state) => {
@@ -1458,10 +1875,25 @@ const SYNC_KEYS: Array<keyof NarrativeState> = [
   "runMode",
   "composerNodes",
   "composerEdges",
+  "entryPipelines",
+  "activePipelineId",
+  "listExpandedKeys",
   "tier",
   "mode",
   "autoDetect",
   "viewMode",
+  "inputTab",
+  "inputEditorOpen",
+  "openedProjectKey",
+  "routing",
+  "input",
+  "entryDirty",
+  "ipDnaJob",
+  "ipCanGenerate",
+  "workbenchBusy",
+  "workbenchError",
+  "pendingCommand",
+  "historyRevision",
   "focusedStepId",
   "focusedChildNodeId",
   "expandedStepId",

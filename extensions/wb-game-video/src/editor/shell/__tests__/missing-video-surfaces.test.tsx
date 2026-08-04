@@ -269,7 +269,7 @@ describe('missing video notices across play surfaces', () => {
     expect(canvasNodeLabels().some((label) => label.includes('选择技能'))).toBe(false)
     expect(screen.getByText('蓝图状态机 · 回看')).toBeTruthy()
 
-    const drillButton = container.querySelector<HTMLButtonElement>('.gv-bp-node button[title*="下钻子流程"]')
+    const drillButton = container.querySelector<HTMLButtonElement>('.gv-bp-node button[title*="进入子流程"]')
     expect(drillButton).toBeTruthy()
     fireEvent.click(drillButton!)
     expect(canvasNodeLabels().some((label) => label.includes('选择技能'))).toBe(true)

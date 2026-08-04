@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-diffusion-renderer",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "Diffusion Renderer",
     "en": "Diffusion Renderer"
@@ -16,16 +15,13 @@
     "email": "dev@forgeax.local"
   },
   "icon": "🎨",
-  "keywords": ["diffusion-renderer", "realtime", "viewport", "fluxrt", "lingbot"],
-  "provides": {
-    "workbench": {
-      "id": "wb-diffusion-renderer",
-      "icon": "🎨",
-      "position": 160,
-      "panelSize": "md",
-      "surface": "single"
-    }
-  },
+  "keywords": [
+    "diffusion-renderer",
+    "realtime",
+    "viewport",
+    "fluxrt",
+    "lingbot"
+  ],
   "entry": {
     "frontend": "./index.html",
     "standalone": {
@@ -36,9 +32,74 @@
       "devOnly": false
     }
   },
-  "requestedEnv": ["FLUXRT_API_KEY", "FLUXRT_BASE_URL", "REACTOR_API_KEY", "REACTOR_COORDINATOR_URL"],
+  "requestedEnv": [
+    "FLUXRT_API_KEY",
+    "FLUXRT_BASE_URL",
+    "REACTOR_API_KEY",
+    "REACTOR_COORDINATOR_URL"
+  ],
   "experimental": true,
   "compatibleWith": {
     "forgeax-bus": "^1.0.0"
+  },
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-diffusion-renderer.content",
+        "runtime": "iframe",
+        "entry": "./index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-diffusion-renderer",
+        "title": {
+          "zh": "Diffusion Renderer",
+          "en": "Diffusion Renderer"
+        },
+        "icon": "🎨",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "tabs",
+            "placements": [
+              "content"
+            ],
+            "active": "content"
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "content",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-diffusion-renderer.content"
+            }
+          }
+        ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "wb-diffusion-renderer.launcher",
+        "title": {
+          "zh": "Diffusion Renderer",
+          "en": "Diffusion Renderer"
+        },
+        "icon": "🎨",
+        "order": 160,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "wb-diffusion-renderer"
+        }
+      }
+    ]
   }
 }

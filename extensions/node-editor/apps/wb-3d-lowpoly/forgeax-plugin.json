@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-plugin/wb-3d-lowpoly",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "3D 低多边形生成器",
     "en": "3D Lowpoly Generator"
@@ -12,27 +11,120 @@
     "en": "3D Lowpoly Generator (node-programming plugin built on @forgeax/node-runtime)"
   },
   "icon": "🦴",
-  "provides": {
-    "workbench": {
-      "id": "wb-3d-lowpoly",
-      "icon": "🦴",
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left": {
-          "minWidth": 280,
-          "scrollable": true
+  "compatibleWith": {
+    "forgeax-node-runtime": "^0.1.0"
+  },
+  "requestedEnv": [
+    "FORGEAX_PLUGIN_DEV_PORTS_FILE",
+    "FORGEAX_LOWPOLY_BACKEND_URL"
+  ],
+  "entry": {
+    "frontend": "./frontend/dist/index.html",
+    "backend": "./backend/src/tool-handlers.ts",
+    "standalone": {
+      "start": "pnpm dev",
+      "port": 9565,
+      "readyProbe": "/",
+      "embeddedAlso": false
+    }
+  },
+  "experimental": true,
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "wb-3d-lowpoly.content",
+        "runtime": "iframe",
+        "entry": "./frontend/dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "wb-3d-lowpoly",
+        "title": {
+          "zh": "3D 低多边形生成器",
+          "en": "3D Lowpoly Generator"
         },
-        "center": {
-          "minHeight": 600,
-          "scrollable": false
+        "icon": "🦴",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              280,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-3d-lowpoly.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "minWidth": 280,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "wb-3d-lowpoly.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/assets/3d/characters/**/*.glb"
+        ],
+        "preferredAgent": "@forgeax-plugin/agent-lowpoly"
+      }
+    ],
+    "activities": [
+      {
+        "id": "wb-3d-lowpoly.launcher",
+        "title": {
+          "zh": "3D 低多边形生成器",
+          "en": "3D Lowpoly Generator"
+        },
+        "icon": "🦴",
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "wb-3d-lowpoly"
         }
-      },
-      "matchProduces": [
-        "**/assets/3d/characters/**/*.glb"
-      ],
-      "preferredAgent": "@forgeax-plugin/agent-lowpoly"
-    },
+      }
+    ],
     "skills": [
       {
         "id": "wb-3d-lowpoly:author-guide",
@@ -48,403 +140,776 @@
     "tools": [
       {
         "id": "lowpoly:projects.list",
-        "args": { "type": "object", "additionalProperties": false },
-        "returns": { "type": "array" },
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "array"
+        },
         "exposedToAI": true,
-        "description": { "zh": "列出 3D lowpoly 项目", "en": "List 3D lowpoly projects" }
+        "description": {
+          "zh": "列出 3D lowpoly 项目",
+          "en": "List 3D lowpoly projects"
+        }
       },
       {
         "id": "lowpoly:projects.create",
         "args": {
           "type": "object",
-          "required": ["name"],
+          "required": [
+            "name"
+          ],
           "properties": {
-            "name": { "type": "string" },
-            "type": { "type": "string" },
-            "description": { "type": "string" },
-            "fromTemplate": { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "fromTemplate": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "创建 3D lowpoly 项目", "en": "Create a 3D lowpoly project" }
+        "description": {
+          "zh": "创建 3D lowpoly 项目",
+          "en": "Create a 3D lowpoly project"
+        }
       },
       {
         "id": "lowpoly:projects.open",
         "args": {
           "type": "object",
-          "required": ["id"],
-          "properties": { "id": { "type": "string" } },
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "打开/激活指定 3D lowpoly 项目（获得独占锁；一个 agent 同一时刻只能持有一个项目；同时会把该项目设为渲染器正在查看的项目，这样 export-glb / assets.list 才会作用于它）", "en": "Open/activate a 3D lowpoly project (acquires an exclusive lock; one agent holds at most one project at a time; also makes this the renderer's viewing project, so export-glb / assets.list target it)" }
+        "description": {
+          "zh": "打开/激活指定 3D lowpoly 项目（获得独占锁；一个 agent 同一时刻只能持有一个项目；同时会把该项目设为渲染器正在查看的项目，这样 export-glb / assets.list 才会作用于它）",
+          "en": "Open/activate a 3D lowpoly project (acquires an exclusive lock; one agent holds at most one project at a time; also makes this the renderer's viewing project, so export-glb / assets.list target it)"
+        }
       },
       {
         "id": "lowpoly:projects.close",
         "args": {
           "type": "object",
-          "required": ["id"],
-          "properties": { "id": { "type": "string" } },
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "关闭/释放对指定 3D lowpoly 项目的独占锁；释放后才能打开另一个项目", "en": "Close/release the exclusive lock on a 3D lowpoly project; required before opening another" }
+        "description": {
+          "zh": "关闭/释放对指定 3D lowpoly 项目的独占锁；释放后才能打开另一个项目",
+          "en": "Close/release the exclusive lock on a 3D lowpoly project; required before opening another"
+        }
       },
       {
         "id": "lowpoly:projects.remove",
         "args": {
           "type": "object",
-          "required": ["id"],
+          "required": [
+            "id"
+          ],
           "properties": {
-            "id": { "type": "string" },
-            "assetPolicy": { "type": "string", "enum": ["detach", "delete"] }
+            "id": {
+              "type": "string"
+            },
+            "assetPolicy": {
+              "type": "string",
+              "enum": [
+                "detach",
+                "delete"
+              ]
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
         "requireConfirm": "destructive",
-        "confirmMessage": { "zh": "删除 3D lowpoly 项目需要确认", "en": "Deleting a 3D lowpoly project requires confirmation" },
-        "description": { "zh": "删除指定 3D lowpoly 项目", "en": "Remove a 3D lowpoly project" }
+        "confirmMessage": {
+          "zh": "删除 3D lowpoly 项目需要确认",
+          "en": "Deleting a 3D lowpoly project requires confirmation"
+        },
+        "description": {
+          "zh": "删除指定 3D lowpoly 项目",
+          "en": "Remove a 3D lowpoly project"
+        }
       },
       {
         "id": "lowpoly:batteries.list",
-        "args": { "type": "object", "additionalProperties": false },
-        "returns": { "type": "array" },
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "array"
+        },
         "exposedToAI": false,
-        "description": { "zh": "列出已注册 lowpoly 电池/ops", "en": "List registered lowpoly batteries/ops" }
+        "description": {
+          "zh": "列出已注册 lowpoly 电池/ops",
+          "en": "List registered lowpoly batteries/ops"
+        }
       },
       {
         "id": "lowpoly:batteries.get",
         "args": {
           "type": "object",
-          "required": ["id"],
-          "properties": { "id": { "type": "string" } },
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": false,
-        "description": { "zh": "读取单个 lowpoly 电池/op 定义", "en": "Get one lowpoly battery/op definition" }
+        "description": {
+          "zh": "读取单个 lowpoly 电池/op 定义",
+          "en": "Get one lowpoly battery/op definition"
+        }
       },
       {
         "id": "lowpoly:pipeline.get",
         "args": {
           "type": "object",
           "properties": {
-            "projectId": { "type": "string" }
+            "projectId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": ["object", "null"] },
+        "returns": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "exposedToAI": false,
-        "description": { "zh": "读取 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目", "en": "Read a lowpoly pipeline graph. projectId is optional; defaults to the currently open/viewed project" }
+        "description": {
+          "zh": "读取 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目",
+          "en": "Read a lowpoly pipeline graph. projectId is optional; defaults to the currently open/viewed project"
+        }
       },
       {
         "id": "lowpoly:pipeline.applyBatch",
         "args": {
           "type": "object",
-          "required": ["ops"],
+          "required": [
+            "ops"
+          ],
           "properties": {
-            "ops": { "type": "array" },
-            "opts": { "type": "object" },
-            "projectId": { "type": "string" }
+            "ops": {
+              "type": "array"
+            },
+            "opts": {
+              "type": "object"
+            },
+            "projectId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": false,
-        "description": { "zh": "批量修改 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目", "en": "Apply a batch of lowpoly pipeline graph edits. projectId is optional; defaults to the currently open/viewed project" }
+        "description": {
+          "zh": "批量修改 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目",
+          "en": "Apply a batch of lowpoly pipeline graph edits. projectId is optional; defaults to the currently open/viewed project"
+        }
       },
       {
         "id": "lowpoly:pipeline.execute",
         "args": {
           "type": "object",
           "properties": {
-            "nodeId": { "type": "string" },
-            "raw": { "type": "boolean" },
-            "projectId": { "type": "string" }
+            "nodeId": {
+              "type": "string"
+            },
+            "raw": {
+              "type": "boolean"
+            },
+            "projectId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": false,
-        "description": { "zh": "执行 lowpoly pipeline 或指定节点。projectId 可选，省略时默认当前打开/查看的项目", "en": "Execute a lowpoly pipeline or a single node. projectId is optional; defaults to the currently open/viewed project" }
+        "description": {
+          "zh": "执行 lowpoly pipeline 或指定节点。projectId 可选，省略时默认当前打开/查看的项目",
+          "en": "Execute a lowpoly pipeline or a single node. projectId is optional; defaults to the currently open/viewed project"
+        }
       },
       {
         "id": "lowpoly:model.apply",
         "args": {
           "type": "object",
-          "required": ["source"],
+          "required": [
+            "source"
+          ],
           "properties": {
-            "source": { "type": "string", "description": "完整 Geometry DSL 文本（每行一条 id = op(args) 语句）" },
-            "name": { "type": "string", "description": "可选模型名（用于 URDF <robot name>）" },
-            "execute": { "type": "boolean", "description": "是否执行图并跑 QC + 导出（默认 true）" },
-            "pipeline": { "type": "string", "enum": ["static", "mechanical", "character"], "description": "可选：强制指定管线（绕过 DSL 内容推断）。省略时按内容推断：含 skin/skeleton → character（角色骨架蒙皮）；含 joint → mechanical（URDF 关节）；两者皆无 → static（纯静态物体/场景 → 单个 .glb）。" },
-            "bake": { "type": ["string", "boolean"], "description": "阶段1 单件烘焙：填要烘焙的 shape id（或 true=烘最后一条语句），追加 g_bake_part 终端而非终端链，返回 <sha>.obj + bbox 并登记到 parts.json；供阶段2 用 mesh(filename=...) 引用。" },
-            "expectedDims": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "可选 brief 目标尺寸 [x,y,z]；仅生成非阻断尺寸偏差建议。" },
-            "features": { "type": "array", "items": { "type": "string" }, "maxItems": 12, "description": "可选显著特征清单；原样回显供非阻断复核。" },
-            "projectId": { "type": "string" }
+            "source": {
+              "type": "string",
+              "description": "完整 Geometry DSL 文本（每行一条 id = op(args) 语句）"
+            },
+            "name": {
+              "type": "string",
+              "description": "可选模型名（用于 URDF <robot name>）"
+            },
+            "execute": {
+              "type": "boolean",
+              "description": "是否执行图并跑 QC + 导出（默认 true）"
+            },
+            "pipeline": {
+              "type": "string",
+              "enum": [
+                "static",
+                "mechanical",
+                "character"
+              ],
+              "description": "可选：强制指定管线（绕过 DSL 内容推断）。省略时按内容推断：含 skin/skeleton → character（角色骨架蒙皮）；含 joint → mechanical（URDF 关节）；两者皆无 → static（纯静态物体/场景 → 单个 .glb）。"
+            },
+            "bake": {
+              "type": [
+                "string",
+                "boolean"
+              ],
+              "description": "阶段1 单件烘焙：填要烘焙的 shape id（或 true=烘最后一条语句），追加 g_bake_part 终端而非终端链，返回 <sha>.obj + bbox 并登记到 parts.json；供阶段2 用 mesh(filename=...) 引用。"
+            },
+            "expectedDims": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "description": "可选 brief 目标尺寸 [x,y,z]；仅生成非阻断尺寸偏差建议。"
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 12,
+              "description": "可选显著特征清单；原样回显供非阻断复核。"
+            },
+            "projectId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "DSL-first 建模主入口：传入完整 Geometry DSL 文本，后端一次完成 校验+编译成图+执行+QC，返回紧凑回执（错误/QC 信号定位到 DSL 行号 + mesh-aware 穿模硬信号）。回执按管线三分（回执带 mode 字段）：static→qc + scene 指纹（无 URDF）；mechanical(urdf)→qc + URDF 指纹；character→skinQc + rig 指纹。管线由 DSL 内容自动推断（含 skin/skeleton=character、含 joint=mechanical、皆无=static），可用 pipeline 参数强制覆盖。你只写 DSL，绝不手工 createNode/connect；projectId 可选，省略时默认当前打开的项目。", "en": "DSL-first modeling entry point: pass the full Geometry DSL text; the backend validates, compiles it to a graph, executes, and runs QC in one call, returning a compact receipt (errors / QC signals mapped to DSL line numbers + mesh-aware interpenetration hard signals). The receipt is split three ways by pipeline (carries a `mode` field): static → qc + scene fingerprint (no URDF); mechanical (urdf) → qc + URDF fingerprint; character → skinQc + rig fingerprint. The pipeline is inferred from DSL content (skin/skeleton = character, joint = mechanical, neither = static) and can be forced with the `pipeline` arg. You only write DSL — never hand-wire createNode/connect. projectId optional; defaults to the open project." }
+        "description": {
+          "zh": "DSL-first 建模主入口：传入完整 Geometry DSL 文本，后端一次完成 校验+编译成图+执行+QC，返回紧凑回执（错误/QC 信号定位到 DSL 行号 + mesh-aware 穿模硬信号）。回执按管线三分（回执带 mode 字段）：static→qc + scene 指纹（无 URDF）；mechanical(urdf)→qc + URDF 指纹；character→skinQc + rig 指纹。管线由 DSL 内容自动推断（含 skin/skeleton=character、含 joint=mechanical、皆无=static），可用 pipeline 参数强制覆盖。你只写 DSL，绝不手工 createNode/connect；projectId 可选，省略时默认当前打开的项目。",
+          "en": "DSL-first modeling entry point: pass the full Geometry DSL text; the backend validates, compiles it to a graph, executes, and runs QC in one call, returning a compact receipt (errors / QC signals mapped to DSL line numbers + mesh-aware interpenetration hard signals). The receipt is split three ways by pipeline (carries a `mode` field): static → qc + scene fingerprint (no URDF); mechanical (urdf) → qc + URDF fingerprint; character → skinQc + rig fingerprint. The pipeline is inferred from DSL content (skin/skeleton = character, joint = mechanical, neither = static) and can be forced with the `pipeline` arg. You only write DSL — never hand-wire createNode/connect. projectId optional; defaults to the open project."
+        }
       },
       {
         "id": "lowpoly:model.get",
         "args": {
           "type": "object",
-          "properties": { "projectId": { "type": "string" } },
+          "properties": {
+            "projectId": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "读回当前模型的 Geometry DSL 源（从图反解，人在编辑器改过图也能读到等价 DSL）。projectId 可选。", "en": "Read back the current model's Geometry DSL source (reconstructed from the graph, so human edits in the editor are reflected). projectId optional." }
+        "description": {
+          "zh": "读回当前模型的 Geometry DSL 源（从图反解，人在编辑器改过图也能读到等价 DSL）。projectId 可选。",
+          "en": "Read back the current model's Geometry DSL source (reconstructed from the graph, so human edits in the editor are reflected). projectId optional."
+        }
       },
       {
         "id": "lowpoly:model.bakeBatch",
         "args": {
           "type": "object",
-          "required": ["items"],
+          "required": [
+            "items"
+          ],
           "properties": {
             "items": {
               "type": "array",
               "maxItems": 16,
               "items": {
                 "type": "object",
-                "required": ["name", "source"],
+                "required": [
+                  "name",
+                  "source"
+                ],
                 "properties": {
-                  "name": { "type": "string" },
-                  "source": { "type": "string" },
-                  "target": { "type": "string" },
-                  "expectedDims": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
-                  "features": { "type": "array", "items": { "type": "string" }, "maxItems": 12 }
+                  "name": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  },
+                  "expectedDims": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    },
+                    "minItems": 3,
+                    "maxItems": 3
+                  },
+                  "features": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 12
+                  }
                 },
                 "additionalProperties": false
               }
             },
-            "projectId": { "type": "string" }
+            "projectId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "批量、逐件独立编译并烘焙最多 16 个 Geometry DSL 零件；部分失败不回滚已成功零件，返回每件紧凑回执。", "en": "Compile and bake up to 16 independent Geometry DSL parts. Partial failures do not roll back successful parts; returns compact per-item receipts." }
+        "description": {
+          "zh": "批量、逐件独立编译并烘焙最多 16 个 Geometry DSL 零件；部分失败不回滚已成功零件，返回每件紧凑回执。",
+          "en": "Compile and bake up to 16 independent Geometry DSL parts. Partial failures do not roll back successful parts; returns compact per-item receipts."
+        }
       },
       {
         "id": "lowpoly:model.patch",
         "args": {
           "type": "object",
-          "required": ["baseHash", "patches"],
+          "required": [
+            "baseHash",
+            "patches"
+          ],
           "properties": {
-            "baseHash": { "type": "string" },
+            "baseHash": {
+              "type": "string"
+            },
             "patches": {
               "type": "array",
               "maxItems": 64,
               "items": {
                 "type": "object",
-                "required": ["line"],
+                "required": [
+                  "line"
+                ],
                 "properties": {
-                  "line": { "type": "number" },
-                  "content": { "type": ["string", "null"] }
+                  "line": {
+                    "type": "number"
+                  },
+                  "content": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
                 },
                 "additionalProperties": false
               }
             },
-            "name": { "type": "string" },
-            "execute": { "type": "boolean" },
-            "pipeline": { "type": "string", "enum": ["static", "mechanical", "character"] },
-            "projectId": { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "execute": {
+              "type": "boolean"
+            },
+            "pipeline": {
+              "type": "string",
+              "enum": [
+                "static",
+                "mechanical",
+                "character"
+              ]
+            },
+            "projectId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "按 1-based 行号增量修改当前 Geometry DSL；baseHash 不匹配时拒绝并要求 model.get，避免覆盖并发编辑。", "en": "Patch current Geometry DSL by 1-based line number. Rejects stale baseHash values so concurrent edits are not overwritten." }
+        "description": {
+          "zh": "按 1-based 行号增量修改当前 Geometry DSL；baseHash 不匹配时拒绝并要求 model.get，避免覆盖并发编辑。",
+          "en": "Patch current Geometry DSL by 1-based line number. Rejects stale baseHash values so concurrent edits are not overwritten."
+        }
       },
       {
         "id": "lowpoly:parts.list",
         "args": {
           "type": "object",
-          "properties": { "projectId": { "type": "string" } },
+          "properties": {
+            "projectId": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "列出本项目已 bake 的 mesh 清单（name → sha256 + 未缩放 bbox + 尺寸），供阶段2 用 g_mesh 引用；直接解决\"找不到已 bake 的 mesh\"。projectId 可选。", "en": "List this project's baked meshes (name → sha256 + unscaled bbox + dims) for phase-2 g_mesh references; solves 'can't find the mesh I baked'. projectId optional." }
+        "description": {
+          "zh": "列出本项目已 bake 的 mesh 清单（name → sha256 + 未缩放 bbox + 尺寸），供阶段2 用 g_mesh 引用；直接解决\"找不到已 bake 的 mesh\"。projectId 可选。",
+          "en": "List this project's baked meshes (name → sha256 + unscaled bbox + dims) for phase-2 g_mesh references; solves 'can't find the mesh I baked'. projectId optional."
+        }
       },
       {
         "id": "lowpoly:pipeline.import",
         "args": {
           "type": "object",
           "properties": {
-            "format": { "type": "string" },
+            "format": {
+              "type": "string"
+            },
             "graph": {},
-            "file": { "type": "object" },
-            "options": { "type": "object" },
-            "projectId": { "type": "string" }
+            "file": {
+              "type": "object"
+            },
+            "options": {
+              "type": "object"
+            },
+            "projectId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": false,
-        "description": { "zh": "导入/替换 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目", "en": "Import or replace a lowpoly pipeline graph. projectId is optional; defaults to the currently open/viewed project" }
+        "description": {
+          "zh": "导入/替换 lowpoly pipeline graph。projectId 可选，省略时默认当前打开/查看的项目",
+          "en": "Import or replace a lowpoly pipeline graph. projectId is optional; defaults to the currently open/viewed project"
+        }
       },
       {
         "id": "lowpoly:pipeline.export",
         "args": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "source": { "type": "string" },
-            "projectId": { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": false,
-        "description": { "zh": "导出当前 pipeline 模板。projectId 可选，省略时默认当前打开/查看的项目", "en": "Export the current pipeline template. projectId is optional; defaults to the currently open/viewed project" }
+        "description": {
+          "zh": "导出当前 pipeline 模板。projectId 可选，省略时默认当前打开/查看的项目",
+          "en": "Export the current pipeline template. projectId is optional; defaults to the currently open/viewed project"
+        }
       },
       {
         "id": "lowpoly:assets.list",
         "args": {
           "type": "object",
           "properties": {
-            "type": { "type": "string" },
-            "suffix": { "type": "string" }
+            "type": {
+              "type": "string"
+            },
+            "suffix": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "列出 lowpoly 模型/贴图等项目资产", "en": "List lowpoly model, texture, and project assets" }
+        "description": {
+          "zh": "列出 lowpoly 模型/贴图等项目资产",
+          "en": "List lowpoly model, texture, and project assets"
+        }
       },
       {
         "id": "lowpoly:screenshot.capture",
         "args": {
           "type": "object",
-          "properties": { "timeout": { "type": "number" } },
+          "properties": {
+            "timeout": {
+              "type": "number"
+            }
+          },
           "additionalProperties": false
         },
         "returns": {
           "type": "object",
           "properties": {
-            "captureId": { "type": "string" },
-            "width": { "type": "number" },
-            "height": { "type": "number" },
-            "capturedAt": { "type": "string" },
-            "path": { "type": "string", "description": "保存到磁盘的 PNG 绝对路径；用 read_file 打开它来查看图像 / absolute path of the saved PNG; open it with read_file to view the image" },
-            "relPath": { "type": "string" }
+            "captureId": {
+              "type": "string"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            },
+            "capturedAt": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "description": "保存到磁盘的 PNG 绝对路径；用 read_file 打开它来查看图像 / absolute path of the saved PNG; open it with read_file to view the image"
+            },
+            "relPath": {
+              "type": "string"
+            }
           }
         },
         "exposedToAI": false,
-        "description": { "zh": "（内部 / 人工用，不暴露给 AI）请求渲染器截图：返回正交四视图 contact sheet（前/侧/顶/等轴 2×2），存盘并返回 PNG 绝对路径。AI 的形态判据是 model.apply 回执里的 mesh-aware QC，不靠截图。", "en": "(internal / human use, not exposed to AI) Request a renderer screenshot: returns an orthographic 4-view contact sheet (Front/Side/Top/Iso 2×2), saves the PNG and returns its absolute path. The AI judges form from model.apply's mesh-aware QC receipt, not from screenshots." }
+        "description": {
+          "zh": "（内部 / 人工用，不暴露给 AI）请求渲染器截图：返回正交四视图 contact sheet（前/侧/顶/等轴 2×2），存盘并返回 PNG 绝对路径。AI 的形态判据是 model.apply 回执里的 mesh-aware QC，不靠截图。",
+          "en": "(internal / human use, not exposed to AI) Request a renderer screenshot: returns an orthographic 4-view contact sheet (Front/Side/Top/Iso 2×2), saves the PNG and returns its absolute path. The AI judges form from model.apply's mesh-aware QC receipt, not from screenshots."
+        }
       },
       {
         "id": "lowpoly:screenshot.latest",
-        "args": { "type": "object", "additionalProperties": false },
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
         "returns": {
           "type": "object",
           "properties": {
-            "captureId": { "type": "string" },
-            "width": { "type": "number" },
-            "height": { "type": "number" },
-            "capturedAt": { "type": "string" },
-            "path": { "type": "string", "description": "保存到磁盘的 PNG 绝对路径；用 read_file 打开它来查看图像 / absolute path of the saved PNG; open it with read_file to view the image" },
-            "relPath": { "type": "string" }
+            "captureId": {
+              "type": "string"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            },
+            "capturedAt": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "description": "保存到磁盘的 PNG 绝对路径；用 read_file 打开它来查看图像 / absolute path of the saved PNG; open it with read_file to view the image"
+            },
+            "relPath": {
+              "type": "string"
+            }
           }
         },
         "exposedToAI": false,
-        "description": { "zh": "（内部 / 人工用，不暴露给 AI）读取最近一次 lowpoly 预览截图：存盘并返回 PNG 绝对路径。", "en": "(internal / human use, not exposed to AI) Read the latest lowpoly preview screenshot: saves the PNG and returns its absolute path." }
+        "description": {
+          "zh": "（内部 / 人工用，不暴露给 AI）读取最近一次 lowpoly 预览截图：存盘并返回 PNG 绝对路径。",
+          "en": "(internal / human use, not exposed to AI) Read the latest lowpoly preview screenshot: saves the PNG and returns its absolute path."
+        }
       },
       {
         "id": "lowpoly:screenshot.store",
         "args": {
           "type": "object",
-          "required": ["captureId", "dataUrl", "width", "height"],
+          "required": [
+            "captureId",
+            "dataUrl",
+            "width",
+            "height"
+          ],
           "properties": {
-            "captureId": { "type": "string" },
-            "dataUrl": { "type": "string" },
-            "width": { "type": "number" },
-            "height": { "type": "number" }
+            "captureId": {
+              "type": "string"
+            },
+            "dataUrl": {
+              "type": "string"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": false,
-        "description": { "zh": "渲染器回写截图数据（内部）", "en": "Renderer callback to store screenshot data" }
+        "description": {
+          "zh": "渲染器回写截图数据（内部）",
+          "en": "Renderer callback to store screenshot data"
+        }
       },
       {
         "id": "lowpoly:export-glb",
         "args": {
           "type": "object",
           "properties": {
-            "name": { "type": "string", "description": "输出文件名（不含扩展名）；落到 assets/3d/<name>.glb" },
-            "mode": { "type": "string", "enum": ["animated", "static", "skinned", "character"], "description": "导出模式：animated（默认，机械路：关节预览/作者动画轨道）/ static（仅几何+材质，无动画，无需 URDF spec）/ skinned（URDF 标准骨骼蒙皮，每连杆刚绑到关节骨）/ character（角色路：骨架+平滑蒙皮，前端体素权重，含骨骼动画；需已走 rig_preview/g_to_rig）" },
-            "animated": { "type": "boolean", "description": "[已弃用，建议改用 mode] 是否把关节预览轨迹烘成 glTF 动画。默认 true；传 false 等价 mode='static'。mode 存在时以 mode 为准" },
-            "timeout": { "type": "number", "description": "毫秒；默认 30000，上限 60000" }
+            "name": {
+              "type": "string",
+              "description": "输出文件名（不含扩展名）；落到 assets/3d/<name>.glb"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "animated",
+                "static",
+                "skinned",
+                "character"
+              ],
+              "description": "导出模式：animated（默认，机械路：关节预览/作者动画轨道）/ static（仅几何+材质，无动画，无需 URDF spec）/ skinned（URDF 标准骨骼蒙皮，每连杆刚绑到关节骨）/ character（角色路：骨架+平滑蒙皮，前端体素权重，含骨骼动画；需已走 rig_preview/g_to_rig）"
+            },
+            "animated": {
+              "type": "boolean",
+              "description": "[已弃用，建议改用 mode] 是否把关节预览轨迹烘成 glTF 动画。默认 true；传 false 等价 mode='static'。mode 存在时以 mode 为准"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "毫秒；默认 30000，上限 60000"
+            }
           },
           "additionalProperties": false
         },
-        "returns": { "type": "object" },
+        "returns": {
+          "type": "object"
+        },
         "exposedToAI": true,
-        "description": { "zh": "把当前 pipeline 的模型烘焙导出为引擎中立的 .glb，落到项目 assets/3d/。mode 选导出模式：animated（默认，含关节动画，需图已 execute 出 URDF）/ static（仅几何+材质）/ skinned（URDF 刚性骨骼蒙皮）/ character（角色骨架+平滑蒙皮，需走角色路 rig_preview）。旧参数 animated:false 等价 mode='static'", "en": "Bake the current pipeline model to an engine-neutral .glb under the project assets/3d/. `mode` selects the flavor: animated (default, joint animation, requires g_to_urdf output) / static (geometry + materials only) / skinned (URDF rigid bone skinning) / character (character skeleton + smooth skinning, requires the character path rig_preview). Legacy animated:false is equivalent to mode='static'." }
+        "description": {
+          "zh": "把当前 pipeline 的模型烘焙导出为引擎中立的 .glb，落到项目 assets/3d/。mode 选导出模式：animated（默认，含关节动画，需图已 execute 出 URDF）/ static（仅几何+材质）/ skinned（URDF 刚性骨骼蒙皮）/ character（角色骨架+平滑蒙皮，需走角色路 rig_preview）。旧参数 animated:false 等价 mode='static'",
+          "en": "Bake the current pipeline model to an engine-neutral .glb under the project assets/3d/. `mode` selects the flavor: animated (default, joint animation, requires g_to_urdf output) / static (geometry + materials only) / skinned (URDF rigid bone skinning) / character (character skeleton + smooth skinning, requires the character path rig_preview). Legacy animated:false is equivalent to mode='static'."
+        }
       }
     ],
     "surfaces": [
       {
         "id": "wb-3d-lowpoly.projects",
         "actions": [
-          { "id": "list", "exposedToAI": true },
-          { "id": "create", "exposedToAI": true },
-          { "id": "open", "exposedToAI": true },
-          { "id": "remove", "exposedToAI": true, "requireConfirm": "destructive" }
+          {
+            "id": "list",
+            "exposedToAI": true
+          },
+          {
+            "id": "create",
+            "exposedToAI": true
+          },
+          {
+            "id": "open",
+            "exposedToAI": true
+          },
+          {
+            "id": "remove",
+            "exposedToAI": true,
+            "requireConfirm": "destructive"
+          }
         ]
       },
       {
         "id": "wb-3d-lowpoly.pipeline",
         "actions": [
-          { "id": "get", "exposedToAI": false },
-          { "id": "applyBatch", "exposedToAI": false },
-          { "id": "execute", "exposedToAI": false },
-          { "id": "import", "exposedToAI": false },
-          { "id": "export", "exposedToAI": false }
+          {
+            "id": "get",
+            "exposedToAI": false
+          },
+          {
+            "id": "applyBatch",
+            "exposedToAI": false
+          },
+          {
+            "id": "execute",
+            "exposedToAI": false
+          },
+          {
+            "id": "import",
+            "exposedToAI": false
+          },
+          {
+            "id": "export",
+            "exposedToAI": false
+          }
         ]
       },
       {
         "id": "wb-3d-lowpoly.preview",
         "actions": [
-          { "id": "screenshot.capture", "exposedToAI": false },
-          { "id": "screenshot.latest", "exposedToAI": false },
-          { "id": "assets.list", "exposedToAI": true }
+          {
+            "id": "screenshot.capture",
+            "exposedToAI": false
+          },
+          {
+            "id": "screenshot.latest",
+            "exposedToAI": false
+          },
+          {
+            "id": "assets.list",
+            "exposedToAI": true
+          }
         ]
       }
     ]
-  },
-  "compatibleWith": {
-    "forgeax-node-runtime": "^0.1.0"
-  },
-  "registeredOps": [],
-  "registeredAssetTypes": [],
-  "requestedPathSlots": [],
-  "requestedEnv": [
-    "FORGEAX_PLUGIN_DEV_PORTS_FILE",
-    "FORGEAX_LOWPOLY_BACKEND_URL"
-  ],
-  "entry": {
-    "frontend": "./frontend/dist/index.html",
-    "backend": "./backend/src/tool-handlers.ts",
-    "standalone": {
-      "start": "pnpm dev",
-      "port": 9565,
-      "readyProbe": "/",
-      "embeddedAlso": false
-    }
-  },
-  "experimental": true
+  }
 }

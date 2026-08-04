@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-ui",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "UI设计",
     "en": "UI Workshop"
@@ -20,31 +19,115 @@
     "interface",
     "game-ui"
   ],
-  "provides": {
-    "workbench": {
-      "id": "ui",
-      "lens": "by-category",
-      "icon": "LayoutTemplate",
-      "position": 130,
-      "panelSize": "lg",
-      "panes": {
-        "left": {
-          "defaultWidth": 360,
-          "minWidth": 300,
-          "collapsible": true,
-          "scrollable": true
+  "entry": {
+    "frontend": "./dist/index.html",
+    "backend": "./server/api-plugin.ts",
+    "standalone": {
+      "start": "npm run dev",
+      "embeddedAlso": true
+    }
+  },
+  "experimental": true,
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "ui.content",
+        "runtime": "iframe",
+        "entry": "./dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "ui",
+        "title": {
+          "zh": "UI设计",
+          "en": "UI Workshop"
         },
-        "center": {
-          "scrollable": false
+        "icon": "LayoutTemplate",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              360,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "ui.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "defaultWidth": 360,
+              "minWidth": 300,
+              "collapsible": true,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "ui.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/ui/**",
+          "**/ui/spec.json",
+          "**/ui-design/**"
+        ],
+        "preferredAgent": "@forgeax-extension/agent-ui-designer"
+      }
+    ],
+    "activities": [
+      {
+        "id": "ui.launcher",
+        "title": {
+          "zh": "UI设计",
+          "en": "UI Workshop"
+        },
+        "icon": "LayoutTemplate",
+        "order": 130,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "ui"
         }
-      },
-      "matchProduces": [
-        "**/ui/**",
-        "**/ui/spec.json",
-        "**/ui-design/**"
-      ],
-      "preferredAgent": "@forgeax-extension/agent-ui-designer"
-    },
+      }
+    ],
     "skills": [
       {
         "id": "wb-ui:author-guide",
@@ -63,14 +146,5 @@
         }
       }
     ]
-  },
-  "entry": {
-    "frontend": "./dist/index.html",
-    "backend": "./server/api-plugin.ts",
-    "standalone": {
-      "start": "npm run dev",
-      "embeddedAlso": true
-    }
-  },
-  "experimental": true
+  }
 }

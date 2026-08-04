@@ -5,7 +5,7 @@ import {
   UPLOAD_ACCEPT,
   readUploadedItem,
   type UploadedItem,
-} from "../controls/TierModeSelector";
+} from "../../lib/uploads";
 import { IpStageFlow, type IpUploadDisplay } from "../controls/IpStageFlow";
 import { composerIpGenerators } from "../../composer/composerCatalog";
 import type { IpDnaFilePayload } from "../../hooks/useNarrativeStream";

@@ -2,7 +2,7 @@ import type { NarrativeContext, NarrativeCard } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { matchPreset, WRITING_CORE, OUTPUT_TEMPLATE, type Tier4Preset } from "../../knowledge/game-narrative/tier4-presets.js";
-import { appendUserInstructions, buildDesignContextSnippet } from "./design-context-helper.js";
+import { appendUserInstructions, buildDesignContextSnippet, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 
@@ -32,7 +32,20 @@ function buildPresetContext(preset: Tier4Preset): string {
 export const NARRATIVE_CARD_COMPOSER: PromptComposer = {
   stepId: "narrative_card",
   blocks: {
-    role: `你是一个休闲游戏叙事设计师。根据用户的游戏需求和品类预设，生成一张完整的叙事卡。`,
+    cot: `## 机制与流程
+1. 分析用户需求文本，先认准游戏品类与核心玩法——故事是给这套玩法做包装的。
+2. 从品类预设中匹配最贴合的一组，用它的组合逻辑与要素库构思故事。
+3. 按三段式落故事，每一段都要能对应到玩家实际会做的操作。
+4. 补齐玩法映射与关卡拓展，让"故事怎么讲"和"关卡怎么长"是同一件事的两面。
+5. 自检：名称有没有记忆点？一句话能不能秒懂？故事有没有画面感？映射是否准确？关卡是否有递进？`,
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
+    role: `你是一个休闲游戏叙事设计师。根据用户的游戏需求和品类预设，生成一张完整的叙事卡。
+
+## 本环节的位置
+你面对的是**叙事要求极低**的品类（消除、放置、休闲益智等）：玩家为玩法而来，故事只是让玩法讲得通、有点期待感的一层包装。
+这一步是整条管线上**唯一**的叙事环节——没有上游的世界观、角色档案可依赖，也没有下游细化。
+因此这张卡必须自成一体：读完就够开工，不留"细节待补"的口子；也不要越界去写玩法数值或关卡参数。
+宁可薄而完整，不要厚而半成品。`,
     task_spec: `## 写作公式
 ${WRITING_CORE.formula}
 
@@ -65,7 +78,7 @@ ${WRITING_CORE.principles.map((p) => `- ${p}`).join("\n")}`,
   }
 }`,
   },
-  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "cot", "ip_source", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

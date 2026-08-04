@@ -1,16 +1,26 @@
 import type { ContentLocale, NarrativeContext } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
-import { appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../prompt-composer.js";
+import { appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
+import {
+  composeSystemPrompt,
+  composeUserPrompt,
+  STRATEGY_SLOT_BLOCK,
+  type PromptComposer,
+} from "../prompt-composer.js";
 
 function buildComposer(locale: ContentLocale): PromptComposer {
   const isEn = locale === "en";
   return {
     stepId: "preference_summary",
     skillSlots: [],
-    systemBlockOrder: ["role", "extraction_guide", "output_format"],
+    // 需求清单是四个吃策略卡的环节之一（stage=demand）：先让四轴各自做结构适配性预判，
+    // 再进入提取要素，避免要素提完了才发现方向与本轴不合。
+    systemBlockOrder: ["role", "strategy", "extraction_guide", "cot", "ip_source", "output_format"],
     userBlockOrder: ["context_inputs", "task_instruction"],
     blocks: {
+      ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
+      strategy: STRATEGY_SLOT_BLOCK,
+
       role: isEn
         ? "You are a narrative requirements analyst. Extract key elements from user descriptions and summarize them structurally. All output must be in English."
         : "你是叙事需求分析专家，擅长从用户描述中提取关键要素并进行结构化总结。所有输出必须使用中文。",
@@ -40,6 +50,16 @@ From the user description, extract:
 7. 期望结局：Happy/Bad/Open
 8. 情感倾向：温馨/紧张/悲伤/惊喜
 9. 特殊要求：用户的特殊偏好或禁忌`,
+
+      cot: isEn
+        ? `## How to work
+1. Read the user's input end to end and pull out genre, tone, reference works and gameplay leanings.
+2. Separate what the user asked for outright from what they only implied — do not promote a guess into a stated requirement.
+3. Flag the gaps: dimensions downstream steps will need that the user never specified.`
+        : `## 机制与流程
+1. 通读用户输入，提取题材、基调、参考作品与玩法倾向。
+2. 区分明确诉求与隐含偏好——用户没说的不要写成他说过的。
+3. 标记缺口：下游需要、但用户这次没有指定的维度。`,
 
       output_format: isEn
         ? "## Output format\n\nStructured Markdown, clear and readable."
@@ -115,6 +135,9 @@ One sentence summarizing the story the user wants.`
     },
   };
 }
+
+/** 骨架契约测试的取样口：中文档位的 composer 形状与英文一致，块序与策略接线只需验一份。 */
+export const PREFERENCE_SUMMARY_COMPOSER: PromptComposer = buildComposer("zh");
 
 export async function userPreferenceSummary(
   ctx: NarrativeContext,

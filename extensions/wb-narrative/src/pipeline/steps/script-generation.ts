@@ -78,9 +78,14 @@ const SYSTEM_PROMPT = `你是游戏剧本设计师，请将情节节点改写为
 export const SCRIPT_GENERATION_COMPOSER: PromptComposer = {
   stepId: "script_generation",
   skillSlots: ["style_guide", "examples", "constraints"],
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "examples", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "examples", "constraints", "cot"],
   userBlockOrder: [],
   blocks: {
+    cot: `## 机制与流程
+1. 将情节文本切分为对白单元与舞台指示，先分清哪些该由人物说出、哪些该由镜头交代。
+2. 逐句打磨对白：保证角色辨识度，并让重要的话都带潜台词——人物很少直说自己要什么。
+3. 在关键情感转折处标注表演提示，给演出留出可执行的落点。
+4. 自检：对白是否同质化（遮住名字还认得出谁在说吗）？全场有没有一句配得上"名场面"的台词？`,
     base: SYSTEM_PROMPT,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",

@@ -20,9 +20,9 @@ interface ManifestTool {
 
 function manifestTools(): ManifestTool[] {
   const raw = JSON.parse(fs.readFileSync(PLUGIN_JSON, "utf8")) as {
-    provides?: { tools?: ManifestTool[] };
+    contributes?: { tools?: ManifestTool[] };
   };
-  return raw.provides?.tools ?? [];
+  return raw.contributes?.tools ?? [];
 }
 
 function manifestToolIds(): string[] {

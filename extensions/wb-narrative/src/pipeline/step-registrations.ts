@@ -54,6 +54,7 @@ import {
   structureValidationL2,
   structureValidationL3,
 } from "./steps/structure-validation.js";
+import { structureCheck } from "./steps/structure-check.js";
 
 // ════════════════════════════════════════════════════════════
 // A. 偏好前置（所有叙事品类必须执行）
@@ -492,4 +493,35 @@ registerStep({
   extractOutputKey: "l3_validation",
   dependsOn: [],
   outputFields: ["l3_validation"],
+});
+
+// ════════════════════════════════════════════════════════
+// H. 质检席位（feature list 2.3.14–2.3.19）
+//
+// 同一份实现按管线注册两个描述符：席位是一个，接线各是各的。
+// 上面的 structure_validation_* 是生成步内部的修复钩子，与本席位并存——
+// 那三个负责修，这里负责审并出报告。
+// ════════════════════════════════════════════════════════
+
+// 检查席位对输入是宽容的：有哪层查哪层，一层没有就如实报告「没有可检查的结构」。
+// dependsOn 仍指向结构席，是为了在管线里排到它后面；但不拿它卡单跑，
+// 否则用户只生成到 L1 就叫不动检查了。
+registerStep({
+  id: "structure_check",
+  name: "结构检查",
+  fn: structureCheck,
+  extractOutputKey: "structure_check_report",
+  dependsOn: ["detailed_outline"],
+  requiredInputs: [],
+  outputFields: ["structure_check_report"],
+});
+
+registerStep({
+  id: "vn_structure_check",
+  name: "结构检查（影游）",
+  fn: structureCheck,
+  extractOutputKey: "structure_check_report",
+  dependsOn: ["vn_branched_beats"],
+  requiredInputs: [],
+  outputFields: ["structure_check_report"],
 });

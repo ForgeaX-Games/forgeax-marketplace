@@ -74,3 +74,4 @@ dist/standalone/
 dist/
 .codebuddy/
 assets/a peer agent CLIAssets/
+.playwright-mcp/

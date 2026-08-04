@@ -1,7 +1,7 @@
 import type { NarrativeContext, WorldviewStructure, InitialOutline } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
-import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
+import { buildDesignContextSnippet, appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 
 function outlineToText(outline: InitialOutline | undefined): string {
@@ -21,18 +21,16 @@ function outlineToText(outline: InitialOutline | undefined): string {
 export const WORLDVIEW_COMPOSER: PromptComposer = {
   stepId: "worldview",
   skillSlots: ["style_guide", "examples", "constraints", "worldview_archetype"],
-  systemBlockOrder: [
-    "role",
-    "task",
-    "ip_dna",
-    "worldview_archetype",
-    "style_guide",
-    "examples",
-    "constraints",
-    "output_format_hint",
-  ],
+  systemBlockOrder: ["role", "task", "ip_dna", "worldview_archetype", "style_guide", "examples", "constraints", "cot", "ip_source", "output_format_hint"],
   userBlockOrder: ["context_inputs", "design_snippet", "task_instruction", "output_schema"],
   blocks: {
+    cot: `## 机制与流程
+1. 先从初步方案与题材基调里提取已确立的核心设定，划出本次不可推翻的边界。
+2. 确立世界的"第一性原理"——魔法 / 科技 / 社会规则的底层逻辑，其余槽位都由它推演而来。
+3. 按第一性原理依次填基础架构层（WV_01-08）：地理影响文化、历史塑造冲突、规则约束行为，不要各写各的。
+4. 再落交互叙事层（WV_09-12），并在其中标出可供下游取用的"张力点"：未解之谜、势力矛盾、历史伤痕。
+5. 自检：十二槽位是否互相咬合？是否服务本品类玩法？是否给角色 / 道具 / 剧情留出了接口？`,
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     role: "你是世界观设计大师，擅长构建完整、自洽的虚构世界。所有输出必须使用中文。",
     task: `## 世界观12槽位体系
 

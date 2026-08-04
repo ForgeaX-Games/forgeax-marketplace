@@ -13,7 +13,7 @@ import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { runParallel, type ParallelTask } from "../parallel-runner.js";
 import { chunkArray } from "../topo-sort.js";
-import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
+import { buildDesignContextSnippet, appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 import { getNodeFilter } from "../node-merge.js";
 import {
@@ -127,12 +127,18 @@ ${SCENE_HIERARCHY_PROMPT}
 export const SCENE_SKELETON_COMPOSER: PromptComposer = {
   stepId: "scene_generation",
   blocks: {
+    cot: `## 机制与流程
+1. 从剧情节点反推需要哪些物理空间——先有戏，再有场景，不要先铺地图。
+2. 为每个场景设计氛围基调、关键交互点、环境叙事埋点三层。
+3. 规划场景之间的连接与玩家动线，让空间关系本身就能提示"下一步该去哪"。
+4. 自检：每个场景是否都有叙事价值？埋点是否自然（玩家会主动发现，而非被提示牌指着看）？`,
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     base: PHASE1_SYSTEM,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints", "cot", "ip_source"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -140,12 +146,13 @@ export const SCENE_SKELETON_COMPOSER: PromptComposer = {
 const SCENE_SKELETON_INCREMENTAL_COMPOSER: PromptComposer = {
   stepId: "scene_generation",
   blocks: {
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     base: PHASE1_INCREMENTAL_SYSTEM,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints", "ip_source"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -272,12 +279,13 @@ ${SCENE_HIERARCHY_PROMPT}
 export const SCENE_EXPAND_COMPOSER: PromptComposer = {
   stepId: "scene_generation",
   blocks: {
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     base: PHASE2_UNIT_SYSTEM,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints", "ip_source"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

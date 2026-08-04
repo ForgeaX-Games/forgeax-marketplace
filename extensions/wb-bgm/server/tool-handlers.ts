@@ -1,7 +1,7 @@
 /**
  * wb-bgm `entry.backend` for the Host ToolRegistry.
  *
- * The forgeax-plugin manifest's `provides.tools[]` lists the bgm tool ids; this
+ * The extension manifest's `contributes.tools[]` lists the bgm tool ids; this
  * module is the dispatch map ToolRegistry dynamic-imports (it reads `mod.tools`
  * or `mod.default`). It runs IN the server process, so:
  *   - AI callers reach `search-audio` / `attach-audio` / `list-audio` via the

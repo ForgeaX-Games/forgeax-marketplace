@@ -1,24 +1,22 @@
 import type { NarrativeContext, CharacterSheet, CharacterPersonalLife } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
-import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
+import { buildDesignContextSnippet, appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 
 export const CHARACTER_ENRICHMENT_COMPOSER: PromptComposer = {
   stepId: "character_enrichment",
   skillSlots: ["style_guide", "examples", "constraints", "character_archetype"],
-  systemBlockOrder: [
-    "role",
-    "task_requirements",
-    "ip_dna",
-    "character_archetype",
-    "style_guide",
-    "examples",
-    "constraints",
-    "output_format_hint",
-  ],
+  systemBlockOrder: ["role", "task_requirements", "ip_dna", "character_archetype", "style_guide", "examples", "constraints", "cot", "ip_source", "output_format_hint"],
   userBlockOrder: ["context_inputs", "design_snippet", "output_schema"],
   blocks: {
+    cot: `## 机制与流程
+1. 从世界观的张力点反推"哪些人会被卷进这场冲突"，先定角色的存在理由，再定角色本身。
+2. 为每个角色确立三件事：外在目标（他要什么）、内在需求（他缺什么）、致命缺陷（他会栽在哪）。
+3. 设计"声音指纹"——说话方式、口头禅、句式长短，让读者遮住名字也认得出是谁在说话。
+4. 规划角色弧光的起点与可能终点，并让终点与主线的高潮位置对得上。
+5. 自检：角色之间是否同质化？反派的立场是否有说服力？每个配角是否都有非他不可的理由？`,
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     role: "你是大师级角色设计师与心理剖析专家，请输出完整角色档案数组JSON。所有输出使用中文。",
     task_requirements: `要求：
 - 至少包含1个主角与2个NPC

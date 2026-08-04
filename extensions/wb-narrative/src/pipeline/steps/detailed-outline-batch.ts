@@ -22,7 +22,7 @@ import type {
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
-import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, STRATEGY_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 import {
   buildCharacterDigest,
   buildItemDigest,
@@ -72,12 +72,24 @@ const STEP1_SYSTEM = `你是叙事结构规划师。根据L1大纲节点，为�
 export const DETAIL_PLAN_COMPOSER: PromptComposer = {
   stepId: "detailed_outline",
   blocks: {
+    cot: `## 机制与流程
+本席继续加密剧情树：把上游节点再分出更细的节点，把树补到情节席可以直接落笔的粒度。
+仍然只定**功能、内容与位置关系**，不写正文。
+
+1. 读上游节点，判断它需要展开成几个子节点才能把过程讲清楚。
+2. 为每个子节点定下目标 / 冲突障碍 / 转折点 / 出场状态，四者缺一则该节点没有戏剧价值。
+3. 沿用五种功能位（起始 / 分支 / 聚合 / 结局 / 普通）标注新节点；新增的分支、聚合、
+   结局同样要给出条件，不要只在粗粒度那层写了条件、细化后就断档。
+4. 检查相邻节点之间的情感连贯与信息揭示节奏——不要把线索一次性倒完。
+5. 自检：是否每个节点都值得单独存在？有没有内容重复、可以合并的冗余节点？
+   细化后的树是否仍与上游给定的形态一致（没有把线性形态偷偷加出分支）？`,
     base: STEP1_SYSTEM,
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints", "cot"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -86,11 +98,12 @@ export const DETAIL_FILL_COMPOSER: PromptComposer = {
   stepId: "detailed_outline",
   blocks: {
     base: "你是叙事结构设计师。",
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -404,11 +417,12 @@ export const DETAIL_GAP_COMPOSER: PromptComposer = {
   stepId: "detailed_outline",
   blocks: {
     base: STEP2_SYSTEM,
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

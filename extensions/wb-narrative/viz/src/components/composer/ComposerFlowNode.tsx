@@ -9,10 +9,11 @@ import {
   TAG_DIMENSIONS,
   COMPLEXITY_LEVELS,
   TIER_HAS_COMPLEXITY,
-  type UploadedItem,
-} from "../controls/TierModeSelector";
+} from "../../lib/routingCatalog";
+import type { UploadedItem } from "../../lib/uploads";
 import { fetchGenres, type GenreCategoryGroup } from "../../hooks/useNarrativeStream";
-import { computeAnchoredPipelines } from "../../composer/composerCatalog";
+import { useSingleAgentRun } from "../../hooks/useSingleAgentRun";
+import { computeAnchoredPipelines, CATEGORY_COLOR } from "../../composer/composerCatalog";
 import type { TierId, ModeId } from "../../types";
 import { ComposerFileEditor } from "./ComposerFileEditor";
 
@@ -110,8 +111,34 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
     };
   }, [node, inputTab, composerNodes, composerEdges]);
 
+  // 单 agent 试跑（Phase-2 M9）：工程师 = 单步 agent，专家 = composite 子 DAG。
+  // 二者都能脱离管线单跑；agent id 分别取 stepId 与 pipelineTemplate（后者已注册 composite AgentDef）。
+  const soloRun = useSingleAgentRun();
+  const soloAgentId =
+    node?.category === "engineer"
+      ? (node.stepId ?? null)
+      : node?.category === "expert"
+        ? (node.pipelineTemplate ?? null)
+        : null;
+  // 试跑要有需求文本：取本节点所在管线的输入节点内容（与 fileRouting 同一条解析路径）。
+  const soloUserInput = useMemo(() => {
+    if (!node || !soloAgentId) return "";
+    const mine = computeAnchoredPipelines(composerNodes, composerEdges).find((p) =>
+      p.orderedNodes.some((n) => n.id === node.id),
+    );
+    return String(mine?.inputNode.config.userInput ?? "").trim();
+  }, [node, soloAgentId, composerNodes, composerEdges]);
+
   if (!node) return null;
   const isolated = data.isolated && node.category !== "input";
+
+  // ── 节点起止类型 & 连接态（Part4）──────────────────────────────
+  // 起始节点 = 输入节点（管线锚点）：无前驱，左侧不出把手。
+  // 结尾节点：暂无固定"结尾"类别，其余节点左右皆出把手，供自由串接。
+  const isStart = node.category === "input";
+  const hasIncoming = composerEdges.some((e) => e.target === node.id);
+  const hasOutgoing = composerEdges.some((e) => e.source === node.id);
+  const catColor = CATEGORY_COLOR[node.category];
   const set = (patch: Record<string, unknown>) => setComposerNodeConfig(node.id, patch);
   // 编辑内容即置为"待确认"（脏态）；点「确认」才置 confirmed。
   const setField = (patch: Record<string, unknown>) => set({ ...patch, confirmed: false });
@@ -231,8 +258,15 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
   });
 
   return (
-    <div className={cls}>
-      <Handle type="target" position={Position.Left} className="rf-handle" />
+    <div className={cls} style={{ ["--cat-color" as string]: catColor }}>
+      {/* 起始节点（输入）无左把手；其余左侧出把手，空心=未连线 / 实心=已连线 */}
+      {!isStart && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          className={`rf-handle composer-handle ${hasIncoming ? "is-filled" : "is-empty"}`}
+        />
+      )}
 
       {/* 拖动手柄：标题栏 + 简介栏(收起) */}
       <div
@@ -456,6 +490,14 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
               </span>
             </div>
           )}
+          {soloAgentId && (
+            <SoloRunFoot
+              agentId={soloAgentId}
+              userInput={soloUserInput}
+              run={soloRun}
+              t={t}
+            />
+          )}
           {node.category === "assistant" && (
             <div className="composer-config__field">
               <span className="composer-config__label">{t("composer.cfg.strategy")}</span>
@@ -471,7 +513,11 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
         </div>
       )}
 
-      <Handle type="source" position={Position.Right} className="rf-handle" />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={`rf-handle composer-handle ${hasOutgoing ? "is-filled" : "is-empty"}`}
+      />
     </div>
   );
 }
@@ -498,6 +544,61 @@ function ConfirmFoot({
       >
         {confirmed ? t("tms.confirmDone") : t("tms.confirm")}
       </button>
+    </div>
+  );
+}
+
+/**
+ * 单 agent 试跑控件（Phase-2 M9）。
+ * composite 专家会按子步逐个点亮，故这里把 announce 出来的步序原样铺成 chip 行。
+ */
+function SoloRunFoot({
+  agentId,
+  userInput,
+  run,
+  t,
+}: {
+  agentId: string;
+  userInput: string;
+  run: ReturnType<typeof useSingleAgentRun>;
+  t: (k: string, v?: Record<string, string | number>) => string;
+}) {
+  const { state, start } = run;
+  const running = state.status === "running";
+  const done = state.steps.filter((s) => s.status === "completed").length;
+  return (
+    <div className="composer-config__field composer-solo">
+      <span className="composer-config__label">{t("composer.solo.label")}</span>
+      <div className="composer-solo__row">
+        <button
+          type="button"
+          className="btn-generate btn-generate--compact ip-stage-btn"
+          disabled={running || !userInput}
+          title={userInput ? undefined : t("composer.solo.needInput")}
+          onClick={() => start(agentId, { userInput })}
+        >
+          {running
+            ? t("composer.solo.running", { done, total: state.steps.length })
+            : t("composer.solo.run")}
+        </button>
+        {state.status === "completed" && (
+          <span className="composer-solo__state is-completed">{t("composer.solo.done")}</span>
+        )}
+        {state.status === "failed" && (
+          <span className="composer-solo__state is-failed" title={state.error}>
+            {t("composer.solo.failed")}
+          </span>
+        )}
+      </div>
+      {state.steps.length > 0 && (
+        <div className="composer-solo__steps">
+          {state.steps.map((s) => (
+            <span key={s.id} className={`composer-solo__step is-${s.status}`} title={s.message}>
+              {s.id}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

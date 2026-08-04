@@ -2,21 +2,18 @@ import { useCallback, useRef, useState } from "react";
 import { Play, Trash2 } from "lucide-react";
 import { ReactFlowProvider } from "reactflow";
 import { useNarrativeStore } from "../../store/narrativeStore";
-import { startRun } from "../../hooks/useNarrativeStream";
+import { startEntryPipelines, planPipelines, saveEntry } from "../../hooks/useNarrativeStream";
 import { getLocale, useT } from "../../i18n";
 import type { TierId, ModeId } from "../../types";
-import { composerIpGenerators } from "../../composer/composerCatalog";
+import { composerIpGenerators, type AnchoredPipeline } from "../../composer/composerCatalog";
 import { ComposerCanvas } from "./ComposerCanvas";
-import { ComposerPalette } from "./ComposerPalette";
+import { CenterHero } from "../panels/CenterHero";
 
 /**
  * 无限画布编排视图（"未生成"态取代只读节点视图）。
- * 顶部工具条（开始编排生成 / 清空）+ 可编辑画布 + 底部调色板 + 右侧节点配置面板。
- *
- * 场景：空项目自由组合——拖入输入节点锚定一条管线，连线专家/助手/工程师，配置路由后开始生成。
- * 以输入节点为锚点：多输入将各建条目（本期实跑首条锚定管线，沿用现有整条管线；自定义步序执行延后）。
+ * Phase-2 M8：按开始节点切分多管线 → /plan（每条各自 config）→ 落盘 entry.pipelines
+ * → `/entry/start` 批量启动全部可运行管线（各自 runId / SSE / manifest）。
  */
-/** 按输入节点子类型合成需求文本：直接输入=原文；标签选择=各维标签串接 + 自定义补充。 */
 function composeUserInput(config: Record<string, unknown>): string {
   const tab = (config.inputTab as string) ?? "text";
   if (tab === "tags") {
@@ -29,6 +26,74 @@ function composeUserInput(config: Record<string, unknown>): string {
   return String(config.userInput ?? "").trim();
 }
 
+/** 一条锚定管线解析出的启动参数（各自的 routing / expert 节点为准）。 */
+interface ResolvedPipelineConfig {
+  startNodeId: string;
+  userInput: string;
+  routeGroup: "planning" | "narrative";
+  tier?: TierId;
+  mode?: ModeId;
+  genreCode?: string;
+  complexity?: number;
+  pipelineTemplate?: string;
+  autoDetect: boolean;
+  /** 输入节点走的是 IP 文件链，需转交 IP 生成器而非文本管线。 */
+  isFileFlow: boolean;
+}
+
+/**
+ * 从锚定管线自身的节点解析配置。
+ * 多管线各自有 routing/expert 节点，不能共用首条的参数 —— 否则第二条画布上选的
+ * 品类/复杂度会被静默替换成第一条的。
+ */
+function resolvePipelineConfig(anchored: AnchoredPipeline): ResolvedPipelineConfig {
+  const routing = anchored.routingNode;
+  const expert = anchored.orderedNodes.find((n) => n.category === "expert");
+
+  // 冲突以「自由编排」为准：路由节点优先于专家节点。
+  const routeGroup =
+    (routing?.config.routeGroup as "planning" | "narrative" | undefined) ??
+    expert?.routeGroup ??
+    "planning";
+
+  let tier: TierId | undefined;
+  let mode: ModeId | undefined;
+  let genreCode: string | undefined;
+  let autoDetect: boolean;
+
+  if (routeGroup === "narrative") {
+    mode = (routing?.config.mode as ModeId | undefined) ?? "narrative_auto";
+    autoDetect = mode === "narrative_auto";
+  } else {
+    tier =
+      ((routing?.config.tier as TierId | null | undefined) ?? expert?.tier ?? undefined) ||
+      undefined;
+    genreCode = (routing?.config.genreCode as string | undefined) || undefined;
+    autoDetect = !genreCode;
+  }
+
+  return {
+    startNodeId: anchored.inputNode.id,
+    userInput: composeUserInput(anchored.inputNode.config),
+    routeGroup,
+    tier,
+    mode,
+    genreCode,
+    complexity: (routing?.config.complexity as number | undefined) ?? undefined,
+    pipelineTemplate: expert?.pipelineTemplate,
+    autoDetect,
+    isFileFlow: (anchored.inputNode.config.inputTab as string) === "file",
+  };
+}
+
+/** 管线是否连到了可执行节点（否则只 plan 不 start）。 */
+function hasExecutableNode(anchored: AnchoredPipeline): boolean {
+  return anchored.orderedNodes.some(
+    (n) =>
+      n.category === "routing" || n.category === "expert" || n.category === "engineer",
+  );
+}
+
 export function ComposerView() {
   const t = useT();
   const composerNodes = useNarrativeStore((s) => s.composerNodes);
@@ -37,6 +102,9 @@ export function ComposerView() {
   const clearComposer = useNarrativeStore((s) => s.clearComposer);
   const getAnchoredPipelines = useNarrativeStore((s) => s.getAnchoredPipelines);
   const storeStartNewRun = useNarrativeStore((s) => s.startNewRun);
+  const setEntryPipelines = useNarrativeStore((s) => s.setEntryPipelines);
+  const setListExpanded = useNarrativeStore((s) => s.setListExpanded);
+  const setPipelineRuns = useNarrativeStore((s) => s.setPipelineRuns);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,50 +122,27 @@ export function ComposerView() {
       setError(t("composer.noInput"));
       return;
     }
-    // 本期实跑首条锚定管线（以输入节点为锚点）；多输入=多条目，后续可扩。
-    const primary = anchored[0];
-    const routing = primary.routingNode;
-    const expert = primary.orderedNodes.find((n) => n.category === "expert");
 
-    // 文件上传锚点：IP 改编为多步半自动流程（节点内确认作品→标准化→体量→改编范围→改编规划）；
-    // 生成入口统一在此顶部——用节点 IpStageFlow 上报的触发器发起（就绪才触发，否则提示补全各步）。
-    if ((primary.inputNode.config.inputTab as string) === "file") {
-      const trigger = composerIpGenerators.get(primary.inputNode.id);
-      setSelectedId(primary.inputNode.id);
+    const nodes = useNarrativeStore.getState().composerNodes;
+    const edges = useNarrativeStore.getState().composerEdges;
+
+    // 每条锚定管线各自解析配置；文件链（IP 上传）不走文本管线，转交对应生成器。
+    const resolved = anchored.map(resolvePipelineConfig);
+    const primary =
+      resolved.find((r, i) => hasExecutableNode(anchored[i]!) && !r.isFileFlow) ?? resolved[0]!;
+
+    if (primary.isFileFlow) {
+      const trigger = composerIpGenerators.get(primary.startNodeId);
+      setSelectedId(primary.startNodeId);
       if (trigger?.canGenerate) trigger.generate();
       else setError(t("composer.fileFlowHint"));
       return;
     }
 
-    // 输入需求：按输入子类型合成文本（直接输入=原文；标签选择=标签串+自定义）。
-    const userInput = composeUserInput(primary.inputNode.config);
-    if (!userInput) {
+    if (!primary.userInput) {
       setError(t("composer.cfg.inputPlaceholder"));
-      setSelectedId(primary.inputNode.id);
+      setSelectedId(primary.startNodeId);
       return;
-    }
-
-    // 冲突以「自由编排」为准：路由节点(自由配置) 优先于 专家节点(预设管线)，专家仅兜底缺省。
-    const routeGroup =
-      ((routing?.config.routeGroup as "planning" | "narrative" | undefined) ??
-        expert?.routeGroup ??
-        "planning");
-
-    let tier: TierId | undefined;
-    let mode: ModeId | undefined;
-    let genreCode: string | undefined;
-    let autoDetect: boolean;
-    const complexity = (routing?.config.complexity as number | undefined) ?? undefined;
-
-    if (routeGroup === "narrative") {
-      // 叙事单品：以路由节点选定的叙事模块为准；narrative_auto 走后端自动检测。
-      mode = ((routing?.config.mode as ModeId | undefined) ?? "narrative_auto");
-      autoDetect = mode === "narrative_auto";
-    } else {
-      // 叙事全量：层级/品类以路由节点为准，缺省回落专家预设。
-      tier = ((routing?.config.tier as TierId | null | undefined) ?? expert?.tier ?? undefined) || undefined;
-      genreCode = (routing?.config.genreCode as string | undefined) || undefined;
-      autoDetect = !genreCode;
     }
 
     lockRef.current = true;
@@ -106,70 +151,179 @@ export function ComposerView() {
       if (useNarrativeStore.getState().runningRunId) {
         useNarrativeStore.getState().cancelRun();
       }
-      // §条目建立时机：仅在此刻（点击「开始编排生成」）向后端发起 run 并落条目，
-      // 拖拽/连线/配置阶段不建条目。生成后与左侧「1 输入 + 2 路由」路径统一展示后端数据。
-      const res = await startRun(userInput, {
-        tier,
-        mode,
-        autoDetect,
-        complexity,
-        routeGroup,
-        genreCode,
-        locale: getLocale(),
+
+      const configByStart = Object.fromEntries(
+        resolved.map((r) => [
+          r.startNodeId,
+          {
+            tier: r.tier ?? null,
+            mode: r.mode ?? null,
+            genreCode: r.genreCode ?? null,
+            complexity: r.complexity,
+            routeGroup: r.routeGroup,
+            pipelineTemplate: r.pipelineTemplate,
+            userInput: r.userInput,
+          },
+        ]),
+      );
+
+      const planned = await planPipelines({
+        compositionNodes: nodes.map((n) => ({
+          id: n.id,
+          catalogId: n.catalogId,
+          category: n.category,
+          config: n.config,
+          agentId: n.stepId ?? n.catalogId,
+          position: n.position,
+        })),
+        compositionEdges: edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+        })),
+        config: {
+          tier: primary.tier ?? null,
+          mode: primary.mode ?? null,
+          genreCode: primary.genreCode ?? null,
+          complexity: primary.complexity,
+          routeGroup: primary.routeGroup,
+          pipelineTemplate: primary.pipelineTemplate,
+          userInput: primary.userInput,
+          locale: getLocale() === "en" ? "en" : "zh",
+        },
+        configByStart,
       });
-      const entryKey = (res as unknown as { sourceDir?: string }).sourceDir ?? res.id;
-      storeStartNewRun(res.id, entryKey, res.tier as TierId | undefined, res.mode as ModeId | undefined);
+
+      const entryKey = planned.entryKey ?? `composer-${Date.now()}`;
+      setEntryPipelines(planned.pipelines, planned.pipelines[0]?.pipelineId);
+      if (planned.pipelines.length > 1) setListExpanded(entryKey, true);
+
+      await saveEntry(entryKey, {
+        inputType: "text",
+        userInput: primary.userInput,
+        routeGroup: primary.routeGroup,
+        tier: primary.tier,
+        mode: primary.mode,
+        genreCode: primary.genreCode,
+        complexity: primary.complexity,
+        locale: getLocale() === "en" ? "en" : "zh",
+        pipelines: planned.pipelines,
+        activePipelineId: planned.pipelines[0]?.pipelineId,
+        listExpanded: planned.pipelines.length > 1,
+        compositionNodes: nodes,
+        compositionEdges: edges,
+      });
+
+      // 每条 manifest 配上它那条管线的启动参数：manifest 顺序 == 后端切分顺序 == resolved 顺序。
+      const byStart = new Map(resolved.map((r) => [r.startNodeId, r]));
+      const requests = planned.pipelines.map((p, i) => {
+        const cfg =
+          byStart.get(
+            (p as unknown as { compositionGraph?: { startNodeId?: string } }).compositionGraph
+              ?.startNodeId ?? "",
+          ) ?? resolved[i];
+        return {
+          pipelineId: p.pipelineId,
+          complete: p.complete && !!cfg && !cfg.isFileFlow,
+          incompletenessReason: cfg?.isFileFlow ? "file_flow" : p.incompletenessReason,
+          userInput: cfg?.userInput,
+          tier: cfg?.tier,
+          mode: cfg?.mode,
+          genreCode: cfg?.genreCode ?? null,
+          complexity: cfg?.complexity,
+          routeGroup: cfg?.routeGroup,
+          autoDetect: cfg?.autoDetect,
+          pipelineTemplate: cfg?.pipelineTemplate,
+        };
+      });
+
+      if (!requests.some((r) => r.complete && !!r.userInput?.trim())) {
+        setError(t("composer.incompletePipelines"));
+        return;
+      }
+
+      const started = await startEntryPipelines({
+        entryKey,
+        locale: getLocale(),
+        pipelines: requests,
+      });
+
+      setPipelineRuns(
+        started.runs.map((r) => ({
+          pipelineId: r.pipelineId ?? "",
+          runId: r.runId,
+          sourceDir: r.sourceDir,
+          primary: r.primary,
+          status: "running" as const,
+          completedSteps: [],
+          runningStepId: null,
+        })),
+      );
+
+      // 主管线接主轨（phase / 取消 / 结果回填仍单头）；次管线由 useSecondaryPipelineStreams 消费。
+      const main = started.runs.find((r) => r.primary) ?? started.runs[0];
+      if (main) {
+        storeStartNewRun(
+          main.runId,
+          main.sourceDir || entryKey,
+          main.tier as TierId | undefined,
+          main.mode as ModeId | undefined,
+        );
+      }
+      if (started.skipped.length > 0) {
+        setError(t("composer.someSkipped", { n: started.skipped.length }));
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       lockRef.current = false;
       setStarting(false);
     }
-  }, [getAnchoredPipelines, storeStartNewRun, t]);
+  }, [getAnchoredPipelines, storeStartNewRun, setEntryPipelines, setListExpanded, setPipelineRuns, t]);
 
   return (
     <div className="composer-view">
-      <div className="composer-view__toolbar">
-        <button
-          type="button"
-          className="fx-btn fx-btn--primary"
-          onClick={handleRun}
-          disabled={starting || composerNodes.length === 0}
-        >
-          <Play size={13} aria-hidden />
-          {t("composer.run")}
-        </button>
-        <button
-          type="button"
-          className="fx-btn fx-btn--danger"
-          onClick={() => { clearComposer(); setSelectedId(null); }}
-          disabled={composerNodes.length === 0}
-        >
-          <Trash2 size={13} aria-hidden />
-          {t("composer.clear")}
-        </button>
-        <span className="composer-view__hint">
-          {error
-            ? error
-            : inputCount > 1
-              ? t("composer.multiInput", { n: inputCount })
-              : t("composer.hint")}
-        </span>
-      </div>
+      {/* 空画布不摆工具条：设计稿 01 的空态只有水印。有节点了才需要"跑/清空"。 */}
+      {composerNodes.length > 0 && (
+        <div className="composer-view__toolbar">
+          <button
+            type="button"
+            className="fx-btn fx-btn--primary"
+            onClick={handleRun}
+            disabled={starting}
+          >
+            <Play size={13} aria-hidden />
+            {t("composer.run")}
+          </button>
+          <button
+            type="button"
+            className="fx-btn fx-btn--danger"
+            onClick={() => { clearComposer(); setSelectedId(null); }}
+          >
+            <Trash2 size={13} aria-hidden />
+            {t("composer.clear")}
+          </button>
+          <span className="composer-view__hint">
+            {error
+              ? error
+              : inputCount > 1
+                ? t("composer.multiInput", { n: inputCount })
+                : t("composer.hint")}
+          </span>
+        </div>
+      )}
 
       <div className="composer-view__body">
         <div className="composer-view__canvas">
           {composerNodes.length === 0 && (
             <div className="composer-view__empty">
-              <span style={{ fontSize: 24, opacity: 0.3 }}>◈</span>
-              <span>{t("composer.empty")}</span>
+              <CenterHero />
             </div>
           )}
           <ReactFlowProvider>
             <ComposerCanvas selectedId={selectedId} onSelect={setSelectedId} />
           </ReactFlowProvider>
         </div>
-        <ComposerPalette />
       </div>
     </div>
   );

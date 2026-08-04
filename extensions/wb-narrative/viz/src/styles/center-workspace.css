@@ -290,96 +290,160 @@ body[data-pane="center"] .editor-center-workspace {
   padding: 0 24px;
 }
 
-/* ── Bottom palette（在流内排布：下方展开时自动把画布与左下控件顶上去） ── */
-.composer-palette {
-  flex-shrink: 0;
+/* ── 创作空间顶栏：四段级联（需求输入 / 叙事路由 / 叙事工具 / 视图模式） ──
+   设计稿 02/06/07：四个等宽矩形 tab 居中，点开后菜单列**浮在**主体上方，
+   不撑开顶栏高度，所以面板走 absolute。 */
+.cw-topnav {
+  position: relative;
+  z-index: 20;
+  background: var(--color-background-base);
+  border-bottom: 1px solid var(--color-divider-subtle);
+}
+
+.cw-topnav__bar {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.cw-topnav__tab {
+  flex: 0 0 auto;
+  width: 152px;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border-default);
+  background: var(--color-background-floating);
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  cursor: pointer;
+  position: relative;
+  transition:
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-base) var(--motion-ease-out),
+    border-color var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.cw-topnav__tab:hover:not(.is-open) {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong, var(--primary));
+}
+
+.cw-topnav__tab.is-open {
+  color: var(--color-text-primary);
+  background: var(--color-background-base);
+  border-color: var(--primary);
+}
+
+/* 级联面板：整块浮在创作空间之上并居中，不撑开顶栏也不挤压主体。 */
+.cw-topnav__panel {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: -1px;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--primary);
+  background: var(--color-background-floating);
+  box-shadow: var(--shadow-overlay, 0 8px 24px rgb(0 0 0 / 28%));
+  max-height: 320px;
+  z-index: 21;
+}
+
+/* 竖排菜单列：一列一级，列与列之间一根细线。 */
+.cw-menu {
   display: flex;
   flex-direction: column;
-}
-
-.composer-palette__bar {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  /* 与左侧「取消/开始生成」footer(.tool-action-row) 对齐：同 padding → 顶部分界线齐平，
-     同背景(--color-background-base) → 底层更深，同 border-subtle。 */
-  padding: 10px 12px;
-  background: var(--color-background-base, var(--dt-surface));
-  border-top: 1px solid var(--color-border-subtle, var(--color-divider-subtle));
-}
-
-.composer-palette__cat {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  /* 与左侧 footer 按钮(.btn-*--compact) 同垂直 padding/字号 → 底层工具条总高＝footer 总高，
-     从而「底层↔表层」分界线与左侧「取消/开始生成」上方分界线处于同一高度。 */
-  padding: 8px 14px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--prim-radius-6);
-  background: var(--color-background-floating);
-  color: var(--color-text-primary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.composer-palette__cat:hover,
-.composer-palette__cat.is-open {
-  border-color: var(--color-accent-brand-default, rgba(77, 255, 160, 0.6));
-  background: var(--color-interaction-hover);
-}
-
-.composer-palette__cat-icon { opacity: 0.8; }
-
-.composer-palette__flyout {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 10px;
-  max-height: 40vh;
+  min-width: 148px;
+  padding: 6px 0;
   overflow-y: auto;
-  background: color-mix(in srgb, var(--color-background-elevated) 96%, transparent);
-  border-top: 1px solid var(--color-divider-subtle);
-  animation: composer-flyup 0.14s ease-out;
 }
 
-@keyframes composer-flyup {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
+.cw-menu + .cw-menu { border-left: 1px solid var(--color-divider-subtle); }
 
-.composer-palette__item {
-  display: inline-flex;
+/* 末级列可能有上百条（品类），给一个更宽的滚动区。 */
+.cw-menu--leaf { min-width: 176px; max-height: 320px; }
+
+.cw-menu__item {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--prim-radius-6);
-  background: var(--color-background-floating);
-  color: var(--color-text-primary);
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
   font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.cw-menu__item:hover {
+  color: var(--color-text-primary);
+  background: var(--color-background-base);
+}
+
+/* is-open = 这一级被展开（右边还有下一列）；is-active = 这一项就是当前选中值。 */
+.cw-menu__item.is-open {
+  color: var(--color-text-primary);
+  background: var(--color-background-base);
+}
+
+.cw-menu__item.is-active {
+  color: var(--color-text-primary);
+  border-left-color: var(--primary);
+}
+
+.cw-menu__picked {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 末级角色行：@ 在前、名字在后，整行可拖进画布（原底部调色板的两件事都在这里）。 */
+.cw-menu__leaf {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 2px solid transparent;
   cursor: grab;
-  user-select: none;
 }
 
-.composer-palette__item:hover {
-  border-color: var(--color-accent-brand-default, rgba(77, 255, 160, 0.6));
+.cw-menu__leaf:active { cursor: grabbing; }
+.cw-menu__leaf:hover { background: var(--color-background-base); }
+.cw-menu__leaf.is-active { border-left-color: var(--primary); }
+.cw-menu__leaf.is-active .cw-menu__item { color: var(--color-text-primary); }
+
+.cw-menu__item--leaf {
+  flex: 1;
+  padding-left: 4px;
+  border-left: none;
+  background: transparent;
 }
 
-.composer-palette__item:active { cursor: grabbing; }
-.composer-palette__item-icon { opacity: 0.8; }
-.composer-palette__item-label { white-space: nowrap; }
+.cw-menu__item--leaf:hover { background: transparent; }
 
-.composer-palette__at {
+.cw-menu__at {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
   border: 1px solid var(--color-border-default);
   border-radius: 4px;
   background: transparent;
@@ -387,10 +451,193 @@ body[data-pane="center"] .editor-center-workspace {
   cursor: pointer;
 }
 
-.composer-palette__at:hover {
-  color: var(--color-accent-brand-default, rgba(77, 255, 160, 0.9));
-  border-color: var(--color-accent-brand-default, rgba(77, 255, 160, 0.6));
+.cw-menu__at:hover {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
 }
+
+/* ── 中栏空态水印（设计稿 01） ── */
+.cw-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+.cw-hero__title {
+  font-size: 34px;
+  letter-spacing: 0.22em;
+  color: var(--color-text-primary);
+  opacity: 0.16;
+}
+
+.cw-hero__sub {
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+}
+
+/* ── 中栏底部：需求输入编辑区 + 常驻操作条（设计稿 03/05） ── */
+/* ── 创作空间浮层（设计稿 01/03/04）：压在主体之上，不占布局高度 ── */
+.cw-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  /* 只有浮出来的那几块能点，其余交给下面的画布。 */
+  pointer-events: none;
+}
+
+.cw-overlay > * { pointer-events: auto; }
+
+.cw-overlay__error {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 6px 10px;
+  border: 1px solid var(--color-danger, #d9534f);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-floating);
+  color: var(--color-danger, #d9534f);
+  font-size: 11px;
+}
+
+/* 需求输入编辑卡：居中、贴着操作条上方，内容多时向上长。 */
+.cw-float-input {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 48px));
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-floating);
+  box-shadow: var(--shadow-overlay, 0 8px 24px rgb(0 0 0 / 28%));
+}
+
+.cw-float-input__head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.cw-float-input__badge {
+  padding: 3px 14px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  color: var(--primary);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.cw-float-input__close {
+  position: absolute;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.cw-float-input__close:hover { color: var(--color-text-primary); }
+
+/* 操作条 + 画布控件：贴右下角。 */
+.cw-overlay__actions {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cw-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cw-actions__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-base);
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.cw-actions__btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong, var(--color-border-default));
+}
+
+.cw-actions__btn:disabled { opacity: 0.4; cursor: default; }
+
+.cw-actions__btn--primary:not(:disabled) {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.cw-actions__btn--cancel.is-active {
+  color: var(--color-accent-orange-default);
+  border-color: color-mix(in srgb, var(--color-accent-orange-default) 55%, transparent);
+}
+
+.cw-actions__hint {
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.cw-canvasctl { display: flex; gap: 4px; }
+
+.cw-canvasctl__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-base);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.cw-canvasctl__btn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong, var(--color-border-default));
+}
+
+.cw-canvasctl__btn:disabled { opacity: 0.4; cursor: default; }
 
 /* ── Canvas flow node（复用管线状态 .rf-pipeline-node 观感：横向、前后连接） ── */
 .composer-node {
@@ -480,11 +727,24 @@ body[data-pane="center"] .editor-center-workspace {
 .composer-node.cat-assistant::before { background: rgba(200, 150, 255, 0.9); }
 .composer-node.cat-engineer::before { background: rgba(255, 235, 120, 0.9); }
 
-/* 孤立节点（未连到输入节点，不会进入可运行管线）：细虚线、密虚点、半透明提示 */
+/* 孤立节点（未连到输入节点）：仅以半透明 + 空心把手示意，不再加虚线边框。 */
 .composer-node.isolated {
-  opacity: 0.55;
-  border-width: 1px;
-  border-style: dashed;
+  opacity: 0.6;
+}
+
+/* 连接把手（Part4）：颜色随节点主题色 --cat-color；空心=未连线，实心=已连线。 */
+.composer-node .composer-handle {
+  border: 1.5px solid var(--cat-color, var(--dt-green-dim)) !important;
+  box-shadow: none !important;
+}
+.composer-node .composer-handle.is-empty {
+  background: var(--color-background-base, #0a0f0a) !important;
+}
+.composer-node .composer-handle.is-filled {
+  background: var(--cat-color, var(--dt-green-dim)) !important;
+}
+.composer-node .composer-handle:hover {
+  box-shadow: 0 0 8px var(--cat-color, var(--dt-green-faint)) !important;
 }
 
 /* 展开态详情栏：卡片内部的一段（非悬浮面板），随标题栏一起构成同一张卡片 */
@@ -639,6 +899,52 @@ body[data-pane="center"] .editor-center-workspace {
   font-size: 12px;
   color: var(--color-text-primary);
   padding: 4px 0;
+}
+
+.composer-solo__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-solo__state {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.composer-solo__state.is-failed {
+  color: var(--color-danger, #d9534f);
+}
+
+.composer-solo__steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.composer-solo__step {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--color-divider-subtle);
+  color: var(--color-text-secondary);
+}
+
+.composer-solo__step.is-running {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.composer-solo__step.is-completed {
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  color: var(--color-text-primary);
+}
+
+.composer-solo__step.is-failed {
+  border-color: var(--color-danger, #d9534f);
+  color: var(--color-danger, #d9534f);
 }
 
 .fx-icon-btn {
@@ -822,6 +1128,101 @@ body[data-pane="center"] .editor-center-workspace {
 
 .editor-center-workspace .text-view {
   padding: 12px 16px;
+}
+
+.editor-center-workspace .pipeline-bar-tracks.is-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.editor-center-workspace .pipeline-bar-lane {
+  border-top: 1px solid var(--color-divider-subtle);
+  cursor: pointer;
+}
+
+.editor-center-workspace .pipeline-bar-lane.is-active {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+.editor-center-workspace .pipeline-bar-lane-head {
+  padding: 4px 14px 0;
+}
+
+.editor-center-workspace .pipeline-bar-lane-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.editor-center-workspace .pipeline-bar-lane.is-active .pipeline-bar-lane-title {
+  color: var(--primary);
+}
+
+.editor-center-workspace .pipeline-bar-lane-head {
+  display: flex;
+  align-items: center;
+}
+
+.editor-center-workspace .pipeline-bar-lane-state {
+  margin-left: 6px;
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary, var(--color-text-secondary));
+}
+
+.editor-center-workspace .pipeline-bar-lane-state.is-running {
+  color: var(--primary);
+}
+
+.editor-center-workspace .pipeline-bar-lane-state.is-failed {
+  color: var(--color-danger, #d9534f);
+}
+
+.editor-center-workspace .text-pipeline-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.editor-center-workspace .text-pipeline-tab {
+  border: 1px solid var(--color-divider-subtle);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.editor-center-workspace .text-pipeline-tab.is-active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.editor-center-workspace .text-pipeline-box {
+  border: 1px solid var(--color-divider-subtle);
+  border-radius: 4px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.editor-center-workspace .text-pipeline-box__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  border-bottom: 1px solid var(--color-divider-subtle);
+}
+
+.editor-center-workspace .text-pipeline-box__body {
+  padding: 6px 8px 8px;
 }
 
 .cw-spin {

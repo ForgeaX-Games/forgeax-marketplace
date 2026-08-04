@@ -2,16 +2,21 @@ import type { NarrativeContext, PreferenceAnalysis, TargetStructure } from "../.
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { getEntropy, getDeviationCeiling, getNodeBudget } from "../layer-threshold-config.js";
-import { appendUserInstructions } from "./design-context-helper.js";
+import { appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../prompt-composer.js";
 import { isIpDnaSeeded } from "../../ip-dna/generation-seed.js";
 
 const PREFERENCE_ANALYSIS_COMPOSER: PromptComposer = {
   stepId: "preference_analysis",
   skillSlots: [],
-  systemBlockOrder: ["role", "slot_system", "output_requirements"],
+  systemBlockOrder: ["role", "slot_system", "cot", "ip_source", "output_requirements"],
   userBlockOrder: ["context_inputs", "task_instruction"],
   blocks: {
+    cot: `## 机制与流程
+1. 由偏好总结逐维度推导需求强度（0-3），强度来自用户的措辞轻重与重复次数，不靠臆测。
+2. 确立全局风格基调与叙事视角，二者必须与强度最高的那几维一致。
+3. 标注复杂度档位对应的叙事密度预期，供下游各层决定该写多细。`,
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     role: "你是专业的叙事分析师与游戏体验设计专家，擅长从用户描述中提取关键偏好并映射到42维度叙事槽位体系。所有输出必须使用中文。",
 
     slot_system: `## 42维度叙事槽位体系

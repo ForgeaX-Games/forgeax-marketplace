@@ -1,8 +1,7 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "@forgeax-extension/wb-narrative",
   "version": "0.1.0",
-  "kind": "workbench",
   "displayName": {
     "zh": "叙事设计",
     "en": "Narrative Studio"
@@ -12,31 +11,150 @@
     "en": "AI-driven narrative studio — two-layer routing (Tier + Mode) plus a dynamic planner over 117 genres, 9 pipeline templates and 6 narrative archetypes, generating a full world to characters to plot to dialogue narrative; with a story-tree view, per-step regeneration and result export."
   },
   "icon": "📖",
-  "provides": {
-    "workbench": {
-      "id": "narrative",
-      "lens": "by-category",
-      "icon": "📖",
-      "position": 140,
-      "panelSize": "lg",
-      "surface": "split",
-      "panes": {
-        "left": {
-          "minWidth": 320,
-          "defaultWidth": 320,
-          "scrollable": true
+  "consumes": {
+    "models": [
+      {
+        "channel": "text",
+        "role": "reasoning"
+      }
+    ]
+  },
+  "entry": {
+    "frontend": "./viz/dist/index.html",
+    "backend": "./server/tool-handlers.ts",
+    "standalone": {
+      "start": "npm run start",
+      "port": 8900,
+      "readyProbe": "/api/health",
+      "embeddedAlso": true
+    }
+  },
+  "permissions": [
+    "fs:read:.forgeax/games/{slug}/narrative/**",
+    "fs:write:.forgeax/games/{slug}/narrative/**",
+    "model:text:reasoning",
+    "net:generativelanguage.googleapis.com",
+    "emit:narrative.*"
+  ],
+  "requestedEnv": [
+    "GEMINI_API_KEY",
+    "LLM_PROXY_URL",
+    "LITELLM_PROXY_KEY",
+    "NARRATIVE_MODEL",
+    "SMALL_MODEL",
+    "NARRATIVE_PORT",
+    "NARRATIVE_AUTO_DEBUG",
+    "NARRATIVE_AGENT_DEBUG",
+    "NARRATIVE_DISABLE_EVAL",
+    "NARRATIVE_EMBED_URL",
+    "NARRATIVE_EMBED_MODEL",
+    "NARRATIVE_EMBED_DIM",
+    "NARRATIVE_EMBED_MODEL_DIR",
+    "NARRATIVE_EMBED_ONNX",
+    "FFMPEG_PATH",
+    "ASR_ENDPOINT",
+    "PDFTOPPM_PATH"
+  ],
+  "experimental": true,
+  "categories": [
+    "workbench"
+  ],
+  "contributes": {
+    "panelTypes": [
+      {
+        "id": "narrative.content",
+        "runtime": "iframe",
+        "entry": "./viz/dist/index.html"
+      }
+    ],
+    "pages": [
+      {
+        "id": "narrative",
+        "title": {
+          "zh": "叙事设计",
+          "en": "Narrative Studio"
         },
-        "center": {
-          "minHeight": 600,
-          "scrollable": false
+        "icon": "📖",
+        "cardinality": "singleton",
+        "restorePolicy": "project",
+        "layout": {
+          "version": 2,
+          "root": {
+            "kind": "split",
+            "direction": "horizontal",
+            "sizes": [
+              320,
+              840
+            ],
+            "children": [
+              {
+                "kind": "tabs",
+                "placements": [
+                  "sidebar"
+                ],
+                "active": "sidebar"
+              },
+              {
+                "kind": "tabs",
+                "placements": [
+                  "workspace"
+                ],
+                "active": "workspace"
+              }
+            ]
+          }
+        },
+        "layoutVersion": 2,
+        "panels": [
+          {
+            "id": "sidebar",
+            "panelType": {
+              "extension": "self",
+              "id": "narrative.content"
+            },
+            "initialProps": {
+              "pane": "left",
+              "minWidth": 320,
+              "defaultWidth": 320,
+              "scrollable": true
+            }
+          },
+          {
+            "id": "workspace",
+            "panelType": {
+              "extension": "self",
+              "id": "narrative.content"
+            },
+            "initialProps": {
+              "pane": "center",
+              "minHeight": 600,
+              "scrollable": false
+            }
+          }
+        ],
+        "matchProduces": [
+          "**/*_narrative.md",
+          "**/dialog/**",
+          "**/*_branch_tree.json"
+        ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "narrative.launcher",
+        "title": {
+          "zh": "叙事设计",
+          "en": "Narrative Studio"
+        },
+        "icon": "📖",
+        "order": 140,
+        "category": "workbench",
+        "pageType": {
+          "extension": "self",
+          "id": "narrative"
         }
-      },
-      "matchProduces": [
-        "**/*_narrative.md",
-        "**/dialog/**",
-        "**/*_branch_tree.json"
-      ]
-    },
+      }
+    ],
     "skills": [
       {
         "id": "wb-narrative:author-guide",
@@ -525,50 +643,5 @@
         ]
       }
     ]
-  },
-  "consumes": {
-    "models": [
-      {
-        "channel": "text",
-        "role": "reasoning"
-      }
-    ]
-  },
-  "entry": {
-    "frontend": "./viz/dist/index.html",
-    "backend": "./server/tool-handlers.ts",
-    "standalone": {
-      "start": "npm run start",
-      "port": 8900,
-      "readyProbe": "/api/health",
-      "embeddedAlso": true
-    }
-  },
-  "permissions": [
-    "fs:read:.forgeax/games/{slug}/narrative/**",
-    "fs:write:.forgeax/games/{slug}/narrative/**",
-    "model:text:reasoning",
-    "net:generativelanguage.googleapis.com",
-    "emit:narrative.*"
-  ],
-  "requestedEnv": [
-    "GEMINI_API_KEY",
-    "LLM_PROXY_URL",
-    "LITELLM_PROXY_KEY",
-    "NARRATIVE_MODEL",
-    "SMALL_MODEL",
-    "NARRATIVE_PORT",
-    "NARRATIVE_AUTO_DEBUG",
-    "NARRATIVE_AGENT_DEBUG",
-    "NARRATIVE_DISABLE_EVAL",
-    "NARRATIVE_EMBED_URL",
-    "NARRATIVE_EMBED_MODEL",
-    "NARRATIVE_EMBED_DIM",
-    "NARRATIVE_EMBED_MODEL_DIR",
-    "NARRATIVE_EMBED_ONNX",
-    "FFMPEG_PATH",
-    "ASR_ENDPOINT",
-    "PDFTOPPM_PATH"
-  ],
-  "experimental": true
+  }
 }

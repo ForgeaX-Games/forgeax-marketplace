@@ -10,7 +10,7 @@ import type {
   TierModeInfo,
 } from "../types";
 
-const API_BASE = "";
+export const API_BASE = "";
 
 /** Fetch available tiers and modes from the API */
 export async function fetchModes(): Promise<TierModeInfo[]> {
@@ -49,6 +49,31 @@ export async function fetchGenres(locale?: string): Promise<GenreCategoryGroup[]
   return body.categories ?? [];
 }
 
+/**
+ * 三轴词表（与后端 GET /api/narrative/axes 对齐）。
+ * 词表只有后端一份，前端不再抄写，避免两处各改一半。
+ */
+export interface AxisOption {
+  code: string;
+  name: string;
+  nameEn?: string;
+  summary?: string;
+  traits?: string;
+}
+
+export interface NarrativeAxesCatalog {
+  types: AxisOption[];
+  themes: AxisOption[];
+  structures: AxisOption[];
+}
+
+export async function fetchNarrativeAxes(): Promise<NarrativeAxesCatalog> {
+  const res = await fetch(`${API_BASE}/api/narrative/axes`);
+  if (!res.ok) throw new Error(`Failed to fetch axes: ${res.status}`);
+  const body = (await res.json()) as Partial<NarrativeAxesCatalog>;
+  return { types: body.types ?? [], themes: body.themes ?? [], structures: body.structures ?? [] };
+}
+
 /** @deprecated A1: derived from (tier, mode, genre_code) instead. Kept as type alias for migration. */
 export type RoutingMode = "auto" | "semi" | "manual";
 
@@ -78,6 +103,10 @@ export async function startRun(
     routeGroup?: "planning" | "narrative";
     routingMode?: RoutingMode;
     genreCode?: string;
+    /** 三轴路由（PRD v1.4 §3.2.2）；结构缺省由后端综合推导。 */
+    storyType?: string | null;
+    storyTheme?: string | null;
+    narrativeStructure?: string | null;
     uploadedScript?: UploadedScriptPayload;
     /** UI locale for generated narrative content (en/zh). */
     locale?: string;
@@ -98,6 +127,9 @@ export async function startRun(
       route_group: opts.routeGroup,
       routing_mode: opts.routingMode,
       genre_code: opts.genreCode,
+      story_type: opts.storyType ?? undefined,
+      story_theme: opts.storyTheme ?? undefined,
+      narrative_structure: opts.narrativeStructure ?? undefined,
       uploaded_script: opts.uploadedScript,
       locale: opts.locale === "en" ? "en" : "zh",
       entry_key: opts.entryKey,
@@ -106,6 +138,206 @@ export async function startRun(
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error ?? `Start failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Phase-1：后端 resolved RunManifest（管线动态配置表）。 */
+export interface ManifestAgentSlotDto {
+  agentId: string;
+  name: string;
+  prototype: string;
+  index: number;
+  lifecycle: { status: string; updatedAt?: string; message?: string };
+  outputField?: string;
+  outputRef?: string;
+}
+
+export interface RunManifestDto {
+  pipelineId: string;
+  entryKey: string;
+  status: string;
+  config: Record<string, unknown>;
+  agents: ManifestAgentSlotDto[];
+  parallelGroups?: number[][];
+  promptLibrary: "v1" | "v2";
+  complete: boolean;
+  incompletenessReason?: string;
+}
+
+export interface PlanPipelinesResponse {
+  entryKey?: string;
+  pipeline?: RunManifestDto;
+  pipelines: RunManifestDto[];
+  count: number;
+}
+
+/**
+ * Phase-1 M2/M5：向后端 /plan 要 resolved 步序（禁止客户端重算）。
+ * - 单管线：传 config
+ * - 多管线画布：传 compositionNodes + compositionEdges（按开始节点切分）
+ */
+export async function planPipelines(body: {
+  entryKey?: string;
+  pipelineId?: string;
+  config?: Record<string, unknown>;
+  compositionGraph?: unknown;
+  requestedSteps?: string[];
+  compositionNodes?: unknown[];
+  compositionEdges?: unknown[];
+  requestedStepsByStart?: Record<string, string[]>;
+  /** 按开始节点覆盖 config（每条管线有自己的 routing/expert 参数）。 */
+  configByStart?: Record<string, Record<string, unknown>>;
+  /** flat shortcuts also accepted by backend */
+  tier?: TierId;
+  mode?: ModeId;
+  genreCode?: string;
+  storyType?: string | null;
+  storyTheme?: string | null;
+  narrativeStructure?: string | null;
+  complexity?: number;
+  routeGroup?: "planning" | "narrative";
+  locale?: string;
+  pipelineTemplate?: string;
+  userInput?: string;
+  /** tpl-vn-v2：已上传剧本时后端把步序切到 E2（normalize + confirm）。 */
+  hasUploadedScript?: boolean;
+}): Promise<PlanPipelinesResponse> {
+  const res = await fetch(`${API_BASE}/api/narrative/plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...body,
+      genre_code: body.genreCode,
+      story_type: body.storyType ?? undefined,
+      story_theme: body.storyTheme ?? undefined,
+      narrative_structure: body.narrativeStructure ?? undefined,
+      route_group: body.routeGroup,
+      pipeline_template: body.pipelineTemplate,
+      user_input: body.userInput,
+      locale: body.locale === "en" ? "en" : body.locale === "zh" ? "zh" : body.locale,
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(errBody.error ?? `Plan failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export interface EntryStartLane {
+  runId: string;
+  pipelineId?: string;
+  sourceDir: string;
+  tier?: TierId;
+  mode?: ModeId;
+  /** 主管线（产物落 output/<key>/，历史与 fork 沿用它）。 */
+  primary: boolean;
+}
+
+export interface EntryStartResponse {
+  entryKey: string;
+  runs: EntryStartLane[];
+  skipped: Array<{ pipelineId?: string; reason: string }>;
+  count: number;
+}
+
+/**
+ * Phase-2 M8：条目级批量启动 —— 每条可运行管线各起一个 run（独立 SSE / manifest / checkpoint）。
+ * 不完整的管线原样跳过并在 skipped 中回报原因，不阻塞其余管线。
+ */
+export async function startEntryPipelines(body: {
+  entryKey: string;
+  locale?: string;
+  model?: string;
+  pipelines: Array<{
+    pipelineId?: string;
+    complete?: boolean;
+    incompletenessReason?: string;
+    userInput?: string;
+    tier?: TierId;
+    mode?: ModeId;
+    genreCode?: string | null;
+    complexity?: number;
+    routeGroup?: "planning" | "narrative";
+    autoDetect?: boolean;
+    pipelineTemplate?: string;
+  }>;
+}): Promise<EntryStartResponse> {
+  const res = await fetch(`${API_BASE}/api/narrative/entry/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      entry_key: body.entryKey,
+      model: body.model,
+      locale: body.locale === "en" ? "en" : "zh",
+      pipelines: body.pipelines,
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(errBody.error ?? `Entry start failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/** 单 agent 独立调用（Phase-1 M3）。 */
+export async function runSingleAgent(
+  agentId: string,
+  opts: {
+    userInput?: string;
+    ctx?: Record<string, unknown>;
+    inputs?: Record<string, unknown>;
+    model?: string;
+  } = {},
+): Promise<{ agentId: string; outputField: string; output: unknown; ctx: unknown }> {
+  const res = await fetch(`${API_BASE}/api/narrative/agent/${encodeURIComponent(agentId)}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      user_input: opts.userInput ?? "",
+      ctx: opts.ctx,
+      inputs: opts.inputs,
+      model: opts.model,
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(errBody.error ?? `Agent run failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
+ * 单 agent 流式调用（Phase-2 M9）。
+ *
+ * composite 专家（tpl-jrpg 等）一次要跑十几分钟的子 DAG，同步调用只能让画布干等；
+ * 这里拿到 runId 后由调用方挂 `GET /api/narrative/stream/:runId`，帧形状与管线 run
+ * 一致（announce → running/completed → done），可直接复用同一套消费逻辑。
+ */
+export async function startSingleAgentStream(
+  agentId: string,
+  opts: {
+    userInput?: string;
+    ctx?: Record<string, unknown>;
+    inputs?: Record<string, unknown>;
+    model?: string;
+  } = {},
+): Promise<{ runId: string; agentId: string; streamUrl: string }> {
+  const res = await fetch(`${API_BASE}/api/narrative/agent/${encodeURIComponent(agentId)}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      stream: true,
+      user_input: opts.userInput ?? "",
+      ctx: opts.ctx,
+      inputs: opts.inputs,
+      model: opts.model,
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(errBody.error ?? `Agent run failed: ${res.status}`);
   }
   return res.json();
 }
@@ -489,6 +721,8 @@ export interface HistoryEntry {
    * 仅当该 IP 条目正处于下游生成阶段时后端才回填；前端据此 attach /stream 直播中间预览。
    */
   generationRunId?: string;
+  /** Phase-1：该条目下管线数量（来自 _entry.json.pipelines）。 */
+  pipelineCount?: number;
 }
 
 /**
@@ -506,10 +740,22 @@ export interface EntryConfig {
   tier?: TierId;
   mode?: ModeId;
   genreCode?: string;
+  /** 三轴路由（PRD v1.4 §3.2.2）；structure 由后端综合后回写，前端一般只读。 */
+  storyType?: string;
+  storyTheme?: string;
+  narrativeStructure?: string;
   complexity?: number;
   locale?: "en" | "zh";
   ipRunKey?: string;
   parentKey?: string;
+  /** Phase-1 多管线：一组 RunManifestDto。 */
+  pipelines?: RunManifestDto[];
+  activePipelineId?: string;
+  listExpanded?: boolean;
+  /** 资产库：作者确认的产物，元素为 `<group>/<相对路径>`。 */
+  assets?: string[];
+  compositionNodes?: unknown[];
+  compositionEdges?: unknown[];
   createdAt?: string;
   updatedAt?: string;
 }

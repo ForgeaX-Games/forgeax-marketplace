@@ -11,8 +11,8 @@
 import type { NarrativeContext, CoreSettings, PlotSynopsis, InitialOutline } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
-import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
-import { composeSystemPrompt } from "../prompt-composer.js";
+import { buildDesignContextSnippet, appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
+import { composeSystemPrompt, STRATEGY_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 import { resolveTargetActs } from "../narrative-scale.js";
 import { loadSkill } from "../../knowledge/game-narrative/skill-loader.js";
@@ -24,6 +24,13 @@ const VALID_HOOKS = ["puzzle", "slice_of_life", "competitive"] as const;
 export const INITIAL_PLAN_COMPOSER: PromptComposer = {
   stepId: "initial_plan",
   blocks: {
+    cot: `## 机制与流程
+1. 由用户需求确立故事的高概念——一句话就能让人想玩的那个卖点。
+2. 由高概念展开核心设定：世界基底、主角、核心冲突，三者互为因果。
+3. 按起承转合撰写故事大纲，确保每一转都由前一段的因导出。
+4. 浓缩为剧情简介，检验高概念是否真的立得住。
+5. 自检：是否服务用户明说的诉求？是否为世界观 / 角色 / 大纲各留出了接口？`,
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     role: `你是专业故事策划师，请根据用户需求一次性输出初步方案全部数据。所有输出必须使用中文（world_tags 的值除外）。`,
     task_spec: `## 输出要求
 
@@ -66,6 +73,7 @@ export const INITIAL_PLAN_COMPOSER: PromptComposer = {
   "highlight_analysis": "核心亮点分析（吸引力所在）"
 }
 \`\`\``,
+    strategy: STRATEGY_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
     output_schema: `## 设计原则
@@ -74,7 +82,8 @@ export const INITIAL_PLAN_COMPOSER: PromptComposer = {
 - key_plot_points 3-5个关键转折点
 - synopsis 必须200字以上，有代入感`,
   },
-  systemBlockOrder: ["role", "task_spec", "style_guide", "constraints", "output_schema"],
+  // 策划文档是 stage=design：策略段紧跟任务，四轴策略先落盘，再谈品类风格与输出约束。
+  systemBlockOrder: ["role", "task_spec", "strategy", "style_guide", "constraints", "cot", "ip_source", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

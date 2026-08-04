@@ -3,11 +3,12 @@
  *
  * 把"提示词来自多个来源"显式化为按骨架插槽注册的 fragment provider：
  *
- *   genre_style                                  ← 品类技能包（skill-loader）
+ *   strategy_genre / strategy_type / strategy_theme / strategy_structure
+ *                                                ← 约定式策略库 + 品类技能包（见 strategy-slots.ts）
  *   objective_truth / operators / relations / ledger
  *                                                ← IP DNA 注入（运行时已写入 ctx 的结构化分段）
  *   material（{{data:*}} 摘要助手）              ← context-helpers 数据摘要
- *   role / constraints / cot / output            ← step 自身的 .md 模板（不在此，由模板提供）
+ *   role / task / constraints / cot / output     ← step 自身的 .md 模板（不在此，由模板提供）
  *
  * 设计：
  *   - provider 在「提示词组装时」运行，必须廉价、无 LLM、无 IO（IP DNA 的重活已在
@@ -24,6 +25,7 @@ import {
   buildItemDigest,
   buildStoryArcDigest,
 } from "../steps/context-helpers.js";
+import { STRATEGY_PROVIDERS } from "./strategy-slots.js";
 
 export interface ProviderInput {
   ctx: NarrativeContext;
@@ -48,9 +50,17 @@ function resolveGenreCode(ctx: NarrativeContext): string | null {
 // 内置 provider
 // ─────────────────────────────────────────────────────────────────
 
-/** 品类风格：拼接 skill 的 style_guide / examples / constraints 槽位内容。 */
+/**
+ * 品类风格：拼接 skill 的 style_guide / examples / constraints 槽位内容。
+ *
+ * 三期换轴后归入 strategy_genre 子槽（品类技能包与品类策略卡讲的是同一件事）。
+ *
+ * ⚠️ 不在 DEFAULT_PROVIDERS 里：现有 composer 已经通过 {{SKILL.style_guide}} 等占位
+ * 和 systemPromptAddition 末尾追加拿到了同一份技能包内容，默认注册会造成重复注入。
+ * 等 composer 全部迁到八段骨架、撤掉自己的 SKILL 块之后，再把它加回默认集合。
+ */
 export const genreStyleProvider: FragmentProvider = {
-  slot: "genre_style",
+  slot: "strategy_genre",
   name: "skill-genre-style",
   provide({ ctx, stepId }) {
     const genreCode = resolveGenreCode(ctx);
@@ -91,7 +101,7 @@ export const DEFAULT_PROVIDERS: readonly FragmentProvider[] = [
   operatorsProvider,
   relationsProvider,
   ledgerProvider,
-  genreStyleProvider,
+  ...STRATEGY_PROVIDERS,
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -114,7 +124,7 @@ export function buildDataHelpers(ctx: NarrativeContext): Record<string, (arg: st
 /**
  * 运行 provider，得到喂给 syntax.renderPlaceholders 的 slot 映射。
  * 键约定：
- *   - 骨架插槽名直接作键（{{slot:genre_style}} / {{slot:operators}}）；
+ *   - 骨架插槽名直接作键（{{slot:strategy_genre}} / {{slot:operators}}）；
  *   - IP DNA 段额外以 "IP_DNA.<name>" 别名暴露（兼容 {{IP_DNA.operators}} 占位 T2）；
  *   - skill 细分槽以 "SKILL.<slot>" 暴露（兼容 {{SKILL.style_guide}} 旧占位）。
  */

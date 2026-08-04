@@ -18,6 +18,14 @@ import { runGraphQA, type GraphAdapter, type QaGraph } from "../../utils/graph-q
 export const QUEST_GENERATION_COMPOSER: PromptComposer = {
   stepId: "quest_generation",
   blocks: {
+    cot: `## 机制与流程
+1. 先把本情节节点在主线上的位置认清楚，据此决定这是推进主线的任务还是旁支。
+2. 由剧情因果导出触发条件与完成条件——两端都必须能在上下文里找到依据。
+3. 拆解目标序列，让玩家的每一步操作都对应剧情里真实发生的一件事。
+4. 落数值：先定 combat 难度档（由剧情位置决定），再让 growth / economy 与难度相称，
+   最后按本任务真实改变的人物关系填 affinity。
+5. 自检：任务链是否可达无环？前置与后继是否符合剧情时间线？
+   数值之间是否自洽（难的更值钱，消耗大的有回报）？`,
     role: `你是游戏任务系统策划，请为给定的情节节点生成游戏任务。所有输出使用中文。`,
     task_spec: `## 任务结构要求
 
@@ -35,6 +43,7 @@ export const QUEST_GENERATION_COMPOSER: PromptComposer = {
 11. **rewards**: { items?:[{name,count}], unlock?, description }
 12. **prerequisites**: 前置任务ID数组
 13. **next_quests**: 后续任务ID数组
+14. **numbers**: 数值系统（见下节，按可填程度输出，不硬凑）
 
 ## 设计原则
 
@@ -42,14 +51,41 @@ export const QUEST_GENERATION_COMPOSER: PromptComposer = {
 - 支线任务丰富世界观、角色关系
 - 触发条件必须基于剧情上下文（不能凭空）
 - 奖励道具应尽量来自道具清单
-- 前后任务链必须符合剧情时间线`,
+- 前后任务链必须符合剧情时间线
+
+## 数值系统（本环节落盘）
+
+任务是叙事与数值的交汇处：剧情说"这场仗很难"，数值必须兑现成玩家能感知的难度。
+在 numbers 字段里给出四类数值，**只填有依据的那几类**——纯对话任务不必编战斗数值，
+叙事驱动品类可整体留空，宁缺毋滥：
+
+- **combat 战斗数值**：recommended_level（推荐等级）、difficulty（trivial/easy/normal/hard/boss）、
+  rationale（为何是这个档位：对标此前哪场战斗、玩家此时应有什么能力）。
+  难度必须服从剧情位置——序章不该出 boss 档，决战不该是 easy。
+- **growth 养成数值**：exp、skill_points、unlocks（解锁的能力/形态）。
+  主线任务的成长回报应明显高于同期支线，让玩家沿主线走就不会卡关。
+- **economy 经济数值**：currency_gain / currency_cost，以及 rationale。
+  收支要与世界观的经济水平相称：贫瘠村落的酬金不该抵得上王室悬赏。
+- **affinity 好感度**：与哪些角色的关系发生增减（character / delta / reason）。
+  delta 的量纲由本作自定，但同一部作品内必须自洽——不要这个任务给 +5、
+  下个同量级任务给 +500。有明确关系人的任务才填。
+
+数值之间要相互咬合：高 difficulty 应配更高的 exp 与酬金；
+消耗型任务（cost 高）要有对应回报，否则玩家做完只觉得亏。`,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
     output_schema: `输出JSON对象：
-{"quests": [{ ... }]}`,
+{"quests": [{ ... , "numbers": {
+  "combat": {"recommended_level": 12, "difficulty": "hard", "rationale": "..."},
+  "growth": {"exp": 800, "skill_points": 1, "unlocks": ["..."]},
+  "economy": {"currency_gain": 300, "currency_cost": 0, "rationale": "..."},
+  "affinity": [{"character": "...", "delta": 10, "reason": "..."}]
+}}]}
+
+numbers 的四个子项均可缺省；无依据可填时整个 numbers 一并省略，不要输出空壳。`,
   },
-  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "cot", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

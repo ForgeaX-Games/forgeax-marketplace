@@ -16,7 +16,6 @@ import {
   Controls,
   EdgeLabelRenderer,
   Handle,
-  MarkerType,
   Position,
   SelectionMode,
   getSmoothStepPath,
@@ -42,28 +41,42 @@ function ensureCanvasStyle(): void {
   }
   // 每次调用写回，避免 HMR 后旧 CSS（含错误间距）残留。
   s.textContent = `
-    .react-flow__controls{box-shadow:0 2px 12px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;border:1px solid #33373f}
-    .react-flow__controls-button{background:#20242c;border-bottom:1px solid #33373f;width:26px;height:26px}
-    .react-flow__controls-button:hover{background:#2b3038}
-    .react-flow__controls-button svg{fill:#c9d1e0;max-width:14px;max-height:14px}
-    /* 蓝图地图：整图底板+节点+连线；与 Controls 同行靠右 */
-    .gv-graph-minimap.react-flow__panel.bottom.left{left:52px;border-radius:8px;overflow:hidden;border:1px solid #403830;box-shadow:0 2px 12px rgba(0,0,0,.55);background:#12151c;cursor:grab}
+    /* Figma 14597_19658：Control Panel 竖条 —— 白 5% 底、圆角 8、白系图标，与蓝图地图等高对齐。 */
+    .react-flow__controls{box-shadow:0 2px 12px rgba(0,0,0,.5);border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.05);background:rgba(255,255,255,0.05)}
+    .react-flow__controls-button{background:transparent;border-bottom:1px solid rgba(255,255,255,0.08);width:33px;height:29px}
+    .react-flow__controls-button:last-child{border-bottom:none}
+    .react-flow__controls-button:hover{background:rgba(255,255,255,0.10)}
+    .react-flow__controls-button svg{fill:rgba(255,255,255,0.80);max-width:16px;max-height:16px}
+    /* Figma 14597_19658：蓝图地图 —— 圆角 8、描边白 10%、视口指示品牌橙。贴左下角。 */
+    .gv-graph-minimap.react-flow__panel.bottom.left{left:12px;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.10);box-shadow:0 2px 12px rgba(0,0,0,.55);background:#12151c;cursor:grab}
+    /* Control Panel：紧贴蓝图地图右侧（地图宽 168 + 左 12 + 间距 8 = 188） */
+    .react-flow__controls.react-flow__panel.bottom.left{left:188px}
     .gv-graph-minimap:active{cursor:grabbing}
     .gv-graph-minimap-svg{display:block;width:100%;height:100%;touch-action:none}
     .gv-graph-minimap-board{fill:#1a2030;stroke:#2a3344;stroke-width:1}
     .gv-graph-minimap-edge{stroke:rgba(148,163,184,.45);stroke-linecap:round}
     .gv-graph-minimap-node{stroke:rgba(11,13,16,.7);opacity:.95}
     .gv-graph-minimap-mask{fill:rgba(6,8,12,.48);stroke:none}
-    .gv-graph-minimap-viewport{stroke:#f08840}
+    .gv-graph-minimap-viewport{stroke:#FF9C2A}
     .react-flow__attribution{display:none}
     /* 节点内可溢出（右侧 hover 菜单）；外层 gv-canvas-host 用 contain:paint 裁命中区，防止渗到工具条 */
     .react-flow__node{overflow:visible!important}
     /* 展开 ⋮ 菜单时把整个 RF 节点抬到最上，避免「添加节点」等 tip 被右侧节点盖住 */
     .react-flow__node:has(.gv-bp-node-more:hover),.react-flow__node:has(.gv-bp-node-more:focus-within){z-index:1000!important}
     .react-flow,.react-flow__renderer{overflow:hidden!important}
-    .gv-canvas-chrome{position:absolute;right:12px;bottom:12px;z-index:5;display:flex;gap:6px;pointer-events:none}
-    .gv-canvas-chrome button{pointer-events:auto;background:#252019;border:1px solid #403830;color:#f6f1e9;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.45)}
-    .gv-canvas-chrome button:hover{background:#2f2923;border-color:#f08840}
+    /* 画布底色对齐 Figma 设计稿：#333333。 */
+    .react-flow__pane{background:#333333}
+    /* Figma 13135_19511：边连线 stroke-width 1（防 xyflow 默认 .react-flow__edge-path 的 1px 覆盖）。
+       traversed(animated) 边 1.5px；配色由每条边的 inline style 提供，此处只兜底粗细。 */
+    .react-flow__edge-path{stroke-width:1px}
+    .react-flow__edge.animated .react-flow__edge-path{stroke-width:1.5px}
+    /* Figma 15195_74435：三按钮横排，白 5% 底、无边框、8px 圆角、30px 高、14px 白字。 */
+    /* Figma 15195_74423：三按钮定位到画布顶部 bar 右侧（bar 高 58，按钮高 30，top 14 垂直居中）。 */
+    .gv-canvas-chrome{position:absolute;right:12px;top:14px;z-index:6;display:flex;gap:12px;pointer-events:none}
+    .gv-canvas-chrome button{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:rgba(255,255,255,0.05);border:none;color:#FFFFFF;border-radius:8px;font-size:14px;font-weight:400;font-family:'PingFang SC',system-ui,sans-serif;cursor:pointer}
+    .gv-canvas-chrome button:hover{background:rgba(255,255,255,0.10)}
+    .gv-canvas-chrome .gv-chrome-ico{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:rgba(255,255,255,0.80)}
+    .gv-canvas-chrome .gv-chrome-ico svg{display:block}
     .gv-bp-node{position:relative}
     /* 标题行右侧 ⋮：与文案同排垂直居中，无底色；hover ⋮ 才展开后插/复制/删除 */
     .gv-bp-node-more{position:relative;flex:none;z-index:20;display:flex;align-items:center}
@@ -96,10 +109,10 @@ function ensureCanvasStyle(): void {
     .gv-readonly-flow .react-flow__pane.dragging{cursor:grabbing}
     /* 边中点悬浮删除：扩大命中区后 hover 才露按钮；试玩 readOnly 不挂 onDelete */
     .gv-edge-delete{position:absolute;transform:translate(-50%,-50%);pointer-events:all;z-index:8}
-    .gv-edge-delete button{position:relative;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin:0;padding:0;border:1px solid #5a4038;border-radius:999px;background:rgba(27,23,19,.96);color:#f0a8a8;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.45);line-height:0}
-    .gv-edge-delete button:hover{background:rgba(239,68,68,.22);border-color:#ef4444;color:#ffb4b4}
+    .gv-edge-delete button{position:relative;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin:0;padding:0;border:1px solid #2a3a55;border-radius:999px;background:rgba(20,24,32,.96);color:#9DC0F5;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.45);line-height:0}
+    .gv-edge-delete button:hover{background:rgba(70,124,201,.22);border-color:#467CC9;color:#FFFFFF}
     .gv-edge-delete button svg{width:12px;height:12px}
-    .gv-edge-delete button[data-tip]::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);white-space:nowrap;padding:5px 10px;font-size:11px;line-height:1.3;border-radius:6px;background:rgba(20,18,16,.96);border:1px solid #4a4036;color:#e8eaed;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .1s;z-index:40}
+    .gv-edge-delete button[data-tip]::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);white-space:nowrap;padding:5px 10px;font-size:11px;line-height:1.3;border-radius:6px;background:rgba(18,22,30,.96);border:1px solid #2a3a55;color:#FFFFFF;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .1s;z-index:40}
     .gv-edge-delete button[data-tip]:hover::after{opacity:1}
   `
 }
@@ -299,6 +312,16 @@ function handleColor(id: string): string {
   return '#3b82f6' // 交互出口（pass/fail/选项/热点…）
 }
 
+/**
+ * InputIcon —— Figma 12414_5350 I/O 中段左侧「输入」图标。
+ * 与节点外侧 handle、行末出口三角同款 10×12 实心填充 ▶（右指三角），保持视觉一致。
+ */
+const InputIcon = (): JSX.Element => (
+  <svg width="10" height="12" viewBox="0 0 10 12" fill="none" aria-hidden>
+    <path d="M0 0L10 6L0 12V0Z" fill="rgba(255,255,255,0.60)" />
+  </svg>
+)
+
 const Ico = {
   insert: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -334,140 +357,327 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
   const { fx, details, active, isGroup, isPack, isEntry, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
   const accent = BADGE_COLOR[fx.data.badge] ?? '#4b5563'
   const canEdit = !!(onInsertAfter || onDuplicate || onDelete)
-  return (
+  // Figma 12414_5350：节点卡片背景 #232323、圆角 12、常态 box-shadow 0 0 15px 10px rgba(0,0,0,0.08)。
+  // 选中态：加蓝色 outline 2px #7DACED（offset -1px，不挤占布局）。
+  // 预览播放中（active）：蓝色外发光 box-shadow 0 0 15px 10px rgba(70,124,201,0.65)。
+  // 预览播放 + 选中：outline 与外发光叠加。
+  const baseShadow = '0px 0px 15px 10px rgba(0,0,0,0.08)'
+  const playShadow = '0px 0px 15px 10px rgba(70,124,201,0.65)'
+  const boxShadow = active ? playShadow : baseShadow
+
+  // Figma 14947_83595：子蓝图/子流程节点标题栏颜色。
+  // 子蓝图 = 绿色 rgba(69.66,200.65,69.66,0.20)；子流程 = 黄色 rgba(234,179,8,0.20)（沿用 subflow badge 色）。
+  const groupTitleBg = isGroup
+    ? isPack
+      ? 'rgba(69.66, 200.65, 69.66, 0.20)'
+      : 'rgba(234, 179, 8, 0.20)'
+    : 'rgba(69.66, 124.40, 200.65, 0.20)' // 普通节点：蓝色
+  const groupTypeLabel = isGroup ? (isPack ? '子蓝图' : '子流程') : null
+
+  const nodeCard = (
     <div
       className={`gv-bp-node${selected ? ' is-selected' : ''}`}
       style={{
         position: 'relative',
-        minWidth: 148,
-        borderRadius: 10,
-        border: isGroup ? '2px dashed #f08840' : `2px solid ${active || selected ? '#f5a623' : '#33373f'}`,
-        background: '#1b1e24',
-        color: '#e8eaed',
-        fontSize: 12,
+        minWidth: 173,
+        borderRadius: 12,
+        border: 'none',
+        background: '#232323',
+        color: '#FFFFFF',
+        fontSize: 14,
         overflow: 'visible',
-        boxShadow: active || selected ? '0 0 0 3px rgba(245,166,35,0.35), 0 6px 18px rgba(0,0,0,0.5)' : '0 3px 10px rgba(0,0,0,0.4)',
+        boxShadow: boxShadow,
+        outline: selected ? '2px solid #7DACED' : 'none',
+        outlineOffset: -1,
       }}
     >
-      {isGroup && (
-        <button
-          type="button"
-          title={isPack ? '双击或点此进入子蓝图' : '双击或点此下钻子流程'}
-          onClick={(e) => { e.stopPropagation(); onDrill?.(id) }}
-          onDoubleClick={(e) => e.stopPropagation()}
-          style={{ position: 'absolute', top: -10, left: 8, zIndex: 2, fontSize: 9, lineHeight: '16px', padding: '0 6px', borderRadius: 8, background: '#f08840', color: '#0b0d10', fontWeight: 700, whiteSpace: 'nowrap', border: 'none', cursor: 'pointer' }}
-        >
-          {isPack ? '子蓝图 · 进入' : '⤵ 下钻'}
-        </button>
-      )}
-      {fx.inputs.map((h) => (
-        <Handle key={h.id} id={h.id} type="target" position={Position.Left} style={{ width: 9, height: 9, background: '#9ca3af', border: 'none' }} />
-      ))}
-      {/* 标题条（按玩法/结局着色）；⋮ 与文案同排垂直居中 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 6px 6px 10px', background: `${accent}22`, borderBottom: `1px solid ${accent}55`, borderRadius: '8px 8px 0 0' }}>
-        <span
-          aria-label={isEntry ? '入口节点' : undefined}
-          title={isEntry ? '入口节点' : undefined}
-          style={{ width: 8, height: 8, borderRadius: '50%', background: isEntry ? '#55b98a' : accent, flexShrink: 0 }}
-        />
-        <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{fx.data.label}</span>
-        {fx.data.badge && (
-          <span style={{ marginLeft: 'auto', fontSize: 9, padding: '1px 6px', borderRadius: 8, background: accent, color: '#0b0d10', fontWeight: 700 }}>{fx.data.badge}</span>
-        )}
-        {canEdit && (
-          <div className="gv-bp-node-more" style={{ marginLeft: fx.data.badge ? 0 : 'auto' }}>
+      {/* 标题栏：子蓝图/子流程使用对应颜色背景 + 类型标签 + 「进入」按钮；
+          普通节点保持蓝色背景 + 名称 + badge + 操作菜单。 */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '12px 8px 12px 8px',
+        background: groupTitleBg,
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: '12px 12px 0 0',
+      }}>
+        {isGroup ? (
+          <>
+            {/* 节点名称（如「我方回合」） */}
+            <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>{fx.data.label}</span>
+            {/* Figma 14947_83595：「进入」按钮 pill —— 紧跟节点名称后面 */}
             <button
               type="button"
-              className="gv-bp-more-btn nodrag nopan"
-              aria-label="节点操作"
-              title="节点操作"
-              onClick={(e) => e.stopPropagation()}
+              className="nodrag nopan"
+              aria-label={`进入${groupTypeLabel}`}
+              title={`进入${groupTypeLabel}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onDrill?.(id)
+              }}
+              style={{
+                height: 19,
+                padding: '0 6px',
+                borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.20)',
+                background: 'transparent',
+                color: 'rgba(255,255,255,0.60)',
+                fontSize: 11,
+                fontWeight: 400,
+                cursor: 'pointer',
+                lineHeight: '19px',
+              }}
             >
-              {Ico.more}
+              进入
             </button>
-            <div className="gv-bp-node-actions">
-              <div className="gv-bp-menu" role="menu">
+            {/* 「...」操作菜单（后插/复制/删除），与普通节点保持一致 */}
+            {canEdit && (
+              <div className="gv-bp-node-more" style={{ marginLeft: 'auto' }}>
                 <button
                   type="button"
-                  className="nodrag nopan"
-                  role="menuitem"
-                  aria-label="后插"
-                  data-tip="添加节点"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onInsertAfter?.(id)
-                  }}
+                  className="gv-bp-more-btn nodrag nopan"
+                  aria-label="节点操作"
+                  title="节点操作"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  {Ico.insert}
+                  {Ico.more}
                 </button>
-                <button
-                  type="button"
-                  className="nodrag nopan"
-                  role="menuitem"
-                  aria-label="复制"
-                  data-tip={`复制此节点（${MOD_HINT}D）`}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDuplicate?.(id)
-                  }}
-                >
-                  {Ico.copy}
-                </button>
-                <div className="sep" aria-hidden />
-                <button
-                  type="button"
-                  className="nodrag nopan danger"
-                  role="menuitem"
-                  aria-label="删除"
-                  data-tip="删除此节点"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onDelete?.(id)
-                  }}
-                >
-                  {Ico.trash}
-                </button>
+                <div className="gv-bp-node-actions">
+                  <div className="gv-bp-menu" role="menu">
+                    <button
+                      type="button"
+                      className="nodrag nopan"
+                      role="menuitem"
+                      aria-label="后插"
+                      data-tip="添加节点"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onInsertAfter?.(id)
+                      }}
+                    >
+                      {Ico.insert}
+                    </button>
+                    <button
+                      type="button"
+                      className="nodrag nopan"
+                      role="menuitem"
+                      aria-label="复制"
+                      data-tip={`复制此节点（${MOD_HINT}D）`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDuplicate?.(id)
+                      }}
+                    >
+                      {Ico.copy}
+                    </button>
+                    <div className="sep" aria-hidden />
+                    <button
+                      type="button"
+                      className="nodrag nopan danger"
+                      role="menuitem"
+                      aria-label="删除"
+                      data-tip="删除此节点"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDelete?.(id)
+                      }}
+                    >
+                      {Ico.trash}
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            )}
+          </>
+        ) : (
+          <>
+            <span
+              aria-label={isEntry ? '入口节点' : undefined}
+              title={isEntry ? '入口节点' : undefined}
+              style={{ width: 8, height: 8, borderRadius: '50%', background: isEntry ? '#55b98a' : accent, flexShrink: 0 }}
+            />
+            <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>{fx.data.label}</span>
+            {fx.data.badge && (
+              <span style={{ marginLeft: 'auto', fontSize: 9, padding: '1px 6px', borderRadius: 8, background: accent, color: '#0b0d10', fontWeight: 700 }}>{fx.data.badge}</span>
+            )}
+            {canEdit && (
+              <div className="gv-bp-node-more" style={{ marginLeft: fx.data.badge ? 0 : 'auto' }}>
+                <button
+                  type="button"
+                  className="gv-bp-more-btn nodrag nopan"
+                  aria-label="节点操作"
+                  title="节点操作"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {Ico.more}
+                </button>
+                <div className="gv-bp-node-actions">
+                  <div className="gv-bp-menu" role="menu">
+                    <button
+                      type="button"
+                      className="nodrag nopan"
+                      role="menuitem"
+                      aria-label="后插"
+                      data-tip="添加节点"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onInsertAfter?.(id)
+                      }}
+                    >
+                      {Ico.insert}
+                    </button>
+                    <button
+                      type="button"
+                      className="nodrag nopan"
+                      role="menuitem"
+                      aria-label="复制"
+                      data-tip={`复制此节点（${MOD_HINT}D）`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDuplicate?.(id)
+                      }}
+                    >
+                      {Ico.copy}
+                    </button>
+                    <div className="sep" aria-hidden />
+                    <button
+                      type="button"
+                      className="nodrag nopan danger"
+                      role="menuitem"
+                      aria-label="删除"
+                      data-tip="删除此节点"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDelete?.(id)
+                      }}
+                    >
+                      {Ico.trash}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
-      {/* 出口引脚 */}
-      <div data-testid="node-edge-info" style={{ padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-end' }}>
-        {fx.outputs.map((h) => {
+      {/* Figma 12414_5350 I/O 中段：白 5% 背景。
+          左侧固定「→输入」标签（44×17，12px 白 60%，12×12 输入图标），
+          右侧每个 output 一行（12px 文字 + 12×12 输出图标 handle）。
+          当没有演出摘要时加上底部圆角，防止卡片 #232323 背景在角落漏出。 */}
+      <div data-testid="node-edge-info" style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5, background: 'rgba(255,255,255,0.05)', borderBottomLeftRadius: (details.performance || details.interfaces.length > 0 || details.settlements.length > 0) ? 0 : 12, borderBottomRightRadius: (details.performance || details.interfaces.length > 0 || details.settlements.length > 0) ? 0 : 12 }}>
+        {(() => {
+          // 顶部行：左「输入」+ 图标，右「第一个出口名称」+ 三角（替代固定「输出」）。
+          // 第一个出口（默认推进）显示在顶部行右侧，下方行从第二个出口开始渲染。
+          const first = fx.outputs[0]
+          const firstFid = first?.data?.flowId ?? first?.id
+          const firstDisplay = first?.data?.displayLabel ?? first?.label ?? firstFid
+          const firstColor = firstFid ? handleColor(firstFid) : 'rgba(255,255,255,0.60)'
+          return (
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.60)', height: 17 }}>
+              {fx.inputs.map((h) => (
+                //输入端 1×1 透明 Handle 作为边的连接点，定位到「输入」行左侧节点边缘。
+                <Handle
+                  key={h.id}
+                  id={h.id}
+                  type="target"
+                  position={Position.Left}
+                  style={{ position: 'absolute', left: -8, top: '50%', transform: 'translateY(-50%)', width: 1, height: 1, minWidth: 1, minHeight: 1, background: 'transparent', border: 'none', opacity: 0 }}
+                />
+              ))}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <InputIcon />
+                <span>输入</span>
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: firstColor }}>
+                <span title={firstFid}>{firstDisplay}</span>
+                {/* 与出口行三角同款10×12，确保右边缘对齐同一列 */}
+                <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: firstColor }}>
+                  <svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M0 0L10 6L0 12V0Z" fill="currentColor" /></svg>
+                </span>
+                {/* 第一个出口的 source Handle 也在此行（替代原「输出」位置），绝对定位到三角中心。 */}
+                {first && (
+                  <Handle
+                    id={first.id}
+                    type="source"
+                    position={Position.Right}
+                    className={`gv-flow-handle${canEdit ? ' is-interactive' : ' is-static'}`}
+                    style={{
+                      position: 'absolute',
+                      right: 0,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      width: 10,
+                      height: 12,
+                      minWidth: 10,
+                      minHeight: 12,
+                      background: 'transparent',
+                      border: 'none',
+                      opacity: 0,
+                      pointerEvents: canEdit ? undefined : 'none',
+                    }}
+                  />
+                )}
+              </span>
+            </div>
+          )
+        })()}
+        {/* 其余 output（从第二个开始）每个一行：右对齐文字 + 右侧 handle。 */}
+        {fx.outputs.slice(1).map((h) => {
           const fid = h.data?.flowId ?? h.id
           const display = h.data?.displayLabel ?? h.label ?? fid
           const c = handleColor(fid)
           return (
-            <div key={h.id} style={{ position: 'relative', fontSize: 10, color: c, display: 'flex', alignItems: 'center', gap: 4, paddingRight: 8 }}>
+            <div key={h.id} style={{ position: 'relative', fontSize: 12, color: c, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
               <span title={fid}>{display}</span>
+              {/* 行末右指三角箭头（独立 SVG 装饰），与文字间距 8px（对齐 Figma 输入组间距）。
+                  三角是行末最后一个占位元素，右边缘与顶部第一出口三角对齐同一垂直列（贴节点边缘）。 */}
+              <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: c, pointerEvents: 'none' }}>
+                <svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M0 0L10 6L0 12V0Z" fill="currentColor" /></svg>
+              </span>
+              {/* Handle 绝对定位到三角中心，不占用 flex 宽度，避免把三角向左挤（保证右对齐贴边）。 */}
               <Handle
                 id={h.id}
                 type="source"
                 position={Position.Right}
                 className={`gv-flow-handle${canEdit ? ' is-interactive' : ' is-static'}`}
-                style={{ position: 'relative', transform: 'none', right: -4, width: 9, height: 9, color: c, background: c, border: 'none', pointerEvents: canEdit ? undefined : 'none' }}
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: 10,
+                  height: 12,
+                  minWidth: 10,
+                  minHeight: 12,
+                  background: 'transparent',
+                  border: 'none',
+                  opacity: 0,
+                  pointerEvents: canEdit ? undefined : 'none',
+                }}
               />
             </div>
           )
         })}
       </div>
+      {/* Figma 12414_5350 演出摘要行：左 "演出" 标签 12px 白 40%，右 "视频名称" 12px 白 80%，左右边距 8px。
+          加底部圆角以对齐卡片，防止 #232323 背景在角落漏出。 */}
       {(details.performance || details.interfaces.length > 0 || details.settlements.length > 0) && (
-        <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '34px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '7px 10px', borderTop: '1px solid #2b2f37' }}>
+        <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '40px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '4px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
           {details.performance && (
             <>
-              <span style={{ color: '#8f98a8' }}>演出</span>
-              <span title={details.performance} style={{ minWidth: 0, color: '#d9dde5', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
+              <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>演出</span>
+              <span title={details.performance} style={{ minWidth: 0, color: 'rgba(255,255,255,0.80)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
                 {details.performance}
               </span>
             </>
           )}
           {details.interfaces.length > 0 && (
             <>
-              <span style={{ color: '#8f98a8' }}>界面</span>
+              <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>界面</span>
               <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                 {details.interfaces.map((label, index) => (
-                  <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#d9dde5' }}>
+                  <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.80)', fontSize: 12 }}>
                     {label}
                   </span>
                 ))}
@@ -476,10 +686,10 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           )}
           {details.settlements.length > 0 && (
             <>
-              <span style={{ color: '#8f98a8' }}>结算</span>
+              <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>结算</span>
               <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                 {details.settlements.map((label, index) => (
-                  <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#d9dde5' }}>
+                  <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.80)', fontSize: 12 }}>
                     {label}
                   </span>
                 ))}
@@ -490,6 +700,9 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
       )}
     </div>
   )
+
+  // Figma 14947_83595：子蓝图/子流程节点不再外裹 #344761 容器，「进入」按钮已内嵌到标题栏。
+  return nodeCard
 }
 
 const nodeTypes = { perf: PerfNode }
@@ -512,7 +725,6 @@ function FlowEdge({
   targetY,
   sourcePosition,
   targetPosition,
-  markerEnd,
   style,
   data,
 }: EdgeProps): JSX.Element {
@@ -538,12 +750,24 @@ function FlowEdge({
   let labelX: number
   let labelY: number
   if (backward) {
-    // 从源右侧出发，向下绕到行下方，再回到目标左侧 —— 明显低于节点行，不遮挡。
+    // 回环/回退边（目标在源左侧）：
+    //  1) 先从「源出口」水平向右引出一段 stub，让出边在出口处清晰可见（能看出是哪个出口引出）；
+    //2) 再向下绕到行下方（dip），避免直线盖在中间节点上；
+    //  3) 到达目标前，从「目标输入口」左侧水平引入一段 stub，让入边在输入口处清晰可见。
+    const stub = 24
     const dip = Math.max(sourceY, targetY) + 120
-    path = `M ${sourceX},${sourceY} C ${sourceX + 80},${dip} ${targetX - 80},${dip} ${targetX},${targetY}`
-    // 三次贝塞尔 t=0.5 近似中点，把删除钮落在绕行弧上。
-    labelX = 0.125 * sourceX + 0.375 * (sourceX + 80) + 0.375 * (targetX - 80) + 0.125 * targetX
-    labelY = 0.125 * sourceY + 0.75 * dip + 0.125 * targetY
+    // 出口右侧引出点 / 输入口左侧引入点
+    const sx = sourceX + stub
+    const tx = targetX - stub
+ path = [
+      `M ${sourceX},${sourceY}`,
+      `L ${sx},${sourceY}`,
+      `C ${sx + 80},${dip} ${tx - 80},${dip} ${tx},${targetY}`,
+ `L ${targetX},${targetY}`,
+    ].join(' ')
+    // 三次贝塞尔 t=0.5 近似中点（用引出/引入后的控制点），把删除钮落在绕行弧上。
+    labelX = 0.125 * sx + 0.375 * (sx + 80) + 0.375 * (tx - 80) + 0.125 * tx
+ labelY = 0.125 * sourceY + 0.75 * dip + 0.125 * targetY
   } else {
     ;[path, labelX, labelY] = getSmoothStepPath({
       sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 12,
@@ -555,9 +779,11 @@ function FlowEdge({
         <BaseEdge
           id={id}
           path={path}
-          markerEnd={markerEnd}
+          // Figma 13135_19511：边为纯线条，不渲染任何末端 marker（无箭头）。
+          markerEnd={undefined}
           interactionWidth={24}
-          style={{ ...style, stroke: backward ? (style?.stroke ?? '#8a6d3b') : style?.stroke }}
+          // Figma 13135_19419：回环边兜底色与主流一致 #467CC9。
+          style={{ ...style, stroke: backward ? (style?.stroke ?? '#467CC9') : style?.stroke }}
         />
       </g>
       {onDelete && hovered && (
@@ -854,9 +1080,10 @@ function GraphCanvasInner({
           targetHandle: e.targetHandle,
           label: e.label,
           type: 'flow',
-          markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: traversedEdgeIds?.has(e.id) ? '#f5a623' : '#6b7280' },
+          // Figma 13135_19511：边连线为纯线条（无箭头），stroke #467CC9、stroke-width 1。
+          // 激活态（traversed）用更亮的 #7DACED + 加粗到 1.5px 区分。
           animated: traversedEdgeIds?.has(e.id) ?? false,
-          style: traversedEdgeIds?.has(e.id) ? { stroke: '#f5a623', strokeWidth: 2 } : { stroke: '#6b7280' },
+          style: traversedEdgeIds?.has(e.id) ? { stroke: '#7DACED', strokeWidth: 1.5 } : { stroke: '#467CC9', strokeWidth: 1 },
           data: {
             onDelete: readOnly ? undefined : onDeleteEdge,
           } as FlowEdgeData,
@@ -1047,7 +1274,11 @@ function GraphCanvasInner({
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onSelectionChange={onSelectionChange}
-        onNodeDoubleClick={(_e, n) => { if (containerIds.has(n.id)) onDrill?.(n.id) }}
+        onNodeDoubleClick={(_e, n) => {
+          // Figma 14947_83595：子流程/子蓝图的下钻通过标题栏「进入」按钮触发，
+          // 双击不再下钻，避免与节点选中/打开配置面板的交互冲突。
+          void n
+        }}
         onPaneClick={() => {
           setSelectedIds([])
           onPaneClick?.()
@@ -1074,8 +1305,9 @@ function GraphCanvasInner({
         deleteKeyCode={readOnly || !keyboardDeleteEnabled ? null : ['Delete', 'Backspace']}
         proOptions={{ hideAttribution: true }}
       >
-        <Background />
-        <Controls position="bottom-left" />
+   <Background />
+        {/* Figma 14597_19658：Control Panel 只保留 3 个操作（放大/缩小/复位），隐藏 interactive 锁按钮。 */}
+  <Controls position="bottom-left" showInteractive={false} />
         <GraphMiniMap nodeColor={minimapNodeColor} />
       </ReactFlow>
       {!readOnly && selectedIds.length > 1 && (
@@ -1092,6 +1324,7 @@ function GraphCanvasInner({
           {clipTip}
         </div>
       )}
+      {/* Figma 15195_74435：右下角三按钮。白 5% 底、无边框、8px 圆角、14px 白字 + 20 图标。 */}
       <div className="gv-canvas-chrome">
         {onAddNode && (
           <button
@@ -1101,9 +1334,12 @@ function GraphCanvasInner({
               // 轻微抖动，连续添加时不完全重叠。
               onAddNode({ x: c.x - 90 + Math.random() * 40, y: c.y - 40 + Math.random() * 40 })
             }}
-            title="添加演出节点"
+            title="新建演出节点"
           >
-            ＋ 添加节点
+            <span className="gv-chrome-ico" aria-hidden>
+              <svg width="12" height="12" viewBox="0 0 11 11" fill="none"><path d="M0 4.55046L0 6.00879L4.604 5.97917V10.5H6.06234V5.97917H10.5V4.52083H6.06234V0H4.604V4.52083L0 4.55046Z" fill="currentColor" /></svg>
+            </span>
+            新建节点
           </button>
         )}
         <button
@@ -1111,11 +1347,17 @@ function GraphCanvasInner({
           onClick={() => { void fitGraphInView({ duration: 200 }) }}
           title="把整张图框进视口正中（不改动节点位置）"
         >
-          ◎ 居中
+          <span className="gv-chrome-ico" aria-hidden>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11.0832 6.99935C11.0832 9.25452 9.255 11.0827 6.99984 11.0827M11.0832 6.99935C11.0832 4.74419 9.255 2.91602 6.99984 2.91602M11.0832 6.99935H12.8332M6.99984 11.0827C4.74468 11.0827 2.9165 9.25452 2.9165 6.99935M6.99984 11.0827V12.8327M6.99984 2.91602C4.74468 2.91602 2.9165 4.74419 2.9165 6.99935M6.99984 2.91602V1.16602M2.9165 6.99935H1.1665" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /><path d="M7.58317 6.99935C7.58317 7.32152 7.32201 7.58268 6.99984 7.58268C6.67766 7.58268 6.4165 7.32152 6.4165 6.99935C6.4165 6.67717 6.67766 6.41602 6.99984 6.41602C7.32201 6.41602 7.58317 6.67717 7.58317 6.99935Z" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /></svg>
+          </span>
+          定位当前节点
         </button>
         {onFitLayout && (
           <button type="button" onClick={onFitLayout} title="dagre 自动重排节点位置并框选">
-            ⤢ 自适应
+            <span className="gv-chrome-ico" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.2085 6.41732V3.20898H6.41683M10.7918 7.58398V10.7923H7.5835M5.25016 5.25065L3.70033 3.70082M10.3 10.3005L8.75016 8.75065M7.87516 6.12565L6.12516 7.87437" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /></svg>
+            </span>
+            自适应
           </button>
         )}
       </div>

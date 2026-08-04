@@ -22,6 +22,7 @@ import { NarrativeCardNode } from "./nodes/NarrativeCardNode";
 import { DetroitEdge } from "./edges/DetroitEdge";
 import { useDetroitLayout } from "../hooks/useDetroitLayout";
 import { useAnimatedProgress } from "../hooks/useAnimatedProgress";
+import { useRegisterCanvasControls } from "../lib/canvasControls";
 import { useT } from "../i18n";
 
 class CanvasErrorBoundary extends React.Component<
@@ -195,6 +196,7 @@ function NarrativeCanvasInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView, setCenter, getViewport } = useReactFlow();
+  useRegisterCanvasControls();
   const prevKeyRef = useRef("");
   const fitViewTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -409,8 +411,9 @@ function NarrativeCanvasInner() {
           size={1.1}
           color="rgba(77,255,160,0.04)"
         />
-        <Controls showInteractive={false} />
+        {/* 缩放/复位由创作空间浮层的画布控件统一提供，这里不再摆第二套。 */}
         <MiniMap
+          position="top-right"
           nodeColor={(n) => {
             if (n.type === "storyChild") return "rgba(77,255,160,0.30)";
             let lookupId = n.id;

@@ -1,3 +1,6 @@
+// 类型导入（编译期擦除，不引入运行时依赖边）。
+import type { AgentLifecycle } from "../pipeline/agent-contract.js";
+
 /**
  * 初步方案的结构化大纲（替代原 Markdown 文本）。
  * 下游步骤通过 JSON.stringify 将其转为 LLM 上下文；
@@ -45,8 +48,33 @@ export interface UploadedScript {
 
 export type ContentLocale = "en" | "zh";
 
+/**
+ * 三轴路由选择（PRD v1.4 §3.2.2）。
+ *
+ * 第四轴「游戏品类」不在这里 —— 它由所选叙事策划专家隐式确定，走
+ * tier_detection / demand_analysis 的 genre_code。四轴合起来喂提示词的 strategy 段。
+ */
+export interface NarrativeAxesSelection {
+  /**
+   * 游戏品类 code，见 knowledge/genre-taxonomy.ts。
+   *
+   * 与另外三轴放在一起注入，是因为策略段的四个子槽要同时可用：品类专家管线里没有
+   * demand_analysis / tier_detection 这类检测步，光靠 ctx 里的检测结果取品类会一直是空，
+   * 品类策略卡就永远装不进提示词。选定专家时品类已经确定，直接随配置带进来即可。
+   */
+  genre?: string | null;
+  /** 叙事类型 code，见 knowledge/narrative-axes/story-types.ts */
+  storyType?: string | null;
+  /** 叙事题材 code，见 knowledge/narrative-axes/story-themes.ts */
+  storyTheme?: string | null;
+  /** 叙事结构 code：三轴综合推导的结论，或用户显式指定 */
+  structure?: string | null;
+}
+
 export interface NarrativeContext {
   user_input: string;
+  /** 三轴路由选择，运行开始时由 PipelineConfig 注入；缺省表示未换轴的旧条目。 */
+  narrative_axes?: NarrativeAxesSelection;
   /** UI locale for generated narrative content (en/zh). Injected from PipelineConfig at run start. */
   content_locale?: ContentLocale;
   /**
@@ -654,6 +682,89 @@ export interface StoryFramework {
   };
 }
 
+/**
+ * 剧情树上节点的功能位（结构席的核心产出之一）。
+ *
+ * 不管什么品类，剧情都是一棵剧情树，差别只在树的形态（由叙事策略的结构轴决定）。
+ * 五种功能位是所有形态共用的原语：
+ *   start   起始节点——一个游戏单元的入口
+ *   branch  分支节点——玩家在此作答，之后走向分岔
+ *   merge   聚合节点——多条分支在此收束回同一条主干
+ *   ending  结局节点——本单元/全局的终点，不再有后继
+ *   normal  普通节点——单入单出的推进
+ *
+ * 线性形态只用 start/normal/ending；树状形态四种齐用；碎片化形态大量 normal
+ * 而几乎无 merge。形态由策略卡塑造，功能位的语义恒定。
+ */
+export type NodeFunction = "start" | "branch" | "merge" | "ending" | "normal";
+
+/**
+ * 分支 / 聚合 / 结局的触发条件（结构席在此落盘）。
+ *
+ * 结构层不写正文，但必须把"凭什么走这条路"说清楚，否则下游情节层只能瞎猜，
+ * 任务层也无从把它转成玩家可执行的开启/完成条件。
+ *
+ * 条件**挂在边上而非节点上**（见 NodeEdge）：一个三选分支是三条边各带自己的条件，
+ * 若挂在节点上就得再靠一个 related_nodes 数组去关联目标，多一层易错的对应关系。
+ * 这一形制取自影游侧已验证的 VnNextEdge。
+ */
+export interface NodeCondition {
+  /** 条件类型：玩家选择 / 状态阈值 / 持有物 / 前置节点已达成 / 无条件 */
+  type: "choice" | "state" | "item" | "visited" | "always";
+  /** 人类可读的条件描述，供情节层与任务层各自具体化 */
+  description: string;
+  /**
+   * 走这条路要付的代价（取自影游 VnChoiceOption.cost）。
+   * 有代价的选择才有分量；无代价的分支等于换套皮的同一条路。
+   */
+  cost?: string;
+  /** 这个选择契合什么样的人设倾向（取自影游 VnChoiceOption.persona_alignment）。 */
+  persona_alignment?: string;
+}
+
+/**
+ * 剧情树的出边。
+ *
+ * kind 区分四种走向：linear 单线推进、choice 玩家抉择、merge_back 收束回主干、
+ * ending 走向结局。merge_back 是关键一项——它让"聚合"成为边上的显式声明，
+ * 而不是靠"入度大于一"事后推断出来的拓扑巧合。
+ */
+export interface NodeEdge {
+  /** 目标节点 id（结局也是节点）。 */
+  to: string;
+  kind: "linear" | "choice" | "merge_back" | "ending";
+  /** UI 标签（choice 时给 A/B/C/D）。 */
+  label?: string;
+  /** 走这条边的条件。linear 边通常省略（等价于无条件推进）。 */
+  condition?: NodeCondition;
+}
+
+/**
+ * 分支代价档——这组分岔的"分支程度"有多大（取自影游 VnBranchedBeat.branch_type）。
+ *
+ * 这是归档实现里最值得迁的一件设计：它逼着结构席在开分支时就想清楚后果量级，
+ * 而不是铺一堆看着热闹、实则殊途同归的假分支。
+ *   converge 路径不同、结果相同——一般失误可挽回，代价是绕远或损耗，走几个节点后汇回；
+ *   diverge  路径天壤之别、结局不同——抉择真正分岔，长链不汇；
+ *   terminal 分支程度过大——直接走向结局（致命错误或决定性正确）。
+ */
+export type BranchType = "converge" | "diverge" | "terminal";
+
+/**
+ * 结局分档（取自影游 VnEnding 的 label + scope）。
+ *
+ * scope 尤其要紧：中途的 game over 与全剧终是两回事。不分档的话，
+ * 一个允许失败的游戏会因为"结局太多"被结构检查误判。
+ */
+export interface EndingSpec {
+  /** H 圆满 / B 悲剧 / O 其他（开放、反转、隐藏）。 */
+  label: "H" | "B" | "O";
+  /** global 全剧终；local 局部结局（中途 game over、提前圆满）。 */
+  scope: "local" | "global";
+  /** 达成这个结局要满足什么。 */
+  trigger?: string;
+}
+
 export interface OutlineNode {
   node_id: string;
   content_id?: string;
@@ -666,6 +777,26 @@ export interface OutlineNode {
     plot: { cause: string; process: string; result: string };
   };
   content: string;
+  /**
+   * 最优路径标记（feature list 2.3.8「需要标记最优路径，即最符合用户需求的那一条链路」）。
+   * 可选——线性形态（无分支）时全线即最优路径，无须逐点标注。
+   */
+  on_optimal_path?: boolean;
+  /**
+   * 本节点在剧情树上的功能位。可选：未标注时可由 prev_node/next_node 的入出度推断
+   * （无入=start，无出=ending，多出=branch，多入=merge，其余=normal），
+   * 显式标注的意义在于让"这里是让玩家作答的地方"成为结构席的主动决策而非拓扑副产品。
+   */
+  node_function?: NodeFunction;
+  /**
+   * 出边（带条件）。与 next_node 并存而非取代它：next_node 是所有下游消费者都在读的
+   * 既有字段，edges 是它的带条件加强版。两者都在时以 edges 为准，结构检查会核对二者一致。
+   */
+  edges?: NodeEdge[];
+  /** 本节点若是分支节点，这组分岔的代价档。 */
+  branch_type?: BranchType;
+  /** 本节点若是结局节点，它的分档与达成条件。 */
+  ending?: EndingSpec;
 }
 
 export interface OutlinesGenerated {
@@ -735,6 +866,14 @@ export interface PlotNode {
   parent_id: string;
   content: string;
   story_elements: { plot: { cause: string; process: string; result: string } };
+  /**
+   * 剧本要素——**与品类无关**，键名 jrpg_ 是早期只有 JRPG 一条线时留下的历史包袱。
+   * 它就是"情节描写 + 对话"的落盘形态：dialogue_segments 是对话，
+   * narration_hints / scene_* 是描写与演出提示。影游、开放世界等品类同样填这里。
+   *
+   * 不改名是因为它是存量项目产物 JSON 的实际键，改名会让已落盘的 checkpoint 读不回来；
+   * 收益仅止于观感，不值当。
+   */
   jrpg_elements: {
     scene_location: string;
     scene_locations: string[];
@@ -814,6 +953,41 @@ export interface GameItem {
 
 // --- L5 任务系统 ---
 
+/**
+ * 任务数值（feature list 2.3.10「数值系统在此落盘」）。
+ *
+ * 四类数值全部可选：老 checkpoint 没有本字段，叙事驱动、无数值系统的品类
+ * （影游 / 叙事卡）也不该硬凑。模型只填它有依据能填的那几类。
+ */
+export interface QuestNumbers {
+  /** 战斗数值：这场仗打给谁看、打多难 */
+  combat?: {
+    recommended_level?: number;
+    difficulty?: "trivial" | "easy" | "normal" | "hard" | "boss";
+    /** 强度依据：为何是这个档位（对标哪场战斗 / 玩家此时应有的能力） */
+    rationale?: string;
+  };
+  /** 养成数值：完成后玩家变强多少 */
+  growth?: {
+    exp?: number;
+    skill_points?: number;
+    unlocks?: string[];
+  };
+  /** 经济数值：进出多少钱、耗材成本量级 */
+  economy?: {
+    currency_gain?: number;
+    currency_cost?: number;
+    rationale?: string;
+  };
+  /** 好感度：本任务改变了与谁的关系、改变多少 */
+  affinity?: Array<{
+    character: string;
+    /** 正负增减值，量纲由品类自定，同一部作品内保持一致 */
+    delta: number;
+    reason?: string;
+  }>;
+}
+
 export interface Quest {
   quest_id: string;
   name: string;
@@ -848,6 +1022,7 @@ export interface Quest {
   };
   prerequisites: string[];
   next_quests: string[];
+  numbers?: QuestNumbers;
 }
 
 export interface QuestGraph {
@@ -1035,9 +1210,14 @@ export interface PipelineConfig {
   timeout?: number;
   onProgress?: ProgressCallback;
   onStepComplete?: (stepId: string, ctx: NarrativeContext) => void;
+  /**
+   * 叙事层级。三期起由 genreCode 派生，前端不再直接选；显式传值只在无 genreCode 时生效。
+   */
   tier?: TierId;
   mode?: ModeId;
-  /** 前端选定的复杂度档位（1-5）；run() 会注入 ctx.complexity 供节点预算派生使用 */
+  /** 三轴路由选择；run() 会注入 ctx.narrative_axes 供提示词的叙事策略段装配。 */
+  narrativeAxes?: NarrativeAxesSelection;
+  /** 前端选定的复杂度档位（1-5，UI 上即「叙事体量」）；run() 会注入 ctx.complexity 供节点预算派生使用 */
   complexity?: number;
   autoDetectTier?: boolean;
   /**
@@ -1047,7 +1227,17 @@ export interface PipelineConfig {
    */
   genreCode?: string;
   resumeCtx?: NarrativeContext;
+  /**
+   * @deprecated Phase-2 M7: 线性前缀跳过。仅在缺 agentLifecycle 时兜底，
+   * 并用于 resume 的提示文案。新路径请传 agentLifecycle。
+   */
   resumeAfterStep?: string;
+  /**
+   * Phase-2 M7: per-agent lifecycle = resume 的事实源。
+   * 提供时逐 agent 查 shouldSkipByLifecycle，支持跳过非连续的已完成步、
+   * 以及只重跑失败的那一步。
+   */
+  agentLifecycle?: Record<string, AgentLifecycle>;
   /**
    * When true (default), the pipeline uses the Planner engine to determine
    * step sequence based on genre needs matrix. Set to false to use the

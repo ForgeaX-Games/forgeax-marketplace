@@ -43,6 +43,10 @@ calendar dates in the project timezone.
   *为什么：* 模板列表要显示版本、作者、制作时间，需后端从模板 JSON 读取并在保存时持久化。
 
 ### Changed
+- **Workbench manifest migrated to the Page contract.** `forgeax-plugin.json`
+  now contributes one Page, one reusable panel type, explicit sidebar/workspace
+  placements, and a horizontal left/right Page layout instead of `provides.workbench`
+  split metadata. *为什么：* panel availability and position must have one Page-owned SSOT.
 - **`scene_asset_pixel` 电池强化 2.5D 纯俯视视角约束**：新增核心约束第 6 条 + 独立「视角要求」段 + 验收勾选项，强制**只可见顶面与正面、绝不可见左右两个侧面**，禁止 3/4 斜角/等距/透视露出侧壁。`prompts/scene_asset_pixel.json`。
   *为什么：* 资产需与 2.5D 俯视场景无缝摆放，侧面露出会与场景透视冲突；此前模板未约束视角，模型常默认出 3/4 视角。
 

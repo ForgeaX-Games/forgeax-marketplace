@@ -4,16 +4,38 @@ import path from "node:path";
 import { NarrativePipeline } from "../pipeline/pipeline.js";
 import type { RerunOptions } from "../pipeline/pipeline.js";
 import { getModesForTier, TIER_DEFAULT_MODE, STEP_OUTPUT_FIELDS, getModeConfig } from "../pipeline/modes.js";
+import { STEP_FILE_MAP } from "../pipeline/step-files.js";
 import { traceNodeSubtree, buildNodeFilter } from "../pipeline/node-dependency.js";
 import { validateImpactAnalysis, type ChangeCategory } from "../pipeline/impact-validator.js";
 import { buildAutoSteps } from "../pipeline/design-steps/auto-narrative-builder.js";
 import { getGenresByCategory, GENRE_TAXONOMY, findGenreByCode, getGenreDisplayName, type ContentLocale } from "../knowledge/genre-taxonomy.js";
 import { getNarrativeType } from "../knowledge/genre-narrative-type.js";
 import { planPipeline } from "../pipeline/planner/index.js";
+import { buildRunManifest, buildEntryManifests } from "../pipeline/run-manifest-builder.js";
+import {
+  checkpointAgentsFrom,
+  completedStepsFromAgents,
+  lifecycleFromCheckpoint,
+  manifestFromStepIds,
+  markAgentLifecycle,
+  syncManifestAgents,
+  type CheckpointAgentSlot,
+} from "../pipeline/run-manifest-runtime.js";
+import { splitCompositionByStartNodes, type RunManifest } from "../types/run-manifest.js";
+import type { AgentLifecycle } from "../pipeline/agent-contract.js";
+import { runAgent, assertAgentRunnable } from "../pipeline/run-agent.js";
+import { getNarrativeAgent } from "../pipeline/agent-registry.js";
+import { getAgentDef } from "../pipeline/blueprint/agent-def-registry.js";
 import { STEP_IDS as S } from "../pipeline/modes.js";
 import { LLMClient } from "../pipeline/llm-client.js";
 import { buildKnowledgePromptSection, buildNodeTreeSummary, preClassifyChange, PIPELINE_KNOWLEDGE } from "../pipeline/pipeline-knowledge.js";
-import type { NarrativeContext, PipelineProgress, TierId, ModeId, PlotsGenerated, JrpgScript, SceneMap, QuestGraph, StepMeta, StepModification, StoryFramework, OutlinesGenerated, DetailedOutlinesGenerated, UploadedScript } from "../types/index.js";
+import type { NarrativeContext, PipelineProgress, TierId, ModeId, PlotsGenerated, JrpgScript, SceneMap, QuestGraph, StepMeta, StepModification, StoryFramework, OutlinesGenerated, DetailedOutlinesGenerated, UploadedScript, NarrativeAxesSelection } from "../types/index.js";
+import {
+  resolveNarrativeStructure,
+  STORY_TYPES,
+  STORY_THEMES,
+  STORY_STRUCTURES,
+} from "../knowledge/narrative-axes/index.js";
 import { detectScriptFormat, describeScriptFormat } from "../utils/script-format-detector.js";
 import { runIpDnaPipeline, runIngest, runExtractAndGenerate, loadExtractSourceByRun, resolveIpDnaRuntimeAdapters, loadHierarchyIndexByRun, loadManifestByRun, listInputRunKeys, runArtifactRoots, RUN_ARTIFACT_GROUP_LABELS, analyzeRewriteImpact, createJob, updateJob, getJob, listJobs, cancelJob, formatTimestamp as formatIpDnaTimestamp, buildAdaptationDirective, planDecomposition, applyDecompositionClosure, assessVolume, collectLeafIds, saveHierarchyIndexOnly, saveAdaptationConfirmation, loadAdaptationConfirmation, guessLevelsFromHierarchy, type IncomingFile, type IpDnaProgress, type ExtractSource, type NarrativeIpDna } from "../ip-dna/index.js";
 // Phase C6: env reads are funnelled through plugin-env so the literal
@@ -23,6 +45,7 @@ import { runIpDnaPipeline, runIngest, runExtractAndGenerate, loadExtractSourceBy
 // ToolRegistry handlers must use ctx.env per the wb-character precedent).
 import { getGeminiApiKey, getLlmProxyUrl, getLlmProxyKey, getDefaultModel, readPluginEnv } from "../utils/plugin-env.js";
 import { isSafeKey as isSafeEntryKeyFn, loadEntry as loadEntryFromDir, writeEntry as writeEntryToDir, type EntryConfig } from "./entry-store.js";
+import { parseRunDirName, runDirName } from "./run-layout.js";
 
 const OUTPUT_DIR = path.resolve(process.cwd(), "output");
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -50,68 +73,6 @@ const loadEntryConfig = (key: string): EntryConfig | null => loadEntryFromDir(OU
 const writeEntryConfig = (key: string, patch: Partial<EntryConfig>): EntryConfig =>
   writeEntryToDir(OUTPUT_DIR, key, patch);
 
-const STEP_FILE_MAP: Record<string, { index: string; name: string; ext: string }> = {
-  preference_summary:   { index: "00", name: "偏好总结",   ext: "md" },
-  preference_analysis:  { index: "01", name: "偏好分析",   ext: "json" },
-  // 合并步骤 INITIAL_PLAN：一次 LLM 调用产出 outline + core_settings + plot_synopsis 三段，
-  // 输出统一为 1 个 JSON 文件 02_初步方案.json，三段作为 top-level keys。
-  // 老的 initial_outline / core_settings / plot_synopsis 不再独立落盘（仅 STEP_CTX_KEY
-  // 保留作为存档编辑的兼容兜底；fork 拷贝循环按 STEP_FILE_MAP 遍历，不会再写老格式）。
-  initial_plan:         { index: "02", name: "初步方案",   ext: "json" },
-  worldview:            { index: "04", name: "世界观",     ext: "json" },
-  story_framework:      { index: "06", name: "故事框架",   ext: "json" },
-  outline_batch:        { index: "07", name: "故事大纲",   ext: "json" },
-  detailed_outline:     { index: "08", name: "故事细纲",   ext: "json" },
-  character_enrichment: { index: "09", name: "角色档案",   ext: "json" },
-  item_database:        { index: "10", name: "道具清单",   ext: "json" },
-  plot_generation:      { index: "11", name: "情节节点",   ext: "json" },
-  script_generation:    { index: "12", name: "剧本节点",   ext: "json" },
-  quest_generation:     { index: "13", name: "任务节点",   ext: "json" },
-  scene_generation:     { index: "14", name: "场景节点",   ext: "json" },
-  script_scene_generation: { index: "12", name: "剧本场景", ext: "json" },
-  structure_validation_l1: { index: "07a", name: "L1结构验证", ext: "json" },
-  structure_validation_l2: { index: "08a", name: "L2结构验证", ext: "json" },
-  structure_validation_l3: { index: "11a", name: "L3结构验证", ext: "json" },
-  lore_generation:      { index: "15", name: "Lore碎片",   ext: "json" },
-  narrative_card:       { index: "17", name: "叙事卡",     ext: "json" },
-  // 路由与全局参数
-  tier_detection:         { index: "T0", name: "品类识别",     ext: "json" },
-  demand_analysis:        { index: "T1", name: "需求分析",     ext: "json" },
-  global_control_params:  { index: "01a", name: "全局控制参数", ext: "json" },
-  // 策划步骤 (D0-D4)
-  core_concept:           { index: "D0", name: "核心概念",     ext: "json" },
-  system_architecture:    { index: "D1", name: "系统架构",     ext: "json" },
-  system_detail:          { index: "D2", name: "玩法设计",     ext: "json" },
-  value_framework:        { index: "D3", name: "数值框架",     ext: "json" },
-  design_doc:             { index: "D4", name: "策划案整合",   ext: "json" },
-  narrative_requirements: { index: "D4a", name: "叙事需求",    ext: "json" },
-  // 叙事步骤附属数据
-  item_lore:              { index: "15a", name: "物品Lore",    ext: "json" },
-  // B3 + Stage C：互动影游 / VN / 开放世界 / 卡牌等模板专属步骤
-  // 必须有 STEP_FILE_MAP 条目，否则 fork 时这些步骤的已生成产物不会被拷到新目录，
-  // 也不会被 saveStepIncremental 落盘成单独文件（前端"已保留"卡片打开会空白）
-  branch_tree:            { index: "B0", name: "分支树",       ext: "json" },
-  dialogue_script:        { index: "B1", name: "对话脚本",     ext: "json" },
-  cinematic_storyboard:   { index: "B2", name: "电影分镜",     ext: "json" },
-  region_design:          { index: "B3", name: "区域设计",     ext: "json" },
-  emergent_event:         { index: "B4", name: "涌现事件",     ext: "json" },
-  card_lore:              { index: "B5", name: "卡牌Lore",     ext: "json" },
-  event_pool:             { index: "B6", name: "事件池",       ext: "json" },
-  // tpl-vn-v2 专属步骤
-  vn_logline:             { index: "V0", name: "需求预处理",   ext: "json" },
-  vn_outline_acts:        { index: "V1", name: "三幕扩写",     ext: "json" },
-  vn_character_bios:      { index: "V1a", name: "人物小传",    ext: "json" },
-  vn_key_items:           { index: "V1b", name: "关键道具",    ext: "json" },
-  vn_scenes:              { index: "V2", name: "场搭建",       ext: "json" },
-  vn_beats:               { index: "V3", name: "情节点搭建",   ext: "json" },
-  vn_script_normalize:    { index: "V4", name: "剧本预处理",   ext: "json" },
-  vn_segment_confirm:     { index: "V5", name: "文本段确认",   ext: "json" },
-  vn_branched_beats:      { index: "V6", name: "剧情树改造",   ext: "json" },
-  vn_state_ledger:        { index: "V6a", name: "世界状态账本", ext: "json" },
-  vn_screenplay:          { index: "V7", name: "剧本创作",     ext: "json" },
-  vn_storyboard:          { index: "V8", name: "分镜设计",     ext: "json" },
-  vn_video_prompts:       { index: "V9", name: "视频提示词",   ext: "json" },
-};
 
 const STEP_CTX_KEY: Record<string, string> = {
   preference_summary:   "user_preference_summary",
@@ -466,7 +427,16 @@ interface CheckpointData {
   tier?: TierId;
   mode?: ModeId;
   startedAt: string;
+  /**
+   * @deprecated Phase-2 M7: 线性前缀恢复的锚点。仅供缺 agents 的旧 checkpoint 桥接使用。
+   */
   lastCompletedStep: string;
+  /**
+   * Phase-2 M7: per-agent lifecycle = 运行时事实源，驱动 resume 的逐 agent 跳过。
+   * 旧 checkpoint 无此字段，由 lifecycleFromCheckpoint 用 completedSteps 桥接补齐。
+   */
+  agents?: CheckpointAgentSlot[];
+  /** @deprecated Phase-2 M7: 由 agents[].lifecycle 派生的兼容视图（读侧仍在用）。 */
   completedSteps: string[];
   savedAt: string;
   ctx: NarrativeContext;
@@ -512,18 +482,27 @@ function saveCheckpoint(state: RunState, stepId: string, ctx: NarrativeContext):
   try {
     const runDir = getRunDir(state);
     fs.mkdirSync(runDir, { recursive: true });
-    const completedSteps = state.progress
+    const completedFromProgress = state.progress
       .filter((p) => p.status === "completed" && p.stepId)
       .map((p) => p.stepId!);
-    completedSteps.push(stepId);
+    completedFromProgress.push(stepId);
+    const doneSet = [...new Set(completedFromProgress)];
     const meta = resolveCheckpointMeta(state, ctx);
+    // Phase-2 M7: 先算 lifecycle，再由它派生 completedSteps。
+    const agents = checkpointAgentsFrom(
+      meta.pipelineOrder ?? [],
+      doneSet,
+      state.checkpointAgents,
+    );
+    state.checkpointAgents = agents;
     const checkpoint: CheckpointData = {
       runId: state.id,
       tier: state.tier,
       mode: state.mode,
       startedAt: state.startedAt,
       lastCompletedStep: stepId,
-      completedSteps: [...new Set(completedSteps)],
+      agents,
+      completedSteps: completedStepsFromAgents(agents),
       savedAt: new Date().toISOString(),
       ctx,
       step_meta: state.stepMeta,
@@ -601,6 +580,10 @@ interface RunState {
   routingMode?: "auto" | "semi" | "manual";
   /** A2-2: explicit genre code from frontend (skips LLM detectGenre when present). */
   genreCode?: string;
+  /** 三轴路由：类型/题材由前端选，结构在 launch 时综合推导后定稿。 */
+  narrativeAxes?: NarrativeAxesSelection;
+  /** 结构结论的来源：用户显式指定 / 三轴投票 / 三轴皆空。写进 manifest 供前端解释"为何是这个结构"。 */
+  structureSource?: "explicit" | "vote" | "none";
   model?: string;
   completedSteps?: string[];
   stepMeta?: Record<string, StepMeta>;
@@ -613,6 +596,25 @@ interface RunState {
    * 二补帧也会刷新这里。saveCheckpoint / writeManifestIncremental 直接读。
    */
   pipelineSteps?: string[];
+  /**
+   * Phase-2 M7: 本次运行的 RunManifest = 运行时事实源。
+   * `/start` 建表落盘，onStepComplete 逐 agent 跃迁 lifecycle 后重写 `_run_manifest.json`。
+   */
+  manifest?: RunManifest;
+  /** checkpoint 的 agent lifecycle 切片（跨 saveCheckpoint 保留时间戳/错误）。 */
+  checkpointAgents?: CheckpointAgentSlot[];
+  /**
+   * Phase-2 M8 多管线：本 run 归属的管线 id。
+   * 置位表示这是条目下的次管线，产物落 `output/<entryKey>/pipelines/<pipelineId>/`。
+   */
+  pipelineId?: string;
+  /** 所属条目 key（多管线并发时用于并发守卫按条目分组）。 */
+  entryKey?: string;
+  /**
+   * Phase-2 M9：单 agent 的 SSE run。临时态 —— 不建产物目录、不落 manifest / checkpoint，
+   * 只为把执行过程（composite 的子 DAG 波次）经既有 stream 端点推给画布。
+   */
+  agentRun?: boolean;
 }
 
 const runs = new Map<string, RunState>();
@@ -629,7 +631,118 @@ function capturePipelineSteps(state: RunState, p: PipelineProgress): void {
     p.steps.length > 0
   ) {
     state.pipelineSteps = [...p.steps];
+    // Phase-2 M7: 权威步骤序变了（含 design_auto 的二补帧）→ 对齐 manifest.agents。
+    if (state.manifest) {
+      syncManifestAgents(state.manifest, state.pipelineSteps);
+      writeRunManifest(state);
+    }
   }
+}
+
+/** RunManifest 落盘文件名。与旧 `manifest.json`（资产清单）区分。 */
+const RUN_MANIFEST_FILE = "_run_manifest.json";
+
+function loadRunManifest(dir: string): RunManifest | null {
+  const p = path.join(OUTPUT_DIR, dir, RUN_MANIFEST_FILE);
+  if (!fs.existsSync(p)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf-8")) as RunManifest;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Phase-2 M7: 把 state.manifest 落盘为该 run 的运行时事实源。
+ * 每次 lifecycle 跃迁后调用；失败仅告警（manifest 是观测面，不阻塞生成）。
+ */
+function writeRunManifest(state: RunState): void {
+  if (!state.manifest || state.agentRun) return;
+  try {
+    const runDir = getRunDir(state);
+    fs.mkdirSync(runDir, { recursive: true });
+    writeAssetFile(runDir, RUN_MANIFEST_FILE, state.manifest);
+  } catch (e) {
+    console.error("Failed to write run manifest:", e);
+  }
+}
+
+/** 建表：以 pipeline announce 的权威步骤序为准，缺省时留空待 announce 补齐。 */
+function initRunManifest(
+  state: RunState,
+  stepIds: string[],
+  opts: { locale?: ContentLocale; pipelineTemplate?: string; lifecycle?: Record<string, AgentLifecycle> } = {},
+): void {
+  const entryKey = state.outputDir
+    ? path.basename(state.outputDir)
+    : formatTimestamp(state.startedAt);
+  state.manifest = manifestFromStepIds({
+    entryKey,
+    runId: state.id,
+    // 次管线沿用前端 /plan 给的 pipelineId，SSE 帧上的 lane 锚点才与前端 lane 同名。
+    pipelineId: state.pipelineId,
+    stepIds,
+    lifecycle: opts.lifecycle,
+    config: {
+      // tier 是品类的只读派生属性（PRD v1.4 §3.2.2）：选定专家即选定品类，层级查表得到。
+      // 客户端传来的 tier 只在没选专家（自动路由预览）时兜底。
+      tier: (state.genreCode ? findGenreByCode(state.genreCode)?.tier : undefined) ?? state.tier ?? null,
+      mode: state.mode ?? null,
+      genreCode: state.genreCode ?? null,
+      storyType: state.narrativeAxes?.storyType ?? null,
+      storyTheme: state.narrativeAxes?.storyTheme ?? null,
+      narrativeStructure: state.narrativeAxes?.structure ?? null,
+      structureSource: state.structureSource ?? "none",
+      complexity: state.complexity,
+      routeGroup: state.routeGroup,
+      locale: opts.locale,
+      userInput: state.userInput,
+      pipelineTemplate: opts.pipelineTemplate,
+    },
+  });
+  writeRunManifest(state);
+}
+
+/**
+ * 收束 manifest 的整体状态与残留 agent。
+ * - completed：仍 pending/running 的 agent 视为动态裁剪掉，置 skipped
+ * - failed：只把 running 的那一步置 failed；pending 保持 pending，
+ *   resume 才能只重跑失败步及其后续（而非整链重跑）
+ */
+function finalizeRunManifest(
+  state: RunState,
+  status: "completed" | "failed",
+  error?: string,
+): void {
+  if (!state.manifest) return;
+  state.manifest.status = status;
+  for (const slot of [...state.manifest.agents]) {
+    const cur = slot.lifecycle.status;
+    if (cur === "completed" || cur === "skipped" || cur === "failed") continue;
+    if (status === "failed") {
+      if (cur === "running") markAgentLifecycle(state.manifest, slot.agentId, "failed", { error });
+    } else {
+      markAgentLifecycle(state.manifest, slot.agentId, "skipped");
+    }
+  }
+  writeRunManifest(state);
+}
+
+/**
+ * lifecycle 跃迁 + 落盘。agent 未登记时自动追加（动态追加步）。
+ * 状态未变则直接返回 —— running 帧会高频重复（sub-emit / 多节点进度），不能每帧写盘。
+ */
+function transitionAgent(
+  state: RunState,
+  agentId: string,
+  status: AgentLifecycle,
+  patch?: { message?: string; error?: string },
+): void {
+  if (!state.manifest) return;
+  const cur = state.manifest.agents.find((a) => a.agentId === agentId);
+  if (cur?.lifecycle.status === status && !patch) return;
+  markAgentLifecycle(state.manifest, agentId, status, patch);
+  writeRunManifest(state);
 }
 
 function writeManifestIncremental(state: RunState): void {
@@ -713,6 +826,40 @@ app.get("/api/narrative/genres", (req, res) => {
     res.json(payload);
   } catch (e) {
     console.error("[Server] /genres failed:", (e as Error)?.stack ?? e);
+    res.status(500).json({ error: (e as Error)?.message ?? "internal error" });
+  }
+});
+
+/**
+ * 三轴词表目录（PRD v1.4 §3.2.2）：叙事类型 / 叙事题材 / 叙事结构。
+ * 前端叙事路由的级联菜单直接吃这份，避免在 viz 里再抄一份词表造成两处漂移。
+ * structures 一并返回，供 UI 展示"综合出的结构是什么"，不是给用户直选的。
+ */
+app.get("/api/narrative/axes", (_req, res) => {
+  try {
+    res.json({
+      types: STORY_TYPES.map((t) => ({
+        code: t.code,
+        name: t.name,
+        nameEn: t.nameEn,
+        summary: t.summary,
+        traits: t.traits,
+      })),
+      themes: STORY_THEMES.map((t) => ({
+        code: t.code,
+        name: t.name,
+        nameEn: t.nameEn,
+        summary: t.summary,
+        traits: t.traits,
+      })),
+      structures: STORY_STRUCTURES.map((s) => ({
+        code: s.code,
+        name: s.name,
+        summary: s.summary,
+      })),
+    });
+  } catch (e) {
+    console.error("[Server] /axes failed:", (e as Error)?.stack ?? e);
     res.status(500).json({ error: (e as Error)?.message ?? "internal error" });
   }
 });
@@ -884,6 +1031,10 @@ app.post("/api/narrative/start", async (req, res) => {
     routing_mode,
     /** A2-2: explicit genre code (e.g. "rpg-jrpg"). When provided, skip LLM detectGenre. */
     genre_code,
+    /** 三轴路由（PRD v1.4 §3.2.2）：叙事类型 / 叙事题材 / 叙事结构。 */
+    story_type,
+    story_theme,
+    narrative_structure,
     /** Phase 6: legacy 回退开关。true = 跳过 Planner，走旧 buildAutoSteps 路径。 */
     use_legacy_pipeline,
     /** Blueprint 模式开关。true = 走 Blueprint + AgentRunner 新路径。 */
@@ -912,6 +1063,9 @@ app.post("/api/narrative/start", async (req, res) => {
     complexity?: number;
     routing_mode?: RoutingMode;
     genre_code?: string;
+    story_type?: string;
+    story_theme?: string;
+    narrative_structure?: string;
     use_legacy_pipeline?: boolean;
     use_blueprint?: boolean;
     entry_key?: string;
@@ -974,7 +1128,9 @@ app.post("/api/narrative/start", async (req, res) => {
     }
   }
 
-  const activeRunning = [...runs.values()].find((r) => r.status === "running");
+  const activeRunning = findConflictingRun(
+    isSafeEntryKeyFn(entry_key) ? entry_key : undefined,
+  );
   if (activeRunning) {
     res.status(409).json({ error: `已有运行中的管线 (${activeRunning.id})，请等待完成或取消后再试` });
     return;
@@ -986,17 +1142,111 @@ app.post("/api/narrative/start", async (req, res) => {
     return;
   }
 
+  const launched = launchNarrativeRun({
+    userInput: user_input.trim(),
+    model,
+    tier,
+    mode,
+    autoDetect: auto_detect,
+    routeGroup: route_group,
+    complexity,
+    routingMode: routing_mode,
+    genreCode: genre_code,
+    storyType: story_type,
+    storyTheme: story_theme,
+    narrativeStructure: narrative_structure,
+    useLegacyPipeline: use_legacy_pipeline,
+    useBlueprint: use_blueprint,
+    entryKey: entry_key,
+    locale,
+    uploadedScript: parsedUploadedScript,
+  });
+
+  res.json({
+    id: launched.id,
+    status: "running",
+    message: "Pipeline started",
+    tier: launched.tier,
+    mode: launched.mode,
+    sourceDir: launched.sourceDir,
+  });
+});
+
+/**
+ * 并发守卫（Phase-2 M8 放宽）：跨条目仍互斥，同条目内不同管线可并发。
+ * 同条目同管线（含两者皆为单管线的 undefined）视为重复启动，仍拒绝。
+ */
+function findConflictingRun(
+  entryKey?: string,
+  pipelineId?: string,
+): RunState | undefined {
+  return [...runs.values()].find((r) => {
+    if (r.status !== "running") return false;
+    if (!entryKey || !r.entryKey) return true;
+    if (r.entryKey !== entryKey) return true;
+    return r.pipelineId === pipelineId;
+  });
+}
+
+interface LaunchRunParams {
+  userInput: string;
+  model?: string;
+  tier?: TierId;
+  mode?: ModeId;
+  autoDetect?: boolean;
+  routeGroup?: "planning" | "narrative";
+  complexity?: number;
+  routingMode?: RoutingMode;
+  genreCode?: string;
+  /** 三轴路由（PRD v1.4 §3.2.2）；结构缺省由品类/类型/题材综合推导。 */
+  storyType?: string;
+  storyTheme?: string;
+  narrativeStructure?: string;
+  useLegacyPipeline?: boolean;
+  useBlueprint?: boolean;
+  entryKey?: string;
+  locale?: unknown;
+  uploadedScript?: UploadedScript;
+  /**
+   * Phase-2 M8 多管线：置位时本 run 归属该管线，产物落
+   * `output/<entryKey>/pipelines/<pipelineId>/`（主管线不置位，仍落 `output/<entryKey>/`）。
+   */
+  pipelineId?: string;
+}
+
+interface LaunchedRun {
+  id: string;
+  sourceDir: string;
+  tier?: TierId;
+  mode?: ModeId;
+  pipelineId?: string;
+}
+
+/**
+ * 启动一条管线并返回 runId + 落盘目录。
+ * `/start`（单管线）与 `/entry/start`（多管线批量）共用，保证两条入口的
+ * 路由归一、manifest 建表、checkpoint 落盘、SSE 帧序完全一致。
+ */
+function launchNarrativeRun(p: LaunchRunParams): LaunchedRun {
+  const { tier, mode, genreCode: genre_code, entryKey: entry_key } = p;
+  const auto_detect = p.autoDetect;
+  const route_group = p.routeGroup;
+  const use_blueprint = p.useBlueprint;
+  const use_legacy_pipeline = p.useLegacyPipeline;
+  const parsedUploadedScript = p.uploadedScript;
+  const userInput = p.userInput;
+
   // ── Routing mode resolution (A1) ──────────────────────────────────────────
   // - auto:    no fields given, LLM detects tier+genre+complexity
   // - semi:    user gave some (e.g. tier) but not all, LLM fills the rest
   // - manual:  all dimensions specified, skip LLM tier detection entirely
   // If client did not send routing_mode, derive from auto_detect / tier presence
   const resolvedRoutingMode: RoutingMode =
-    routing_mode ??
+    p.routingMode ??
     (auto_detect === false ? "manual" : (tier ? "semi" : "auto"));
 
   // Manual mode: complexity falls back to tier default when omitted (A2)
-  let effectiveComplexity = complexity;
+  let effectiveComplexity = p.complexity;
   if (resolvedRoutingMode === "manual" && tier && effectiveComplexity == null) {
     effectiveComplexity = TIER_DEFAULT_COMPLEXITY[tier];
     console.log(`[Server] manual routing: complexity not provided, using tier default ${effectiveComplexity}`);
@@ -1017,17 +1267,29 @@ app.post("/api/narrative/start", async (req, res) => {
   }
 
   const id = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const resolvedModel = model ?? getDefaultModel();
+  const resolvedModel = p.model ?? getDefaultModel();
 
   // §条目提前建立：复用前端草稿键作为落盘目录（仅接受安全的相对目录名，防路径穿越）。
-  const isSafeEntryKey =
-    typeof entry_key === "string" &&
-    /^[A-Za-z0-9_.-]+$/.test(entry_key) &&
-    !entry_key.includes("..");
-  const reuseOutputDir = isSafeEntryKey ? path.join(OUTPUT_DIR, entry_key!) : undefined;
+  const isSafeEntryKey = isSafeEntryKeyFn(entry_key);
+  const runDir = isSafeEntryKey ? runDirName(entry_key!, p.pipelineId) : undefined;
+  const reuseOutputDir = runDir ? path.join(OUTPUT_DIR, runDir) : undefined;
 
   // A2-2: explicit genre_code makes manual routing implicit (we have genre + tier when both provided)
   const hasExplicitGenre = typeof genre_code === "string" && genre_code.trim().length > 0;
+
+  // 三轴路由：结构由品类/类型/题材综合推导，用户显式指定则短路（PRD v1.4 §3.2.2）。
+  const resolvedStructure = resolveNarrativeStructure({
+    genreCode: hasExplicitGenre ? genre_code!.trim() : null,
+    storyType: p.storyType,
+    storyTheme: p.storyTheme,
+    explicit: p.narrativeStructure,
+  });
+  const narrativeAxes: NarrativeAxesSelection = {
+    genre: hasExplicitGenre ? genre_code!.trim() : null,
+    storyType: p.storyType ?? null,
+    storyTheme: p.storyTheme ?? null,
+    structure: resolvedStructure.structure,
+  };
   const state: RunState = {
     id,
     status: "running",
@@ -1036,21 +1298,26 @@ app.post("/api/narrative/start", async (req, res) => {
     startedAt: new Date().toISOString(),
     tier,
     mode: resolvedMode,
-    userInput: user_input!.trim(),
+    userInput,
     routeGroup: route_group,
     complexity: effectiveComplexity,
     routingMode: resolvedRoutingMode,
     genreCode: hasExplicitGenre ? genre_code!.trim() : undefined,
+    narrativeAxes,
+    structureSource: resolvedStructure.source,
     model: resolvedModel,
     outputDir: reuseOutputDir,
+    pipelineId: p.pipelineId,
+    entryKey: isSafeEntryKey ? entry_key : undefined,
   };
   runs.set(id, state);
 
-  const contentLocale = parseContentLocale(locale);
+  const contentLocale = parseContentLocale(p.locale);
 
   // §条目持久化（开始生成自动保存兜底）：把当次最终配置 upsert 回 output/<key>/_entry.json。
   // 即使用户没点 ROUTING「确认保存」，开始生成也会落盘一份，保证条目参数可还原。
-  if (isSafeEntryKey) {
+  // 多管线时条目级配置由 /entry/start 统一写一次，各管线 run 不再互相覆盖。
+  if (isSafeEntryKey && !p.pipelineId) {
     try {
       writeEntryConfig(entry_key!, {
         userInput: state.userInput,
@@ -1058,6 +1325,9 @@ app.post("/api/narrative/start", async (req, res) => {
         tier,
         mode: resolvedMode,
         genreCode: state.genreCode,
+        storyType: narrativeAxes.storyType ?? undefined,
+        storyTheme: narrativeAxes.storyTheme ?? undefined,
+        narrativeStructure: narrativeAxes.structure ?? undefined,
         complexity: effectiveComplexity,
         locale: contentLocale,
       });
@@ -1079,6 +1349,9 @@ app.post("/api/narrative/start", async (req, res) => {
         state.progress.push(p);
       }
       capturePipelineSteps(state, p);
+      if (p.type !== "streaming" && p.status === "running" && p.stepId) {
+        transitionAgent(state, p.stepId, "running");
+      }
       if (!state.tier && p.stepId === "tier_router" && p.status === "completed") {
         state.tier = p.message?.match(/tier[1-4]/)?.[0] as TierId | undefined;
       }
@@ -1087,6 +1360,7 @@ app.post("/api/narrative/start", async (req, res) => {
       }
     },
     onStepComplete: (stepId, ctx) => {
+      transitionAgent(state, stepId, "completed");
       saveCheckpoint(state, stepId, ctx);
       saveCompanionData(state, stepId, ctx);
       if (!state.completedSteps) state.completedSteps = [];
@@ -1101,6 +1375,7 @@ app.post("/api/narrative/start", async (req, res) => {
     // - auto/semi: run LLM detection as before
     autoDetectTier: hasExplicitGenre ? false : (resolvedRoutingMode === "manual" ? false : (auto_detect !== false)),
     genreCode: hasExplicitGenre ? genre_code!.trim() : undefined,
+    narrativeAxes,
     usePlanner: use_legacy_pipeline === true ? false : undefined,
     locale: contentLocale,
   });
@@ -1113,8 +1388,10 @@ app.post("/api/narrative/start", async (req, res) => {
   // route tables. We compute a best-effort step list from the resolved mode;
   // when running in narrative_auto mode we leave `steps` empty and let the
   // frontend keep its preview until concrete progress events arrive.
+  let announcedTemplate: string | undefined;
   try {
     const announce = buildPipelineStepsAnnounce(state, resolvedMode, tier);
+    announcedTemplate = announce.pipelineTemplate;
     state.progress.unshift({
       type: "pipeline_steps_announce",
       stage: "announce",
@@ -1136,6 +1413,13 @@ app.post("/api/narrative/start", async (req, res) => {
   } catch (e) {
     console.warn("[Server] pipeline_steps_announce skipped:", (e as Error).message);
   }
+
+  // Phase-2 M7: RunManifest 成为本次运行的事实源。步骤序取 announce 的那一份
+  // （auto 路由首帧可能为空，届时由 capturePipelineSteps 的二补帧对齐）。
+  initRunManifest(state, state.pipelineSteps ?? [], {
+    locale: contentLocale,
+    pipelineTemplate: announcedTemplate,
+  });
 
   const injectCtxHelpers = (ctx: NarrativeContext) => {
     const ctxAny = ctx as Record<string, unknown>;
@@ -1166,18 +1450,20 @@ app.post("/api/narrative/start", async (req, res) => {
 
   const runOpts = parsedUploadedScript ? { uploadedScript: parsedUploadedScript } : undefined;
   const pipelinePromise = use_blueprint
-    ? pipeline.runWithBlueprint(user_input.trim(), runOpts).then(({ ctx: result, blueprint }) => {
+    ? pipeline.runWithBlueprint(userInput, runOpts).then(({ ctx: result, blueprint }) => {
         state.status = "completed";
         state.result = result;
         (state as unknown as Record<string, unknown>).blueprint = blueprint;
         if (result.tier_detection) state.tier = result.tier_detection.tier;
+        finalizeRunManifest(state, "completed");
         try { writeManifestIncremental(state); } catch { /* best effort */ }
         try { saveRunToFile(state); } catch (e) { console.error("Failed to save result:", e); }
       })
-    : pipeline.run(user_input.trim(), runOpts).then((result) => {
+    : pipeline.run(userInput, runOpts).then((result) => {
         state.status = "completed";
         state.result = result;
         if (result.tier_detection) state.tier = result.tier_detection.tier;
+        finalizeRunManifest(state, "completed");
         try { writeManifestIncremental(state); } catch { /* best effort */ }
         try { saveRunToFile(state); } catch (e) { console.error("Failed to save result:", e); }
       });
@@ -1185,13 +1471,132 @@ app.post("/api/narrative/start", async (req, res) => {
   pipelinePromise.catch((err) => {
       state.status = "failed";
       state.error = (err as Error).message;
+      finalizeRunManifest(state, "failed", (err as Error).message);
       try { writeManifestIncremental(state); } catch { /* best effort */ }
       try { saveRunToFile(state); } catch (e) { console.error("Failed to save error:", e); }
     });
 
-  // §条目提前建立：复用草稿键时 sourceDir = 该键（=outputDir 目录名），否则按启动时间戳。
-  const sourceDir = state.outputDir ? path.basename(state.outputDir) : formatTimestamp(state.startedAt);
-  res.json({ id, status: "running", message: "Pipeline started", tier, mode: resolvedMode, sourceDir });
+  // §条目提前建立：复用草稿键时 sourceDir = run 目录相对路径（多管线含 pipelines/<pid>），
+  // 否则按启动时间戳。
+  const sourceDir = runDir ?? formatTimestamp(state.startedAt);
+  return { id, sourceDir, tier, mode: resolvedMode, pipelineId: p.pipelineId };
+}
+
+/**
+ * Phase-2 M8：条目级批量启动 —— 一条目下每条可运行管线各起一个 run。
+ *
+ * 每条管线独立 runId / SSE 流 / RunManifest / checkpoint；不完整的管线原样跳过
+ * 并回报原因，不阻塞其余管线。首条可运行管线作为主管线落 `output/<key>/`
+ * （历史列表 / fork / 载入沿用既有路径），其余落 `output/<key>/pipelines/<pipelineId>/`。
+ */
+app.post("/api/narrative/entry/start", (req, res) => {
+  const body = req.body as {
+    entry_key?: string;
+    model?: string;
+    locale?: ContentLocale;
+    pipelines?: Array<{
+      pipelineId?: string;
+      complete?: boolean;
+      incompletenessReason?: string;
+      userInput?: string;
+      tier?: TierId;
+      mode?: ModeId;
+      genreCode?: string | null;
+      storyType?: string | null;
+      storyTheme?: string | null;
+      narrativeStructure?: string | null;
+      complexity?: number;
+      routeGroup?: "planning" | "narrative";
+      autoDetect?: boolean;
+      pipelineTemplate?: string;
+    }>;
+  };
+
+  const entryKey = body.entry_key;
+  if (!isSafeEntryKeyFn(entryKey)) {
+    res.status(400).json({ error: "entry_key is required and must be a safe directory name" });
+    return;
+  }
+  const requested = body.pipelines ?? [];
+  if (requested.length === 0) {
+    res.status(400).json({ error: "pipelines is required (at least one pipeline)" });
+    return;
+  }
+
+  const conflicting = findConflictingRun(entryKey);
+  if (conflicting) {
+    res.status(409).json({
+      error: `已有运行中的管线 (${conflicting.id})，请等待完成或取消后再试`,
+    });
+    return;
+  }
+
+  const contentLocale = parseContentLocale(body.locale);
+  const runnable = requested.filter((p) => p.complete !== false && !!p.userInput?.trim());
+  const skipped = requested
+    .filter((p) => !runnable.includes(p))
+    .map((p) => ({
+      pipelineId: p.pipelineId,
+      reason: p.complete === false ? (p.incompletenessReason ?? "incomplete") : "missing_user_input",
+    }));
+
+  if (runnable.length === 0) {
+    res.status(400).json({ error: "no runnable pipeline", skipped });
+    return;
+  }
+
+  // 条目级配置只写一次（取主管线参数），避免各管线 run 互相覆盖 _entry.json。
+  const primary = runnable[0]!;
+  try {
+    writeEntryConfig(entryKey, {
+      userInput: primary.userInput,
+      routeGroup: primary.routeGroup,
+      tier: primary.tier,
+      mode: primary.mode,
+      genreCode: primary.genreCode ?? undefined,
+      storyType: primary.storyType ?? undefined,
+      storyTheme: primary.storyTheme ?? undefined,
+      narrativeStructure: primary.narrativeStructure ?? undefined,
+      complexity: primary.complexity,
+      locale: contentLocale,
+    });
+  } catch (e) {
+    console.error("[Server] writeEntryConfig on entry/start failed:", e);
+  }
+
+  const launched = runnable.map((p, i) =>
+    launchNarrativeRun({
+      userInput: p.userInput!.trim(),
+      model: body.model,
+      tier: p.tier,
+      mode: p.mode,
+      autoDetect: p.autoDetect,
+      routeGroup: p.routeGroup,
+      complexity: p.complexity,
+      genreCode: p.genreCode ?? undefined,
+      storyType: p.storyType ?? undefined,
+      storyTheme: p.storyTheme ?? undefined,
+      narrativeStructure: p.narrativeStructure ?? undefined,
+      entryKey,
+      locale: body.locale,
+      // 主管线不下沉子目录，保持既有读侧路径可用。
+      pipelineId: i === 0 ? undefined : p.pipelineId,
+    }),
+  );
+
+  res.json({
+    entryKey,
+    runs: launched.map((r, i) => ({
+      runId: r.id,
+      pipelineId: runnable[i]!.pipelineId,
+      sourceDir: r.sourceDir,
+      tier: r.tier,
+      mode: r.mode,
+      primary: i === 0,
+    })),
+    skipped,
+    count: launched.length,
+  });
 });
 
 app.post("/api/narrative/resume", async (req, res) => {
@@ -1200,8 +1605,14 @@ app.post("/api/narrative/resume", async (req, res) => {
     res.status(400).json({ error: "dir is required (run directory name)" });
     return;
   }
+  // Phase-2 M8: 接受 `<key>` 与 `<key>/pipelines/<pipelineId>` 两种 run 目录，逐段校验防穿越。
+  const resumeTarget = parseRunDirName(dir.trim());
+  if (!resumeTarget) {
+    res.status(400).json({ error: `invalid run directory: ${dir}` });
+    return;
+  }
 
-  const activeRunning = [...runs.values()].find((r) => r.status === "running");
+  const activeRunning = findConflictingRun(resumeTarget.entryKey, resumeTarget.pipelineId);
   if (activeRunning) {
     res.status(409).json({ error: `已有运行中的管线 (${activeRunning.id})，请等待完成或取消后再试` });
     return;
@@ -1245,6 +1656,11 @@ app.post("/api/narrative/resume", async (req, res) => {
         : undefined) ??
       checkpoint.ctx.demand_analysis?.genre_code,
     routingMode: checkpoint.routingMode,
+    // 三轴随 ctx 落盘，续跑照抄，manifest 才不会在第二段少掉路由结论。
+    narrativeAxes: checkpoint.ctx.narrative_axes,
+    checkpointAgents: checkpoint.agents,
+    entryKey: resumeTarget.entryKey,
+    pipelineId: resumeTarget.pipelineId,
   };
   runs.set(id, state);
 
@@ -1253,6 +1669,26 @@ app.post("/api/narrative/resume", async (req, res) => {
     checkpointCtx: checkpoint.ctx,
     entryKey: dir,
   });
+
+  // Phase-2 M7: lifecycle 是 resume 的事实源。新 checkpoint 直接读 agents[].lifecycle；
+  // 一期落盘的旧 checkpoint 用 completedSteps + lastCompletedStep 桥接补齐。
+  const resumeLifecycle = lifecycleFromCheckpoint(checkpoint);
+  const resumeManifest = loadRunManifest(dir);
+  if (resumeManifest) {
+    resumeManifest.status = "running";
+    resumeManifest.runId = id;
+    for (const [agentId, status] of Object.entries(resumeLifecycle)) {
+      markAgentLifecycle(resumeManifest, agentId, status);
+    }
+    state.manifest = resumeManifest;
+    writeRunManifest(state);
+  } else {
+    // 旧条目无 `_run_manifest.json`：按 checkpoint 的权威步骤序补建，使续跑后也有事实源。
+    initRunManifest(state, state.pipelineSteps ?? Object.keys(resumeLifecycle), {
+      locale: resumeLocale,
+      lifecycle: resumeLifecycle,
+    });
+  }
 
   const pipeline = new NarrativePipeline({
     apiKey: API_KEY || undefined,
@@ -1267,11 +1703,15 @@ app.post("/api/narrative/resume", async (req, res) => {
         state.progress.push(p);
       }
       capturePipelineSteps(state, p);
+      if (p.type !== "streaming" && p.status === "running" && p.stepId) {
+        transitionAgent(state, p.stepId, "running");
+      }
       if (p.status === "completed" && p.stepId && p.data != null) {
         saveStepIncremental(state, p.stepId, p.data);
       }
     },
     onStepComplete: (stepId, ctx) => {
+      transitionAgent(state, stepId, "completed");
       saveCheckpoint(state, stepId, ctx);
       saveCompanionData(state, stepId, ctx);
       if (!state.completedSteps) state.completedSteps = [];
@@ -1283,6 +1723,7 @@ app.post("/api/narrative/resume", async (req, res) => {
     autoDetectTier: false,
     resumeCtx: checkpoint.ctx,
     resumeAfterStep: checkpoint.lastCompletedStep,
+    agentLifecycle: resumeLifecycle,
     locale: resumeLocale,
   });
 
@@ -1351,12 +1792,14 @@ app.post("/api/narrative/resume", async (req, res) => {
     .then((result) => {
       state.status = "completed";
       state.result = result;
+      finalizeRunManifest(state, "completed");
       try { writeManifestIncremental(state); } catch { /* best effort */ }
       try { saveRunToFile(state); } catch (e) { console.error("Failed to save resumed result:", e); }
     })
     .catch((err) => {
       state.status = "failed";
       state.error = (err as Error).message;
+      finalizeRunManifest(state, "failed", (err as Error).message);
       try { writeManifestIncremental(state); } catch { /* best effort */ }
       try { saveRunToFile(state); } catch (e) { console.error("Failed to save resumed error:", e); }
     });
@@ -2514,6 +2957,12 @@ app.get("/api/narrative/status/:id", (req, res) => {
     startedAt: state.startedAt,
     tier: state.tier,
     mode: state.mode,
+    // Phase-2 M8: 多管线分流锚点 —— 前端据此把本流的进度归到对应 lane。
+    entryKey: state.entryKey,
+    pipelineId: state.manifest?.pipelineId ?? state.pipelineId,
+    sourceDir: state.outputDir
+      ? path.relative(OUTPUT_DIR, state.outputDir).split(path.sep).join("/")
+      : undefined,
   });
 });
 
@@ -2568,6 +3017,8 @@ interface HistoryItem {
    * → 中间管线空。此处按目录时间戳前缀反查暴露，供前端 attach 后经 /stream 直播下游进度。
    */
   generationRunId?: string;
+  /** Phase-1：_entry.json.pipelines 长度（多管线条目）。 */
+  pipelineCount?: number;
 }
 
 /** IP DNA 输入侧资产清单（媒体优先：主媒体 extraction_output；legacy 兜底），用于无 output 清单时回填历史。 */
@@ -2808,6 +3259,10 @@ function parseDirEntry(dir: string): HistoryItem {
     } else {
       effectiveStatus = raw.status;
     }
+    const entryForPipes = loadEntryConfig(dir);
+    const pipeCount = Array.isArray(entryForPipes?.pipelines)
+      ? entryForPipes!.pipelines!.length
+      : undefined;
     return {
       key: dir,
       type: "dir",
@@ -2831,6 +3286,7 @@ function parseDirEntry(dir: string): HistoryItem {
       forkReason: raw.forkReason ?? undefined,
       kind: raw.kind ?? undefined,
       generationRunId: ipGenerationRunId,
+      pipelineCount: pipeCount,
     };
   } catch {
     // §条目持久化：无 output 运行清单但有 _entry.json（未生成的条目）→ 返回 status="config" 项，
@@ -2838,6 +3294,7 @@ function parseDirEntry(dir: string): HistoryItem {
     const entryCfg = loadEntryConfig(dir);
     if (entryCfg) {
       const status = activeRun ? activeRun.status : ipJobClass === "generating" ? "running" : "config";
+      const pipeCount = Array.isArray(entryCfg.pipelines) ? entryCfg.pipelines.length : undefined;
       return {
         key: dir,
         type: "dir",
@@ -2859,6 +3316,7 @@ function parseDirEntry(dir: string): HistoryItem {
         parentKey: entryCfg.parentKey,
         kind: entryCfg.ipRunKey ? "ip-dna" : undefined,
         generationRunId: ipGenerationRunId,
+        pipelineCount: pipeCount,
       };
     }
     // 无 output 运行清单：先尝试用 IP DNA 输入侧资产回填（user_asset_manifest.json 或 _hierarchy.json）。
@@ -3105,6 +3563,9 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
           checkpoint?.routingMode ??
           (manifest.routingMode as "auto" | "semi" | "manual" | undefined) ??
           data.routingMode;
+        // Phase-1：附带 _entry.json（多管线 pipelines / 画布拓扑），供 O 侧还原。
+        const entryCfgFull = loadEntryConfig(key);
+        if (entryCfgFull) data.entry = entryCfgFull;
         res.json(data);
         return;
       }
@@ -3117,6 +3578,7 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
       ?? (manifest.completedSteps as string[] | undefined)
       ?? null;
     const completedSteps = migrateLegacyCompletedSteps(completedStepsRaw);
+    const entryCfgCp = loadEntryConfig(key);
     res.json({
       id: checkpoint.runId ?? manifest.runId,
       tier: checkpoint.tier ?? manifest.tier,
@@ -3143,6 +3605,7 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
       routingMode:
         checkpoint.routingMode ??
         (manifest.routingMode as "auto" | "semi" | "manual" | undefined),
+      entry: entryCfgCp ?? undefined,
     });
     return;
   }
@@ -3154,6 +3617,7 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
   if (gameUnitCtx) {
     const downstream = deriveCompletedStepsFromCtx(gameUnitCtx);
     const fullOrder = withIpPredecessorOrder(key, downstream) ?? downstream;
+    const entryCfgGu = loadEntryConfig(key);
     res.json({
       id: (manifest.runId as string) ?? key,
       tier: manifest.tier,
@@ -3171,6 +3635,7 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
         gameUnitCtx.demand_analysis?.genre_code,
       pipelineOrder: fullOrder,
       routingMode: manifest.routingMode as "auto" | "semi" | "manual" | undefined,
+      entry: entryCfgGu ?? undefined,
     });
     return;
   }
@@ -3198,6 +3663,228 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
   }
 
   res.status(404).json({ error: "No loadable data found" });
+});
+
+/**
+ * Phase-1 M2: config → resolved RunManifest（后端 Planner 真值）。
+ * 前端「未运行」管线状态预览应读此接口，禁止客户端重算步序。
+ * Body: { entryKey?, pipelineId?, config, compositionGraph?, requestedSteps? }
+ *      或 { entryKey?, configs: PlanManifestRequest[] } 批量多管线。
+ */
+/**
+ * Phase-1 M3: 单 agent 独立调用（不遍历全管线）。
+ * Body: { ctx?, inputs?, user_input?, model? }
+ * 返回 { agentId, outputField, output, ctx }；长任务可后续挂 SSE。
+ */
+/**
+ * 登记一个单 agent 的 SSE run 并在后台执行，返回 runId。
+ *
+ * 帧形状与管线 run 完全一致（announce → running/completed → done），使前端能
+ * 复用同一套消费逻辑；composite 的子步各占一帧，波次因此在画布上可见。
+ * 校验（agent 存在 / requiredInputs）在返回前同步做完，失败即 4xx 而非流内报错。
+ */
+function launchAgentRun(p: {
+  agentId: string;
+  ctx: NarrativeContext;
+  inputs?: Record<string, unknown>;
+  llm: LLMClient;
+}): string {
+  const ctx = assertAgentRunnable(p.agentId, p.ctx, p.inputs);
+  const runId = `agent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const agent = getNarrativeAgent(p.agentId);
+  const def = getAgentDef(p.agentId);
+  // composite：把子步一并 announce，画布可先铺出全部待跑节点。
+  const announced =
+    def?.structure.type === "composite"
+      ? [p.agentId, ...def.structure.config.children]
+      : [p.agentId];
+
+  const state: RunState = {
+    id: runId,
+    status: "running",
+    progress: [
+      {
+        type: "pipeline_steps_announce",
+        stage: "announce",
+        step: 0,
+        totalSteps: announced.length,
+        status: "pending",
+        steps: announced,
+      },
+    ],
+    streamBuffer: [],
+    startedAt: new Date().toISOString(),
+    userInput: typeof ctx.user_input === "string" ? ctx.user_input : undefined,
+    pipelineSteps: announced,
+    agentRun: true,
+  };
+  runs.set(runId, state);
+
+  const push = (
+    stepId: string,
+    status: "running" | "completed",
+    extra: { message?: string; data?: unknown } = {},
+  ) => {
+    state.progress.push({
+      stage: getNarrativeAgent(stepId)?.name ?? stepId,
+      stepId,
+      step: Math.max(1, announced.indexOf(stepId) + 1),
+      totalSteps: announced.length,
+      status,
+      ...extra,
+    });
+  };
+
+  runAgent({
+    agentId: p.agentId,
+    ctx,
+    inputs: p.inputs,
+    llm: p.llm,
+    onAgentProgress: (id, message) => push(id, "running", { message }),
+    onAgentComplete: (id, output) => push(id, "completed", { data: output }),
+  })
+    .then((result) => {
+      state.status = "completed";
+      state.result = result.ctx;
+      state.completedSteps = state.progress
+        .filter((f) => f.status === "completed" && f.stepId)
+        .map((f) => f.stepId!);
+    })
+    .catch((err: unknown) => {
+      state.status = "failed";
+      state.error = err instanceof Error ? err.message : String(err);
+      state.progress.push({
+        stage: agent?.name ?? p.agentId,
+        stepId: p.agentId,
+        step: announced.length,
+        totalSteps: announced.length,
+        status: "failed",
+        message: state.error,
+      });
+    });
+
+  return runId;
+}
+
+/**
+ * 单 agent 执行。默认同步返回结果；`stream: true` 时改为登记一个 run 并立刻返回
+ * runId，过程经既有 `GET /api/narrative/stream/:id` 推送（Phase-2 M9）。
+ *
+ * composite 专家（tpl-jrpg 这类）一跑就是十几分钟的子 DAG，同步模式下画布上只能干等
+ * 一个 pending 的请求；SSE 模式下每个子步各出一帧 running/completed，与管线运行同构，
+ * 前端可直接复用同一套 SSE 消费逻辑。
+ */
+app.post("/api/narrative/agent/:id/run", async (req, res) => {
+  const agentId = req.params.id;
+  const body = req.body ?? {};
+  const makeLlm = () =>
+    new LLMClient({
+      apiKey: getGeminiApiKey() || undefined,
+      proxyUrl: getLlmProxyUrl() || undefined,
+      proxyApiKey: getLlmProxyKey() || undefined,
+      defaultModel: body.model ?? getDefaultModel(),
+    });
+  const baseCtx = (body.ctx ?? {
+    user_input: body.user_input ?? body.userInput ?? "",
+  }) as NarrativeContext;
+
+  if (body.stream === true || body.stream === "true") {
+    try {
+      const runId = launchAgentRun({
+        agentId,
+        ctx: baseCtx,
+        inputs: body.inputs,
+        llm: makeLlm(),
+      });
+      res.status(202).json({
+        runId,
+        agentId,
+        streamUrl: `/api/narrative/stream/${runId}`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const status = message.includes("missing required inputs") ? 422 : 400;
+      res.status(status).json({ error: message, agentId });
+    }
+    return;
+  }
+
+  try {
+    const result = await runAgent({
+      agentId,
+      ctx: baseCtx,
+      inputs: body.inputs,
+      llm: makeLlm(),
+    });
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message.includes("missing required inputs") ? 422 : 400;
+    res.status(status).json({ error: message, agentId });
+  }
+});
+
+app.post("/api/narrative/plan", (req, res) => {
+  try {
+    const body = req.body ?? {};
+
+    // 多管线：画布 nodes/edges → 按开始节点切分
+    if (body.compositionNodes && body.compositionEdges) {
+      const graphs = splitCompositionByStartNodes(
+        body.compositionNodes,
+        body.compositionEdges,
+      );
+      const manifests = buildEntryManifests(
+        body.entryKey ?? `draft-${Date.now()}`,
+        graphs,
+        body.config ?? {},
+        body.requestedStepsByStart,
+        body.configByStart,
+        body.hasUploadedScript ?? body.has_uploaded_script,
+      );
+      res.json({
+        entryKey: manifests[0]?.entryKey,
+        pipelines: manifests,
+        count: manifests.length,
+      });
+      return;
+    }
+
+    if (Array.isArray(body.configs)) {
+      const pipelines = body.configs.map((c: Parameters<typeof buildRunManifest>[0]) =>
+        buildRunManifest(c),
+      );
+      res.json({ pipelines, count: pipelines.length });
+      return;
+    }
+
+    const manifest = buildRunManifest({
+      entryKey: body.entryKey,
+      pipelineId: body.pipelineId,
+      config: body.config ?? {
+        tier: body.tier,
+        mode: body.mode,
+        genreCode: body.genre_code ?? body.genreCode,
+        storyType: body.story_type ?? body.storyType,
+        storyTheme: body.story_theme ?? body.storyTheme,
+        narrativeStructure: body.narrative_structure ?? body.narrativeStructure,
+        complexity: body.complexity,
+        routeGroup: body.route_group ?? body.routeGroup,
+        locale: body.locale,
+        autoDetect: body.auto_detect ?? body.autoDetect,
+        pipelineTemplate: body.pipeline_template ?? body.pipelineTemplate,
+        userInput: body.user_input ?? body.userInput,
+        ipRunKey: body.ip_run_key ?? body.ipRunKey,
+      },
+      compositionGraph: body.compositionGraph,
+      requestedSteps: body.requestedSteps,
+      hasUploadedScript: body.hasUploadedScript ?? body.has_uploaded_script,
+    });
+    res.json({ pipeline: manifest, pipelines: [manifest], count: 1 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(400).json({ error: message });
+  }
 });
 
 /**
@@ -3419,19 +4106,28 @@ app.get("/api/narrative/stream/:id", (req, res) => {
   let heartbeatCounter = 0;
   const HEARTBEAT_EVERY = 30; // every 15s (30 * 500ms)
 
+  // Phase-2 M8: 每帧带上管线锚点，前端多 lane 据此分流（同条目多管线各开一条 SSE）。
+  const lane = {
+    entryKey: state.entryKey,
+    pipelineId: state.manifest?.pipelineId ?? state.pipelineId,
+  };
+  const writeFrame = (frame: unknown) => {
+    res.write(`data: ${JSON.stringify({ ...lane, ...(frame as object) })}\n\n`);
+  };
+
   const interval = setInterval(() => {
     while (lastIndex < state.progress.length) {
-      res.write(`data: ${JSON.stringify(state.progress[lastIndex])}\n\n`);
+      writeFrame(state.progress[lastIndex]);
       lastIndex++;
       heartbeatCounter = 0;
     }
     while (lastStreamIndex < state.streamBuffer.length) {
-      res.write(`data: ${JSON.stringify(state.streamBuffer[lastStreamIndex])}\n\n`);
+      writeFrame(state.streamBuffer[lastStreamIndex]);
       lastStreamIndex++;
       heartbeatCounter = 0;
     }
     if (state.status !== "running") {
-      res.write(`data: ${JSON.stringify({ type: "done", status: state.status, error: state.error })}\n\n`);
+      writeFrame({ type: "done", status: state.status, error: state.error });
       clearInterval(interval);
       res.end();
       return;

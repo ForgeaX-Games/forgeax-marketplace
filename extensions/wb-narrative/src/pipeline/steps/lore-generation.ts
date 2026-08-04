@@ -1,15 +1,33 @@
 import type { NarrativeContext, LoreFragment, ItemLore } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
-import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
+import { buildDesignContextSnippet, appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 
 export const LORE_GENERATION_COMPOSER: PromptComposer = {
   stepId: "lore_generation",
   blocks: {
+    cot: `## 机制与流程
+1. 通读上游的世界观与角色设定，挑出适合"由碎片侧面说出"的那几桩事——
+   正面平铺直叙的内容不该做成碎片。
+2. 为每桩事分配 2-3 个不同来源的碎片（碑文的口吻与酒馆传言的口吻应当截然不同），
+   让它们从不同视角互相印证。
+3. 撰写碎片正文，只给线索不给结论——玩家拼合后得到的信息应当多于任一单片。
+4. 为物品写 Lore 与风味文本，把世界观的质感压进玩家随手可见的地方。
+5. 自检：碎片之间有没有互相矛盾？是否与上游设定冲突？有没有哪片说得太满、
+   把该由玩家拼出来的答案直接讲了？`,
+    ip_source: (ctx: NarrativeContext): string => buildIpSourceReference(ctx, "extract"),
     role: `你是一个游戏世界观设计师，擅长创作碎片化叙事内容。
-根据已有的世界观、故事框架和角色设定，生成 Lore 碎片和物品叙事文本。`,
+根据已有的世界观、故事框架和角色设定，生成 Lore 碎片和物品叙事文本。
+
+## 本环节的位置
+你面对的是**叙事要求较低**的品类（卡牌、Roguelike、碎片化叙事等）：故事不靠一条主线推进，
+而是散落在碑文、手记、物品描述里，由玩家自己拼起来。
+与"叙事要求极低"的叙事卡不同，你**有上游**：世界观、故事框架、角色设定都已确立。
+你的产出是它们的**切片与回声**，不是另一套设定——
+凡上游写明的，沿用其名称与口径；凡上游没写的，只在碎片能触及的边角处补，且不得与上游冲突。
+碎片之间要能互相印证：同一桩往事从不同视角被提起，玩家拼合后应得到比单片更多的信息。`,
     task_spec: `## Lore 碎片类型
 - inscription: 碑文/铭刻 — 古老的石碑、墙壁刻文、祭坛铭文
 - journal: 日志/手记 — 探险者日记、学者笔记、战场报告
@@ -47,7 +65,7 @@ export const LORE_GENERATION_COMPOSER: PromptComposer = {
   ]
 }`,
   },
-  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "output_schema"],
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "cot", "ip_source", "output_schema"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };

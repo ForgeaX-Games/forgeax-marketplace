@@ -18,6 +18,7 @@ import { useOrderedSteps } from "../../hooks/useOrderedSteps";
 import type { NarrativeContext, StoryNode, SceneNode, PlotSynopsis } from "../../types";
 import { STEP_CTX_FIELD, PIPELINE_STEPS } from "../../types";
 import { ProgressRing } from "../controls/ProgressRing";
+import { CenterHero } from "./CenterHero";
 import { GenericObjectView, MarkdownBlock } from "../shared/GenericObjectView";
 import { dataToReadableText } from "../shared/dataReadable";
 import { localizeTagSummary } from "../../i18n/tagSummary";
@@ -76,6 +77,9 @@ export function TextViewPanel() {
   const ipPreviewRunId = useNarrativeStore((s) => s.ipPreviewRunId);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
   const runningProgress = useNarrativeStore((s) => s.runningProgress);
+  const entryPipelines = useNarrativeStore((s) => s.entryPipelines);
+  const activePipelineId = useNarrativeStore((s) => s.activePipelineId);
+  const setActivePipelineId = useNarrativeStore((s) => s.setActivePipelineId);
   const isViewingRunning =
     activeEntryKey != null &&
     activeEntryKey === runningEntryKey &&
@@ -161,7 +165,7 @@ export function TextViewPanel() {
   if (!entryStatus && (!result || steps.length === 0)) {
     return (
       <div className="text-view empty-state">
-        <div className="empty-text">{t("textView.empty")}</div>
+        <CenterHero />
       </div>
     );
   }
@@ -213,7 +217,94 @@ export function TextViewPanel() {
       )}
 
       <div className="step-card-list">
-        {steps.filter((s) => !s.id.startsWith("structure_validation")).map((s) => {
+        {/* Phase-1：多管线时外包一层「大框」；小框仍是现有 StepCard */}
+        {entryPipelines.length > 1 && (
+          <div className="text-pipeline-tabs" role="tablist">
+            {entryPipelines.map((p, i) => (
+              <button
+                key={p.pipelineId}
+                type="button"
+                role="tab"
+                aria-selected={activePipelineId === p.pipelineId}
+                className={`text-pipeline-tab ${activePipelineId === p.pipelineId ? "is-active" : ""}`}
+                onClick={() => setActivePipelineId(p.pipelineId)}
+              >
+                {t("textView.pipelineTab", { n: i + 1 })}
+                {!p.complete ? ` · ${t("textView.incomplete")}` : ""}
+              </button>
+            ))}
+          </div>
+        )}
+        {entryPipelines.length > 1 ? (
+          entryPipelines.map((p, i) => {
+            const open = activePipelineId === p.pipelineId || (!activePipelineId && i === 0);
+            const agentIds = new Set(p.agents?.map((a) => a.agentId) ?? []);
+            const pipeSteps = steps.filter(
+              (s) => !s.id.startsWith("structure_validation") && (agentIds.size === 0 || agentIds.has(s.id)),
+            );
+            if (!open) return null;
+            return (
+              <div key={p.pipelineId} className="text-pipeline-box" data-pipeline-id={p.pipelineId}>
+                <div className="text-pipeline-box__head">
+                  {t("textView.pipelineBox", { n: i + 1 })}
+                  <span className="text-pipeline-box__meta">
+                    {pipeSteps.filter((s) => s.status === "completed").length}/{pipeSteps.length}
+                  </span>
+                </div>
+                <div className="text-pipeline-box__body">
+                  {pipeSteps.map((s) => {
+                    const isExpanded = expandedStepId === s.id;
+                    const data = s.data ?? resolveStepData(s.id, result);
+                    const tags = tStepTags(s.id);
+                    const isStory = STORY_STEP_IDS.has(s.id);
+                    const isLocked = s.status === "running" && isRunningState && !isStory;
+                    const isAnimating = animatingStepId === s.id;
+                    const draft = editDrafts[s.id] as EditDraft | undefined;
+                    const canEdit = (entryStatus === "completed" || entryStatus === "interrupted") && s.status === "completed";
+                    const display = resolveStepDisplay(s.status as "completed" | "pending" | "running" | "failed", entryStatus, draft);
+                    return (
+                      <StepCard
+                        key={`${p.pipelineId}:${s.id}`}
+                        stepId={s.id}
+                        label={s.label ? tStepLabel(s.id, s.label) : tStepLabel(s.id, STEP_LABEL_MAP.get(s.id) ?? s.id)}
+                        stepStatus={s.status}
+                        message={s.message}
+                        tags={tags}
+                        expanded={isExpanded}
+                        data={data}
+                        result={result}
+                        fileRunKey={fileRunKey}
+                        fileGroups={fileGroupsForStep(s.id)}
+                        isRunning={s.status === "running" && isRunningState}
+                        isLocked={isLocked}
+                        isAnimating={isAnimating}
+                        canEdit={canEdit}
+                        draft={draft}
+                        displayState={display}
+                        onToggle={() => {
+                          if (!isLocked) setFocus(isExpanded ? null : s.id);
+                        }}
+                        onStartEdit={() => setEditDraft(s.id, { editing: true })}
+                        onSaveDraft={(content, userInput) => {
+                          setEditDraft(s.id, { content, userInput, editing: false, saved: true });
+                          sendToHost({
+                            type: "narrative:content-edited",
+                            payload: { stepId: s.id, hasUserInput: !!userInput?.trim() },
+                          });
+                        }}
+                        onCancelEdit={() => clearEditDraft(s.id)}
+                        onDraftChange={(content, userInput) => {
+                          if (content !== undefined) setEditDraft(s.id, { content });
+                          if (userInput !== undefined) setEditDraft(s.id, { userInput });
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })
+        ) : steps.filter((s) => !s.id.startsWith("structure_validation")).map((s) => {
           const isExpanded = expandedStepId === s.id;
           const data = s.data ?? resolveStepData(s.id, result);
           const tags = tStepTags(s.id);

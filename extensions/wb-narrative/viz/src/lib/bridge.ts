@@ -125,9 +125,37 @@ function formatRoleText(role: ComposerRoleInsert): string {
  * 跨 iframe 原生拖拽无法直达宿主，故用 postMessage 兜底：拖拽释放 / 点击"@"均走此函数。
  */
 export function sendRoleToComposer(role: ComposerRoleInsert): void {
+  sendTextToComposer(formatRoleText(role));
+}
+
+/**
+ * 项目产物文件在对话里的引用。
+ *
+ * 与角色 @ 同一条通道，只是载荷换成"这是哪个项目的哪份产物"，
+ * 让平台 agent 能直接对这份文件动手（读、改、以它为输入重跑下游）。
+ */
+export interface ProjectFileInsert {
+  /** 条目 key（输出目录名）。 */
+  entryKey: string;
+  /** `<group>/<相对路径>`，与 GET /files/:key 同形。 */
+  path: string;
+  /** 展示名（文件名）。 */
+  name: string;
+  /** 内容类型 id（角色档案 / 道具清单 …）。 */
+  contentType?: string;
+}
+
+function formatFileText(file: ProjectFileInsert): string {
+  const attrs = [`entry=${file.entryKey}`, `path=${file.path}`];
+  if (file.contentType) attrs.push(`type=${file.contentType}`);
+  return `@${file.name} [叙事产物: ${attrs.join(" ")}，请据此选择对应的 narrative:* 工具规划并执行]`;
+}
+
+export function sendFileToComposer(file: ProjectFileInsert): void {
+  sendTextToComposer(formatFileText(file));
+}
+
+function sendTextToComposer(text: string): void {
   if (!isEmbedded) return;
-  window.parent.postMessage(
-    { type: "FORGEAX_COMPOSER_INSERT", text: formatRoleText(role) },
-    "*",
-  );
+  window.parent.postMessage({ type: "FORGEAX_COMPOSER_INSERT", text }, "*");
 }

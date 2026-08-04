@@ -12,19 +12,31 @@ import type { NarrativeContext, VnLogline } from "../../../types/index.js";
 import type { LLMClient } from "../../llm-client.js";
 import { extractJSON } from "../../llm-client.js";
 import { appendUserInstructions } from "../design-context-helper.js";
-import { composeSystemPrompt, composeUserPrompt, type PromptComposer } from "../../prompt-composer.js";
+import {
+  composeSystemPrompt,
+  composeUserPrompt,
+  STRATEGY_SLOT_BLOCK,
+  type PromptComposer,
+} from "../../prompt-composer.js";
 import {
   buildUploadedScriptSnippet,
   FIVE_ELEMENT_NOTE,
   getStreamEmit,
 } from "./_shared.js";
 
-const VN_LOGLINE_COMPOSER: PromptComposer = {
+export const VN_LOGLINE_COMPOSER: PromptComposer = {
   stepId: "vn_logline",
   skillSlots: ["style_guide", "constraints"],
-  systemBlockOrder: ["role", "task", "output_format"],
+  systemBlockOrder: ["role", "task", "strategy", "cot", "output_format"],
   userBlockOrder: ["context_inputs", "task_instruction"],
   blocks: {
+    cot: `## 机制与流程
+1. 通读用户原始需求，认准他真正想体验的是什么。
+2. 若有上传剧本素材，从中提取核心故事线，沿用原作的人名与设定。
+3. 按五要素构思梗概，五者要在一段话里互相咬合，不做罗列。
+4. 合成为连贯的一段叙述，读起来是故事而不是提纲。
+5. 自检：五要素是否齐全？字数是否合规？有没有混入游戏机制词？有没有编造原作里没有的人名？`,
+    strategy: STRATEGY_SLOT_BLOCK,
     role: `你是互动影游叙事策划。任务是把用户的口头需求与（可选的）上传剧本浓缩为一份"一句话故事梗概"。
 
 ## 角色定位

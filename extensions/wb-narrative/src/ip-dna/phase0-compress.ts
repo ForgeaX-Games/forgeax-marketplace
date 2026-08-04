@@ -58,7 +58,10 @@ function ext(fileName: string): string {
   return path.extname(fileName).toLowerCase();
 }
 
-const LabelledTextDecoder = TextDecoder as unknown as new (label?: string) => TextDecoder;
+/** Node 类型里 TextDecoder 构造器不接受 gb18030 等 label；用 InstanceType 避免把值当类型用。 */
+const LabelledTextDecoder = TextDecoder as unknown as new (
+  label?: string,
+) => InstanceType<typeof TextDecoder>;
 
 /** Node's runtime accepts WHATWG encoding labels that its narrow type omits. */
 export function decodeGb18030(bytes: Buffer): string {

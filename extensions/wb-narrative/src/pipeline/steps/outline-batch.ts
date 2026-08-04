@@ -23,7 +23,7 @@ import type {
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
-import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
+import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, STRATEGY_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
 import {
   buildCharacterDigest,
   buildItemDigest,
@@ -82,6 +82,12 @@ interface StructurePlan {
   branch_reason?: string;
   should_merge?: boolean;
   narrative_stage?: string;
+  /**
+   * 分叉处哪条支线属于最优路径（分支字母 a/b/c…）。
+   * feature list 2.3.8 要求结构层标出"最符合用户需求的那一条链路"。
+   * 缺省时按 a 处理——总得有一条，不标等于把判断推给下游瞎猜。
+   */
+  optimal_branch?: string;
   /** @deprecated backward compat — mapped to branch_count */
   has_branch?: boolean;
 }
@@ -91,12 +97,51 @@ const STEP1_SYSTEM = `你是叙事结构规划师。根据L0框架节点，为�
 export const OUTLINE_PLAN_COMPOSER: PromptComposer = {
   stepId: "outline_batch",
   blocks: {
+    cot: `## 机制与流程
+本席把上游的每个**叙事单元**展开成一棵**剧情树**：定清树上每个节点的功能位、
+主要内容与位置关系。节点正文交给下游情节席去写，此处只到"这个节点干什么、
+接在哪、凭什么走到下一个"为止。
+
+节点分五种功能位，任何形态的剧情树都由它们拼成：
+- **起始**：单元入口，无前驱；
+- **分支**：玩家在此作答，之后走向分岔；
+- **聚合**：多条分支在此收束回主干；
+- **结局**：本单元或全局的终点，无后继；
+- **普通**：单入单出的推进。
+
+分支、聚合、结局三种节点**必须给出条件**——凭什么走这条分支、各分支凭什么汇回、
+达成这个结局要满足什么。条件写成玩家可感的判据（选了哪个选项、某个数值过线、
+是否持有某物、是否去过某节点），不要写成"剧情需要"。普通节点默认无条件推进。
+条件挂在**出边**上：一个三选分支就是三条边各带自己的条件与代价，不要把三个条件
+堆在节点上再让下游去猜哪个通向哪。收束回主干的边要显式标为 merge_back。
+
+开分支时先定这处分岔的**代价档**，再决定铺几条边：
+- **converge**：路径不同、结果相同——一般失误可挽回，代价是绕远或损耗，走几个节点后汇回；
+- **diverge**：路径天壤之别、结局不同——抉择真正分岔，长链不汇；
+- **terminal**：分支程度过大——直接走向结局（致命错误，或决定性正确带来的提前圆满）。
+定不出代价档，说明这处分岔本身没想清楚。**几条边指向同一个目标是假分支**，
+玩家的选择没有产生任何差异，宁可不开。每条选择边尽量写明它的代价与人设契合倾向。
+
+结局要分档：**H 圆满 / B 悲剧 / O 其他**（开放、反转、隐藏），并区分作用域——
+**global** 是全剧终，**local** 是中途的 game over 或提前圆满。允许失败的作品会有
+好几个 local 结局，这是正常的；但 global 结局不该满地都是。
+
+1. 逐个读上游叙事单元，判断这一段承担的叙事功能需要几个子节点才铺得开。
+2. 按**结构轴策略卡指定的形态**布置这棵树：线性形态只用起始/普通/结局；
+   树状形态四种齐用；碎片化形态大量普通节点而少聚合。形态服从策略卡，
+   不要一律铺成同一种树。
+3. 决定分支位置与分支数——分支要出现在角色**必须做选择**的地方，不为分叉而分叉；
+   每个分支给出条件，并确认它能收束回主干（除非本处就是结局分岔）。
+4. 为每处分支指出最优路径。
+5. 自检：因果是否连贯？五种功能位是否标全？分支/聚合/结局是否都带了条件？
+   有没有节点成了孤岛（无前驱又非起始、无后继又非结局）？`,
     base: STEP1_SYSTEM,
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints", "cot"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -105,11 +150,12 @@ export const OUTLINE_FILL_COMPOSER: PromptComposer = {
   stepId: "outline_batch",
   blocks: {
     base: "你是叙事结构设计师。",
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -158,10 +204,20 @@ ${deviationSection}
 ## 输出JSON数组
 [
   { "parent_id": "1", "outline_count": 3, "branch_count": 1 },
-  { "parent_id": "2", "outline_count": 4, "branch_count": 2, "branch_position": 2, "branch_reason": "...", "should_merge": true }
+  { "parent_id": "2", "outline_count": 4, "branch_count": 2, "branch_position": 2, "branch_reason": "...", "should_merge": true, "optimal_branch": "a" }
 ]
 
 branch_count: 1=不分支（线性），2=二分支，3=三分支，以此类推。由你根据叙事需要决定。
+
+## 最优路径
+凡 branch_count >= 2，必须用 optimal_branch 指出哪条支线（"a"/"b"/"c"…）是**最优路径**——
+即最贴合上面「用户需求」与「偏好总结」的那一条走向。判断依据按优先级：
+1. 用户明确点名要的情节走向、结局倾向、角色归宿；
+2. 与初步大纲的主题和角色弧光最一致的那条；
+3. 戏剧张力最足、后续可展开空间最大的那条。
+最优路径不等于"好结局"——若用户要的是悲剧，那条通向悲剧的支线才是最优路径。
+不分支的节点无须标注，它们默认都在最优路径上。
+
 每个框架节点都必须有对应规划。请严格输出JSON数组。`;
 }
 
@@ -176,6 +232,8 @@ interface SkeletonNode {
   merges_from?: string[];
   prev_node: string[];
   next_node: string[];
+  /** 是否落在最优路径上。非分叉节点恒为 true：不分叉时人人都在唯一那条路上。 */
+  on_optimal_path: boolean;
 }
 
 function normalizePlan(p: StructurePlan): StructurePlan {
@@ -201,6 +259,7 @@ function buildSkeleton(plans: StructurePlan[]): SkeletonNode[] {
     let seqIdx = 0;
     for (let i = 1; i <= count; i++) {
       if (hasBranch && i === branchPos) {
+        const optimalIdx = Math.max(0, letters.indexOf(plan.optimal_branch?.trim().toLowerCase() ?? "a"));
         const branchNodes: SkeletonNode[] = [];
         for (let b = 0; b < numBranches; b++) {
           branchNodes.push({
@@ -211,6 +270,7 @@ function buildSkeleton(plans: StructurePlan[]): SkeletonNode[] {
             is_merge_point: false,
             prev_node: [],
             next_node: [],
+            on_optimal_path: b === optimalIdx,
           });
         }
 
@@ -237,6 +297,7 @@ function buildSkeleton(plans: StructurePlan[]): SkeletonNode[] {
             merges_from: branchNodes.map((bn) => bn.node_id),
             prev_node: branchNodes.map((bn) => bn.node_id),
             next_node: [],
+            on_optimal_path: true,
           };
           for (const bn of branchNodes) bn.next_node.push(mergeNode.node_id);
           nodes.push(mergeNode);
@@ -255,6 +316,7 @@ function buildSkeleton(plans: StructurePlan[]): SkeletonNode[] {
           is_merge_point: false,
           prev_node: [],
           next_node: [],
+          on_optimal_path: true,
         };
 
         if (nodes.length > 0) {
@@ -427,11 +489,12 @@ export const OUTLINE_GAP_COMPOSER: PromptComposer = {
   stepId: "outline_batch",
   blocks: {
     base: STEP2_SYSTEM,
+    strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -623,6 +686,7 @@ export async function outlineBatch(
         },
       },
       content: fill?.content ?? "",
+      on_optimal_path: skel.on_optimal_path,
     };
   });
 

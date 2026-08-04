@@ -18,6 +18,13 @@ calendar dates in the project timezone.
 
 ## Unreleased
 
+### Changed
+
+- **Workbench manifest migrated to the Page contract.** `forgeax-plugin.json`
+  now contributes one Page, one reusable panel type, explicit sidebar/workspace
+  placements, and a horizontal left/right Page layout instead of `provides.workbench`
+  split metadata. *为什么：* panel availability and position must have one Page-owned SSOT.
+
 ### Fixed
 - **Standalone installs no longer depend on pnpm's workspace protocol.**
   `package.json` now resolves `@forgeax/node-runtime` through the repository-local
