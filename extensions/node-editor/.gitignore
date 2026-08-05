@@ -1,4 +1,7 @@
 node_modules/
+# This repository is a pnpm workspace; a local `bun install` must not make
+# the nested submodule dirty or bubble into forgeax-marketplace/Studio.
+bun.lock
 *.tsbuildinfo
 *.log
 
