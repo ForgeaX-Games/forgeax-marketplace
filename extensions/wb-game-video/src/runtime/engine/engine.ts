@@ -32,7 +32,7 @@ import { nodeOverlayChildren, nodeOverlayMounts } from '../schema/expand-overlay
 import { resolveEventReactions, resolveOverlayReaction, completeReactions } from '../schema/overlay-events'
 import type { Layout, NodeAction, OverlayInstanceChild, Reaction } from '../schema/node-config-schema'
 import { overlayMountId } from '../schema/node-config-schema'
-import { applyEffects, type MutableState } from './apply-effects'
+import { applyEffects, effectTargetValue, type EffectWrite, type MutableState } from './apply-effects'
 import {
   BgmStack,
   DOC_BGM_OWNER,
@@ -878,9 +878,11 @@ export class GraphRuntime {
   /** 结算动作：按序施加 effect、显示/隐藏界面，或沿当前结算节点的真实出边推进。 */
   private runSettlementActions(node: GameNode, actions: NodeAction[]): void {
     const scope = this.activeScope()
+    // 顺序即语义：spawn 读紧邻上一条 effect 实际造成的变化，让绑定界面的数字派生自结算本身。
+    let lastWrite: EffectWrite | undefined
     for (const a of actions) {
-      if (a.kind === 'effect' && a.effects.length) this.applyAndReact(a.effects)
-      else if (a.kind === 'spawn') this.doSpawn(a)
+      if (a.kind === 'effect' && a.effects.length) lastWrite = this.applyAndReact(a.effects)
+      else if (a.kind === 'spawn') this.doSpawn(a, lastWrite)
       else if (a.kind === 'hideOverlay') this.doHideOverlay(a, node)
       else if (a.kind === 'advance' && !this.redirect && !this.inExit) {
         const route = this.scopedEdgeInScope(a.edgeId, scope)
@@ -1045,10 +1047,19 @@ export class GraphRuntime {
     return true
   }
 
-  private applyAndReact(effects: GraphEffect[]): void {
+  /**
+   * 施加 effect 并推进响应式条件。返回**最后一个 effect 条目**的观测变化，供同一 do 内其后的
+   * spawn 以 `prev` / `next` / `delta` 读取；`flag` / `item` 无数值目标时返回 undefined。
+   * 采样夹在 applyEffects 两侧，因此不含 checkReactiveConditions 级联带来的后续改动。
+   */
+  private applyAndReact(effects: GraphEffect[]): EffectWrite | undefined {
+    const target = effects[effects.length - 1]
+    const prev = target ? effectTargetValue(this.state, target) : null
     applyEffects(this.state, effects)
+    const next = target && prev != null ? effectTargetValue(this.state, target) : null
     this.emit({ type: 'stateChanged' })
     this.checkReactiveConditions()
+    return prev == null || next == null ? undefined : { prev, next, delta: next - prev }
   }
 
   // ── 响应式条件结算（pull-diff 于写屏障）──────────────────────────────────────

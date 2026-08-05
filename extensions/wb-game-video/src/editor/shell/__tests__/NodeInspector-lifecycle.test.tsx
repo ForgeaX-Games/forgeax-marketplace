@@ -430,7 +430,7 @@ describe('NodeInspector · 结算选中联动', () => {
     expect(next.nodes[0]?.data.reactions).toHaveLength(1)
   })
 
-  it('统一呈现定时与数值变化结算，仅条件结算开放显示界面', () => {
+  it('统一呈现定时与数值变化结算，两者都能绑定界面', () => {
     const onChange = vi.fn()
     const { container } = render(
       <NodeInspector
@@ -449,15 +449,21 @@ describe('NodeInspector · 结算选中联动', () => {
     expect(screen.getByRole('option', { name: '数值增加' })).toBeTruthy()
     expect(screen.getByRole('option', { name: '数值减少' })).toBeTruthy()
     expect(screen.queryByText('响应规则')).toBeNull()
-    expect(screen.getByRole('combobox', { name: '添加显示界面' })).toBeDisabled()
+    expect(screen.getAllByRole('combobox', { name: '绑定界面' })).toHaveLength(2)
     expect(screen.getAllByRole('button', { name: '＋ 添加效果' })).toHaveLength(2)
     expect(screen.queryByRole('button', { name: '+ 效果' })).toBeNull()
     expect(screen.getAllByRole('button', { name: '＋ 沿边推进' })).toHaveLength(2)
-    const conditionToolbar = container.querySelectorAll<HTMLElement>('[data-node-action-toolbar]')[1]!
-    expect(Array.from(conditionToolbar.children).map((control) => control.textContent?.trim())).toEqual([
+    const [timedToolbar, conditionToolbar] = container.querySelectorAll<HTMLElement>('[data-node-action-toolbar]')
+    // 定时结算能绑界面，但不开放「隐藏界面」——hideOverlay 命中不了 spawn 出来的界面。
+    expect(Array.from(timedToolbar!.children).map((control) => control.textContent?.trim())).toEqual([
       '＋ 添加效果',
       '＋ 沿边推进',
-      '+ 添加界面',
+      '+ 绑定界面',
+    ])
+    expect(Array.from(conditionToolbar!.children).map((control) => control.textContent?.trim())).toEqual([
+      '＋ 添加效果',
+      '＋ 沿边推进',
+      '+ 绑定界面',
       '＋ 隐藏界面',
     ])
 
@@ -466,7 +472,110 @@ describe('NodeInspector · 结算选中联动', () => {
     expect(next.nodes[0]?.data.reactions?.[0]?.when.type).toBe('hidden')
   })
 
-  it('条件结算可从界面模板添加默认 1200ms 的显示动作', () => {
+  it('绑定界面的初始显示时长取自模板 window 声明的可见长度', () => {
+    const onChange = vi.fn()
+    const overlays: Record<string, Overlay> = {
+      rageHud: {
+        id: 'rageHud',
+        title: '怒气值界面',
+        children: [{
+          id: 'value',
+          component: 'DamageFloatText',
+          trigger: { when: 'enter' },
+          window: { startMs: 200, endMs: 1_000 },
+          inputs: { value: 0 },
+        }],
+      },
+    }
+    render(
+      <NodeInspector
+        graph={graphWith([lifecycle(3000, 'ent-player')])}
+        nodeId="gate"
+        overlays={overlays}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.change(screen.getByRole('combobox', { name: '绑定界面' }), { target: { value: 'rageHud/value' } })
+
+    const next = onChange.mock.calls.at(-1)?.[0] as GameGraph
+    expect(next.nodes[0]?.data.reactions?.[0]?.do[1]).toEqual({
+      kind: 'spawn',
+      from: 'rageHud/value',
+      ttlMs: 800,
+    })
+  })
+
+  it('模板 window 不写结束时刻时仍给一个确定时长，好让它随结算点整体平移', () => {
+    const onChange = vi.fn()
+    const overlays: Record<string, Overlay> = {
+      rageHud: {
+        id: 'rageHud',
+        title: '怒气值界面',
+        children: [{
+          id: 'value',
+          component: 'DamageFloatText',
+          trigger: { when: 'enter' },
+          window: { startMs: 0 },
+          inputs: {},
+        }],
+      },
+    }
+    render(
+      <NodeInspector
+        graph={graphWith([lifecycle(3000, 'ent-player')])}
+        nodeId="gate"
+        overlays={overlays}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.change(screen.getByRole('combobox', { name: '绑定界面' }), { target: { value: 'rageHud/value' } })
+
+    const next = onChange.mock.calls.at(-1)?.[0] as GameGraph
+    expect(next.nodes[0]?.data.reactions?.[0]?.do[1]).toEqual({
+      kind: 'spawn',
+      from: 'rageHud/value',
+      ttlMs: 2500,
+    })
+  })
+
+  it('定时结算可绑定界面，并把效果排在界面之前让飘字能读到 delta', () => {
+    const onChange = vi.fn()
+    const overlays: Record<string, Overlay> = {
+      rageHud: {
+        id: 'rageHud',
+        title: '怒气值界面',
+        children: [{
+          id: 'value',
+          component: 'DamageFloatText',
+          trigger: { when: 'enter' },
+          window: { startMs: 0, endMs: 1_200 },
+          inputs: { value: 0 },
+        }],
+      },
+    }
+    render(
+      <NodeInspector
+        graph={graphWith([lifecycle(3000, 'ent-player')])}
+        nodeId="gate"
+        overlays={overlays}
+        onChange={onChange}
+      />,
+    )
+
+    const addUi = screen.getByRole('combobox', { name: '绑定界面' })
+    expect(addUi).not.toBeDisabled()
+    fireEvent.change(addUi, { target: { value: 'rageHud/value' } })
+
+    const next = onChange.mock.calls.at(-1)?.[0] as GameGraph
+    const reaction = next.nodes[0]?.data.reactions?.[0]
+    expect(reaction?.when).toEqual({ type: 'at', ms: 3000 })
+    expect(reaction?.do.map((action) => action.kind)).toEqual(['effect', 'spawn'])
+    expect(reaction?.do[1]).toEqual({ kind: 'spawn', from: 'rageHud/value', ttlMs: 1200 })
+  })
+
+  it('条件结算可从界面模板绑定界面，并带上确定的显示时长', () => {
     const onChange = vi.fn()
     const overlays: Record<string, Overlay> = {
       rageHud: {
@@ -490,7 +599,7 @@ describe('NodeInspector · 结算选中联动', () => {
       />,
     )
 
-    const addUi = screen.getByRole('combobox', { name: '添加显示界面' })
+    const addUi = screen.getByRole('combobox', { name: '绑定界面' })
     expect(addUi).not.toBeDisabled()
     fireEvent.change(addUi, { target: { value: 'rageHud/value' } })
 
@@ -498,11 +607,11 @@ describe('NodeInspector · 结算选中联动', () => {
     expect(next.nodes[0]?.data.reactions?.[0]?.do).toEqual([{
       kind: 'spawn',
       from: 'rageHud/value',
-      ttlMs: 1200,
+      ttlMs: 2500,
     }])
   })
 
-  it('条件结算显示界面只提供常驻和按时长隐藏', () => {
+  it('条件结算绑定界面只提供常驻和按时长隐藏', () => {
     const overlays: Record<string, Overlay> = {
       rageHud: {
         id: 'rageHud',
@@ -522,9 +631,10 @@ describe('NodeInspector · 结算选中联动', () => {
     const { container } = render(<Harness />)
     const settlement = container.querySelector<HTMLElement>('[data-settlement-index="0"]')!
 
-    fireEvent.change(settlement.querySelector('select[aria-label="添加显示界面"]')!, { target: { value: 'rageHud/value' } })
+    fireEvent.change(settlement.querySelector('select[aria-label="绑定界面"]')!, { target: { value: 'rageHud/value' } })
     const disappearance = screen.getByRole('combobox', { name: '消失方式' })
     expect(Array.from(disappearance.querySelectorAll('option')).map((option) => option.textContent)).toEqual(['常驻', '按时长隐藏'])
+    // 绑定即带确定时长，作者要常驻得显式选。
     expect(disappearance).toHaveValue('duration')
 
     fireEvent.change(disappearance, { target: { value: 'persistent' } })
@@ -538,7 +648,7 @@ describe('NodeInspector · 结算选中联动', () => {
     expect(latest.nodes[0]?.data.reactions?.[0]?.do).toEqual([{
       kind: 'spawn',
       from: 'rageHud/value',
-      ttlMs: 1200,
+      ttlMs: 2500,
     }])
   })
 
@@ -606,13 +716,13 @@ describe('NodeInspector · 结算选中联动', () => {
     }
 
     const { container } = render(<Harness />)
-    const addUi = screen.getByRole('combobox', { name: '添加显示界面' })
+    const addUi = screen.getByRole('combobox', { name: '绑定界面' })
     fireEvent.change(addUi, { target: { value: 'rageHud/value' } })
     fireEvent.change(addUi, { target: { value: 'dialogue/line' } })
 
     expect(latest.nodes[0]?.data.reactions?.[0]?.do).toEqual([
-      { kind: 'spawn', from: 'rageHud/value', ttlMs: 1200 },
-      { kind: 'spawn', from: 'dialogue/line', ttlMs: 1200 },
+      { kind: 'spawn', from: 'rageHud/value', ttlMs: 2500 },
+      { kind: 'spawn', from: 'dialogue/line', ttlMs: 2500 },
     ])
     const spawnCards = container.querySelectorAll<HTMLElement>('[data-action-kind="spawn"]')
     const componentCards = container.querySelectorAll<HTMLDetailsElement>('[data-component-inputs-disclosure]')
@@ -628,13 +738,13 @@ describe('NodeInspector · 结算选中联动', () => {
     expect(latest.nodes[0]?.data.reactions?.[0]?.do[0]).toEqual({
       kind: 'spawn',
       from: 'rageHud/value',
-      ttlMs: 1200,
+      ttlMs: 2500,
       inputs: { value: 80 },
     })
 
-    fireEvent.click(Array.from(spawnCards[0]!.querySelectorAll('button')).find((button) => button.textContent === '移除界面')!)
+    fireEvent.click(Array.from(spawnCards[0]!.querySelectorAll('button')).find((button) => button.textContent === '解除绑定')!)
     expect(latest.nodes[0]?.data.reactions?.[0]?.do).toEqual([
-      { kind: 'spawn', from: 'dialogue/line', ttlMs: 1200 },
+      { kind: 'spawn', from: 'dialogue/line', ttlMs: 2500 },
     ])
     expect(container.querySelectorAll('[data-action-kind="spawn"]')).toHaveLength(1)
   })

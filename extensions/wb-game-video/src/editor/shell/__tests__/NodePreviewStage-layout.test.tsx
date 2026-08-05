@@ -178,7 +178,7 @@ describe('NodePreviewStage overlay layout', () => {
     expect(screen.getByTitle('满足 1 项条件 → 未配置动作')).toBeTruthy()
   })
 
-  it('highlights every condition settlement interface and drags the active spawn layout in the preview', async () => {
+  it('frames every condition settlement interface but selects only the active one, and drags its spawn layout', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function rect() {
       return {
         x: 0,
@@ -255,18 +255,12 @@ describe('NodePreviewStage overlay layout', () => {
     fireEvent.pointerDown(conditionMarker)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-preview-condition-spawn-id="condition-spawn:0:0"]')).not.toBeNull()
-      expect(container.querySelector('[data-preview-condition-spawn-id="condition-spawn:0:1"]')).not.toBeNull()
-      expect(container.querySelector('[data-canvas-item="condition-spawn:0:0"]')).toHaveClass(
-        'is-selected',
-        'is-highlighted',
-      )
-      expect(container.querySelector('[data-canvas-item="condition-spawn:0:1"]')).toHaveClass(
-        'is-highlighted',
-      )
-      expect(container.querySelector('[data-canvas-item="condition-spawn:0:1"]')).not.toHaveClass(
-        'is-selected',
-      )
+      expect(container.querySelector('[data-preview-settlement-spawn-id="settlement-spawn:0:0"]')).not.toBeNull()
+      expect(container.querySelector('[data-preview-settlement-spawn-id="settlement-spawn:0:1"]')).not.toBeNull()
+      // 同结算的界面都画陪衬虚框（看得见才点得中），但只有活动的那个是选中态。
+      expect(container.querySelector('[data-canvas-item="settlement-spawn:0:0"]')).toHaveClass('is-selected')
+      expect(container.querySelector('[data-canvas-item="settlement-spawn:0:1"]')).toHaveClass('is-highlighted')
+      expect(container.querySelector('[data-canvas-item="settlement-spawn:0:1"]')).not.toHaveClass('is-selected')
     })
     expect(screen.getAllByText('+42')).toHaveLength(2)
 

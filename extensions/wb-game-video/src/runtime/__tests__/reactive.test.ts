@@ -3,7 +3,7 @@ import { GraphRuntime } from '../engine/engine'
 import { registerComponent, unregisterComponent } from '../registry/component-registry'
 import { isRenderOverlay } from '../engine/directives'
 import type { RenderOverlayDirective } from '../engine/directives'
-import type { GameGraph, Overlay } from '../schema/graph-schema'
+import type { GameGraph, GameNode, Overlay } from '../schema/graph-schema'
 import { node, scnOf } from './test-fixtures'
 
 const COMPONENT_IDS = ['floatT']
@@ -331,6 +331,115 @@ describe('watch reaction (数值变化 → spawn)', () => {
     rt.start()
     const dirs = rt.tick(600)
     expect(dirs.some((d) => isRenderOverlay(d) && d.elementId.startsWith('spawn:'))).toBe(false)
+  })
+})
+
+describe('timed settlement locals (结算绑定界面)', () => {
+  const spawnOf = (dirs: ReturnType<GraphRuntime['tick']>): RenderOverlayDirective | undefined =>
+    dirs.find((d): d is RenderOverlayDirective => isRenderOverlay(d) && d.elementId.startsWith('spawn:'))
+
+  const timedNode = (
+    doActions: NonNullable<GameNode['data']['reactions']>[number]['do'],
+    extra: Record<string, unknown> = {},
+  ): GameNode => node('a', {
+    durationMs: 5000,
+    reactions: [{ when: { type: 'at', ms: 500 }, do: doActions }],
+    ...extra,
+  })
+
+  const runTimed = (doActions: NonNullable<GameNode['data']['reactions']>[number]['do']) => {
+    const graph: GameGraph = { nodes: [timedNode(doActions)], edges: [] }
+    const scn = scnOf(graph, { ui: { overlays: { hud: dmgOverlay } } })
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+    return spawnOf(rt.tick(600))
+  }
+
+  it('injects observed prev/next/delta into a spawn in the same timed settlement', () => {
+    const spawn = runTimed([
+      { kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -40 }] },
+      {
+        kind: 'spawn',
+        from: 'hud/dmgFloat',
+        inputs: { dmg: { expr: 'abs(delta)' }, before: { expr: 'prev' }, after: { expr: 'next' } },
+        ttlMs: 800,
+      },
+    ])
+
+    expect(spawn?.inputs.dmg).toBe(40)
+    expect(spawn?.inputs.before).toBe(700)
+    expect(spawn?.inputs.after).toBe(660)
+  })
+
+  it('reports the clamped change rather than the authored effect value', () => {
+    // qi 的 varMeta 上限是 9：作者写 +20，实际只涨 9。
+    const spawn = runTimed([
+      { kind: 'effect', effects: [{ id: 'q', kind: 'var', varId: 'qi', op: 'add', value: 20 }] },
+      { kind: 'spawn', from: 'hud/dmgFloat', inputs: { gain: { expr: 'delta' } }, ttlMs: 800 },
+    ])
+
+    expect(spawn?.inputs.gain).toBe(9)
+  })
+
+  it('describes the last effect entry when one action writes several targets', () => {
+    const spawn = runTimed([
+      {
+        kind: 'effect',
+        effects: [
+          { id: 'q', kind: 'var', varId: 'qi', op: 'add', value: 3 },
+          { id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -25 },
+        ],
+      },
+      { kind: 'spawn', from: 'hud/dmgFloat', inputs: { dmg: { expr: 'abs(delta)' } }, ttlMs: 800 },
+    ])
+
+    expect(spawn?.inputs.dmg).toBe(25)
+  })
+
+  it('reports zero delta when the spawn precedes the effect', () => {
+    const spawn = runTimed([
+      { kind: 'spawn', from: 'hud/dmgFloat', inputs: { dmg: { expr: 'abs(delta)' } }, ttlMs: 800 },
+      { kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -40 }] },
+    ])
+
+    expect(spawn?.inputs.dmg).toBe(0)
+  })
+
+  it('reports zero delta when a once effect was already consumed', () => {
+    const consumed = { id: 'once-q', kind: 'var', varId: 'qi', op: 'add', value: 1, once: true } as const
+    const graph: GameGraph = {
+      nodes: [node('a', {
+        durationMs: 5000,
+        reactions: [
+          { when: { type: 'at', ms: 100 }, do: [{ kind: 'effect', effects: [consumed] }] },
+          {
+            when: { type: 'at', ms: 500 },
+            do: [
+              { kind: 'effect', effects: [consumed] },
+              { kind: 'spawn', from: 'hud/dmgFloat', inputs: { gain: { expr: 'delta' } }, ttlMs: 800 },
+            ],
+          },
+        ],
+      })],
+      edges: [],
+    }
+    const scn = scnOf(graph, { ui: { overlays: { hud: dmgOverlay } } })
+    const rt = new GraphRuntime(scn.graph, scn)
+    rt.start()
+
+    const spawn = spawnOf(rt.tick(600))
+    expect(rt.state.vars.qi).toBe(1)
+    expect(spawn?.inputs.gain).toBe(0)
+  })
+
+  it('does not leak locals from a flag effect that has no numeric target', () => {
+    const spawn = runTimed([
+      { kind: 'effect', effects: [{ id: 'd', kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -40 }] },
+      { kind: 'effect', effects: [{ id: 'f', kind: 'flag', varId: 'lotusClue', value: true }] },
+      { kind: 'spawn', from: 'hud/dmgFloat', inputs: { dmg: { expr: 'abs(delta)' } }, ttlMs: 800 },
+    ])
+
+    expect(spawn?.inputs.dmg).toBe(0)
   })
 })
 

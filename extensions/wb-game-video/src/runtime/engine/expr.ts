@@ -377,10 +377,15 @@ export interface ExprRefs {
   entities: string[]
   flags: string[]
   usesScore: boolean
+  /**
+   * 单段标识 —— 只能由 `EvalCtx.locals` 满足（`delta` / `prev` / `next`）。
+   * 带点的引用（`entity.x.attr.hp`）是一个整体 id token，永不落进这里。
+   */
+  locals: string[]
 }
 
 export function collectRefs(src: string): ExprRefs {
-  const refs: ExprRefs = { vars: [], entities: [], flags: [], usesScore: false }
+  const refs: ExprRefs = { vars: [], entities: [], flags: [], usesScore: false, locals: [] }
   const walk = (n: Node): void => {
     switch (n.t) {
       case 'ref': {
@@ -389,6 +394,7 @@ export function collectRefs(src: string): ExprRefs {
         else if (head === 'var') refs.vars.push(rest.join('.'))
         else if (head === 'flag') refs.flags.push(rest.join('.'))
         else if (head === 'entity') refs.entities.push(rest[0] ?? '')
+        else if (head && !rest.length) refs.locals.push(head)
         break
       }
       case 'unary':

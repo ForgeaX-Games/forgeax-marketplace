@@ -51,6 +51,80 @@ describe('MaterialTimeline · 结算选中联动', () => {
     )
   })
 
+  describe('拖手柄调时间不进选中态', () => {
+    const MOUNT = {
+      key: 'mount:hud',
+      id: 'hud',
+      kind: 'mount' as const,
+      label: '我方血条',
+      startMs: 1_000,
+      endMs: 2_000,
+      zIndex: 0,
+    }
+
+    function renderBar() {
+      const onSelectMaterial = vi.fn()
+      const onPatchMaterial = vi.fn()
+      const onScrubStart = vi.fn()
+      const { container } = render(
+        <MaterialTimeline
+          materials={[MOUNT]}
+          maxMs={4_000}
+          playheadMs={0}
+          selectedMaterialKey={null}
+          onSelectMaterial={onSelectMaterial}
+          onPatchMaterial={onPatchMaterial}
+          onScrubStart={onScrubStart}
+        />,
+      )
+      const canvas = container.querySelector<HTMLElement>('.gc-mtimeline-canvas')!
+      vi.spyOn(canvas, 'getBoundingClientRect').mockReturnValue({
+        x: 0, y: 0, left: 0, top: 0, right: 1_000, bottom: 240,
+        width: 1_000, height: 240, toJSON: () => ({}),
+      })
+      vi.spyOn(canvas, 'setPointerCapture').mockImplementation(() => {})
+      return { container, canvas, onSelectMaterial, onPatchMaterial, onScrubStart }
+    }
+
+    it('adjusts the end without selecting the interface', () => {
+      const { canvas, onSelectMaterial, onPatchMaterial } = renderBar()
+      const handle = screen.getByRole('button', { name: '调整终点' })
+
+      fireEvent.pointerDown(handle, { pointerId: 1, clientX: 500 })
+      fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 600 })
+
+      expect(onPatchMaterial).toHaveBeenCalled()
+      expect(onSelectMaterial).not.toHaveBeenCalled()
+    })
+
+    it('adjusts the start without selecting the interface', () => {
+      const { canvas, onSelectMaterial, onPatchMaterial } = renderBar()
+      const handle = screen.getByRole('button', { name: '调整起点' })
+
+      fireEvent.pointerDown(handle, { pointerId: 2, clientX: 250 })
+      fireEvent.pointerMove(canvas, { pointerId: 2, clientX: 300 })
+
+      expect(onPatchMaterial).toHaveBeenCalled()
+      expect(onSelectMaterial).not.toHaveBeenCalled()
+    })
+
+    it('still pauses playback while a handle is being dragged', () => {
+      const { onScrubStart } = renderBar()
+
+      fireEvent.pointerDown(screen.getByRole('button', { name: '调整终点' }), { pointerId: 3, clientX: 500 })
+
+      expect(onScrubStart).toHaveBeenCalled()
+    })
+
+    it('still selects when the bar body itself is pressed', () => {
+      const { container, onSelectMaterial } = renderBar()
+
+      fireEvent.pointerDown(container.querySelector('.gc-mclip')!, { pointerId: 4, clientX: 400, clientY: 60 })
+
+      expect(onSelectMaterial).toHaveBeenCalledWith('mount:hud')
+    })
+  })
+
   it('按下某个效果菱形时上抛其 id，并只点亮受控选中项', () => {
     const onSelectPointMarker = vi.fn()
     const { container } = render(

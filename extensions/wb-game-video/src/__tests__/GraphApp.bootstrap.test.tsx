@@ -28,6 +28,12 @@ test('wraps only the center pane with bootstrap and leaves the left pane side-ef
   render(<GraphApp />)
   expect(screen.getByRole('complementary')).toBeTruthy()
   expect(screen.queryByTestId('bootstrap')).toBeNull()
+  expect(screen.getByText('调试蓝图')).toBeTruthy()
+  expect(screen.getByText('生成视频')).toBeTruthy()
+  expect(screen.getByText('上传视频')).toBeTruthy()
+  expect(screen.getByRole('button', { name: '新增 蓝图 子项' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '重命名 调试蓝图' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '删除 调试蓝图' })).toBeTruthy()
 })
 
 test('wraps the center pane with bootstrap before rendering the main surface', () => {

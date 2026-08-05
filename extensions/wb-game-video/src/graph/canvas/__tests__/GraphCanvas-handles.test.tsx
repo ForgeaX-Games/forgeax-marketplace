@@ -134,7 +134,7 @@ describe('GraphCanvas output handles', () => {
       ready: { id: 'ready', name: '可释放' },
     }).settlements).toEqual([
       '条件 · 怒气 +1；可释放=是',
-      '界面出现 · 显示 toast',
+      '界面出现 · 绑定 toast',
     ])
     expect(canvasSettlementLabel({
       when: { type: 'complete' },

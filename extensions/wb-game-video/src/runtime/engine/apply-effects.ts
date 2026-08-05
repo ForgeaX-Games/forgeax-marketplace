@@ -63,6 +63,26 @@ export function applyNumericOp(op: NumericEffectOp, cur: number, val: number): n
   }
 }
 
+/**
+ * 一次 effect 写入的观测结果。写成 type 而非 interface：需要隐式索引签名才能直接当
+ * `locals: Record<string, number>` 传给表达式求值。
+ */
+export type EffectWrite = { prev: number; next: number; delta: number }
+
+/**
+ * 读某 effect 写入目标的当前数值；`flag` / `item` 没有可比对的数值目标，返回 null。
+ * 施加前后各调一次即得观测变化量——必须读观测值，因为 clamp 与 `once` 会让实际变化
+ * 不等于作者写的 `value`。
+ */
+export function effectTargetValue(state: MutableState, eff: GraphEffect): number | null {
+  if (eff.kind === 'var') return state.vars[eff.varId] ?? 0
+  if (eff.kind === 'attr') {
+    const ent = state.entities[eff.entityId]
+    return ent ? ent.attrs[eff.attr] ?? 0 : null
+  }
+  return null
+}
+
 /** 把一组 effect 顺序作用到 state（原地修改）。 */
 export function applyEffects(state: MutableState, effects: readonly GraphEffect[]): void {
   for (const eff of effects) {

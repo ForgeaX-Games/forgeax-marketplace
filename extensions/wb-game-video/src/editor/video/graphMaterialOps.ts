@@ -79,6 +79,7 @@ import {
   removeOverlayChild,
   resetOverride,
 } from '../../graph/edit/overlay-edit'
+import { clampSettlementSpawnTtlMs, nodePlayDurationMs } from '../../graph/canvas/timeline-geometry'
 import { createOverlayMount, overlayMountId } from '../../runtime/schema/node-config-schema'
 import { expandNodeChildren, resolveMountChildren } from '../../runtime/schema/expand-overlay'
 import {
@@ -241,18 +242,8 @@ export interface SettlementSpawn {
   inputs?: Record<string, unknown>
 }
 
-/** 本节点演出时长（ms）；缺省给一个安全上限，避免 spawn 无界。 */
-export function nodePlayDurationMs(node: GameNode): number {
-  const d = node.data.durationMs
-  return typeof d === 'number' && Number.isFinite(d) && d > 0 ? Math.round(d) : 60_000
-}
-
-/** 本版：spawn 不跨节点——ttl 夹在 (0, nodeDur]；缺省/0 = 撑到本节点结束。 */
-export function clampSettlementSpawnTtlMs(ttlMs: number | undefined, nodeDurMs: number): number {
-  const cap = Math.max(100, Math.round(nodeDurMs))
-  if (ttlMs == null || !Number.isFinite(ttlMs) || ttlMs <= 0) return cap
-  return Math.min(Math.max(100, Math.round(ttlMs)), cap)
-}
+// spawn ttl 的夹取住在 graph 层（graph-edit 的时间轴回写也要用），这里只转出给既有消费方。
+export { clampSettlementSpawnTtlMs, nodePlayDurationMs }
 
 function readSpawnFromDo(actions: NodeAction[] | undefined): SettlementSpawn | undefined {
   const a = actions?.find((x) => x.kind === 'spawn' && x.from)
@@ -1132,7 +1123,7 @@ export function resetMaterialOverrideGraph(scenario: GameScenario, node: GameNod
  * 固定宽度时间轴条会被误判为占满整段视频，导致无法水平移动。
  * 滤镜/特效无位置语义，返回 null（不参与挂载条跨度）。
  */
-function childVisibleSpan(el: OverlayChild, maxMs: number): { start: number; end: number } | null {
+export function childVisibleSpan(el: OverlayChild, maxMs: number): { start: number; end: number } | null {
   if (el.component === 'filter' || el.component === 'fx') return null
   const start = el.window?.startMs ?? timedStart(el)
   const end = el.window?.endMs ?? (

@@ -11,6 +11,7 @@ import { getSubFlowPack, getSubProcess } from '../schema/graph-schema'
 import { expandNodeOverlays } from '../schema/expand-overlay'
 import { overlayMountId } from '../schema/node-config-schema'
 import { eventsFromParams, overlayReactionKey } from '../schema/overlay-events'
+import { collectRefs } from '../engine/expr'
 import { deriveOutputs, getComponent } from '../registry/component-registry'
 import { defaultNodeKindRegistry, resolveNodeType } from '../nodes'
 
@@ -42,6 +43,33 @@ function isRoutingHandle(h: string): boolean {
 
 const EFFECT_KINDS = new Set(['attr', 'var', 'flag', 'item'])
 const CLAUSE_TYPES = new Set(['var', 'flag', 'visited', 'attr', 'attrRatio', 'attrCompare', 'score', 'hasItem'])
+
+/** 引擎注入的局部量；只有部分 reaction 上下文能提供它们（见 spawnLocalsAvailable）。 */
+const REACTION_LOCALS = new Set(['prev', 'next', 'delta'])
+
+/** 只有写 attr / var 的 effect 有可采样的数值目标，能给后续动作产出 prev/next/delta。 */
+function effectYieldsLocals(action: NodeAction): boolean {
+  if (action.kind !== 'effect') return false
+  const last = action.effects[action.effects.length - 1]
+  return last?.kind === 'attr' || last?.kind === 'var'
+}
+
+/** 该 spawn 的 inputs 里用到的局部量名（表达式解析失败时按无引用处理，交给别的规则报）。 */
+function spawnLocalsUsed(inputs: Record<string, unknown> | undefined): string[] {
+  const used = new Set<string>()
+  for (const value of Object.values(inputs ?? {})) {
+    const expr = value && typeof value === 'object' ? (value as { expr?: unknown }).expr : undefined
+    if (typeof expr !== 'string') continue
+    try {
+      for (const local of collectRefs(expr).locals) {
+        if (REACTION_LOCALS.has(local)) used.add(local)
+      }
+    } catch {
+      // 表达式本身不合法 —— 由 walkRefs 的 expr 规则负责报告。
+    }
+  }
+  return [...used]
+}
 
 /** Overlay 目录 reactions 是比挂载 Reaction 更窄的持久化契约，逐字段 fail-loud。 */
 function checkOverlayReactions(
@@ -590,10 +618,26 @@ function validateGraphScope(
           const at = `${pack.at}[${i}]`
           if (r.when.type === 'state') walkRefs(r.when.condition, ctx, at, issues)
           if (r.when.type === 'complete' && r.when.if) walkRefs(r.when.if, ctx, at, issues)
+          // watch 的局部量由被观察值提供；演出相位结算靠同一 do 内在前的数值 effect 采样；
+          // event / state / shown / hidden 的执行路径不传局部量，任何位置都读不到。
+          const phaseSamples = r.when.type === 'enter' || r.when.type === 'at'
+            || r.when.type === 'exit' || r.when.type === 'complete'
+          let localsAvailable = r.when.type === 'watch'
           for (const a of r.do) {
+            if (phaseSamples && effectYieldsLocals(a)) localsAvailable = true
+            else if (phaseSamples && a.kind === 'effect') localsAvailable = false
             if (a.kind === 'effect') walkRefs(a.effects, ctx, at, issues)
             if (a.kind === 'spawn') {
               walkRefs(a.inputs, ctx, at, issues)
+              const localsUsed = spawnLocalsUsed(a.inputs)
+              if (localsUsed.length && !localsAvailable) {
+                issues.push({
+                  level: 'error',
+                  code: 'ref.spawn.locals.unavailable',
+                  msg: `reaction spawn 读取 ${localsUsed.join(' / ')}，但此处没有可采样的数值变化：请在同一结算内把改属性/改变量的效果排在该界面之前`,
+                  at,
+                })
+              }
               const slash = a.from.indexOf('/')
               const overlayId = slash > 0 ? a.from.slice(0, slash) : ''
               const childId = slash > 0 ? a.from.slice(slash + 1) : ''

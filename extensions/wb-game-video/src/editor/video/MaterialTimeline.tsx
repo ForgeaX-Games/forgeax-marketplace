@@ -9,6 +9,7 @@ import {
   type TimelineConditionMarker,
   type TimelinePointMarker,
   type TimelineSegment,
+  type TimelineSpawnGroup,
   TIMELINE_LAYER_STEP,
   TIMELINE_LAYER_TOP,
   TIMELINE_MIN_TRACKS,
@@ -23,6 +24,8 @@ import {
   layerTop,
   materialClass,
   materialDisplayLabel,
+  spawnBarTrack,
+  spawnGroupsMaxRow,
 } from './materialTimelineShared'
 
 /** 素材库卡片 → 时间轴拖放时携带的模板类型 MIME。 */
@@ -114,10 +117,34 @@ export interface MaterialTimelineProps {
   selectedPointMarkerId?: string | null
   /** 点中时刻标记时上抛（按下即选，不必等拖动结束）。 */
   onSelectPointMarker?: (id: string) => void
+  /**
+   * 结算**绑定界面**组：从属于 lifecycle 菱形，分布在菱形轨正上方。
+   * 起始由宿主结算派生（不可单独编辑），因此这些条只有右手柄。
+   */
+  spawnGroups?: TimelineSpawnGroup[]
+  /** 拖绑定界面右端的回写（id = `settlement-spawn:${settlementIndex}:${actionIndex}`）。 */
+  onSpawnBarEndChange?: (id: string, endMs: number) => void
+  /** 点中绑定界面时上抛（宿主结算的选中由 `onSelectPointMarker` 一并触发）。 */
+  onSelectSpawnBar?: (id: string) => void
+  /** 当前选中的绑定界面 id。 */
+  selectedSpawnBarId?: string | null
+  /** 提供时，选中的绑定界面上出现解除绑定控件。 */
+  onDeleteSpawnBar?: (id: string) => void
 }
 
 /** 时刻标记的拖拽 sentinel 前缀（与 `__seek__` 同一手法：借指针管线，不占材料 key）。 */
 const POINT_DRAG_PREFIX = '__point:'
+/** 绑定界面「拖右端」的拖拽 sentinel 前缀；这类条没有起点拖动，所以只需要一个前缀。 */
+const SPAWN_END_DRAG_PREFIX = '__spawnend:'
+/** 绑定界面的最短可见跨度：一个吸附格，保证结束永不落到宿主结算时刻或它之前。 */
+const MIN_SPAWN_SPAN_MS = 10
+/** 绑定界面组虚线框相对组内条的留白，避免框线贴着条边。 */
+const SPAWN_GROUP_PAD_X = 7
+/**
+ * 纵向留白只能取 1px：轨距 34、条高 32，相邻两行之间只有 2px 空隙，两组的框各分 1px 才刚好
+ * 平铺不压线。要更多纵向留白就得给每组额外占一行，那是作者不愿付的代价。
+ */
+const SPAWN_GROUP_PAD_Y = 1
 
 interface DragState {
   key: string
@@ -157,6 +184,11 @@ export function MaterialTimeline({
   onPointMarkerChange,
   selectedPointMarkerId,
   onSelectPointMarker,
+  spawnGroups,
+  onSpawnBarEndChange,
+  onSelectSpawnBar,
+  selectedSpawnBarId,
+  onDeleteSpawnBar,
 }: MaterialTimelineProps) {
   injectStyleOnce('material-timeline', MATERIAL_TIMELINE_CSS)
   const activeMode: 'material' | 'audio' = mode ?? 'material'
@@ -190,12 +222,15 @@ export function MaterialTimeline({
   // 无确定时间的条件结算再独占下一轨；最后仍留一条空投放轨。
   const settlementMarkers = (pointMarkers ?? []).filter((m) => m.kind === 'settlement')
   const lifecycleMarkers = (pointMarkers ?? []).filter((m) => m.kind === 'lifecycle' || m.kind === 'derived')
-  const lifecycleTrack = dataMaxLayer + 1
+  // 绑定界面组占据材料轨与菱形轨之间的若干行，因此菱形轨要整体下移让出空间。
+  const spawnGroupList = activeMode === 'material' ? spawnGroups ?? [] : []
+  const spawnRowCount = spawnGroupsMaxRow(spawnGroupList)
+  const lifecycleTrack = dataMaxLayer + 1 + spawnRowCount
   const conditionTrack = lifecycleTrack + (lifecycleMarkers.length ? 1 : 0)
   const trackCount = Math.max(
     TIMELINE_MIN_TRACKS,
     dataMaxLayer + 2,
-    lifecycleMarkers.length ? lifecycleTrack + 2 : 0,
+    lifecycleMarkers.length || spawnRowCount ? lifecycleTrack + 2 : 0,
     conditionMarkers?.length ? conditionTrack + 2 : 0,
   )
   // 流程预览锁定首段建立的 px/ms；后续片段等比例追加，视口通过横向滚动跟随。
@@ -276,8 +311,13 @@ export function MaterialTimeline({
       if (onSeek) beginSeek(e)
       return
     }
+    // 调时间不进选中态：拖左右手柄改的是「什么时候出现/消失」，不是「我要编辑这个界面」，
+    // 不该顺带把它选中并在预览画布上点亮（与结算绑定界面的右手柄一致）。仍要暂停播放，
+    // 否则播放头会在拖动中继续走。
+    const timingOnly = dragMode === 'start' || dragMode === 'end'
     // 音频条仅显示 + 拖动，不进 material 选中/检视器流。
-    if (activeMode === 'material' && selectable) onSelectMaterial(item.key)
+    if (activeMode === 'material' && selectable && !timingOnly) onSelectMaterial(item.key)
+    if (timingOnly) onScrubStart?.()
     if (!editable && !selectable && onSeek) {
       beginSeek(e)
       return
@@ -318,6 +358,19 @@ export function MaterialTimeline({
       const grid = resolveSnapGridMs({ shift: e.shiftKey, alt: e.altKey })
       const id = drag.key.slice(POINT_DRAG_PREFIX.length)
       onPointMarkerChange?.(id, clampMs(snapMs(drag.startMs + deltaMs, grid), 0, maxMs))
+      return
+    }
+    if (drag.key.startsWith(SPAWN_END_DRAG_PREFIX)) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      if (rect.width <= 0) return
+      const deltaMs = ((e.clientX - drag.pointerX) / rect.width) * maxMs
+      const grid = resolveSnapGridMs({ shift: e.shiftKey, alt: e.altKey })
+      const id = drag.key.slice(SPAWN_END_DRAG_PREFIX.length)
+      // 起点归菱形所有：结束只能往后夹，永不越过宿主结算时刻。
+      onSpawnBarEndChange?.(
+        id,
+        clampMs(snapMs(drag.endMs + deltaMs, grid), drag.startMs + MIN_SPAWN_SPAN_MS, maxMs),
+      )
       return
     }
     const rect = e.currentTarget.getBoundingClientRect()
@@ -622,6 +675,105 @@ export function MaterialTimeline({
                   }}
                 />
               </div>
+            )
+          })}
+          {spawnGroupList.map((grp) => {
+            const topRowTrack = spawnBarTrack(lifecycleTrack, grp.uBase, grp.bars.length - 1)
+            const barWidth = (bar: { startMs: number; endMs: number }) =>
+              Math.max(CLIP_MIN_PX, (bar.endMs - bar.startMs) * pxPerMs)
+            // 条自带最小宽度，组框按实际渲染出的最宽一条量，才不会被短条截断。
+            const widestBarPx = Math.max(...grp.bars.map(barWidth))
+            // 条高 32 落在 34 的轨距里，故垂直跨度 = (n-1)×轨距 + 条高。
+            const barsSpanPx = (grp.bars.length - 1) * TIMELINE_LAYER_STEP + 32
+            return (
+              <Fragment key={grp.markerId}>
+                {/* 虚线组框：把同属一个结算的界面圈成一体，四边留白，不贴着条边。
+                    选中宿主菱形时整组一起点亮，作者一眼看出这几行归哪个结算。 */}
+                <div
+                  className={`gc-spawn-group${selectedPointMarkerId === grp.markerId ? ' is-selected' : ''}`}
+                  data-spawn-group={grp.markerId}
+                  style={{
+                    left: `${grp.startMs * pxPerMs - SPAWN_GROUP_PAD_X}px`,
+                    width: `${widestBarPx + SPAWN_GROUP_PAD_X * 2}px`,
+                    top: `${layerTop(topRowTrack) - SPAWN_GROUP_PAD_Y}px`,
+                    height: `${barsSpanPx + SPAWN_GROUP_PAD_Y * 2}px`,
+                  }}
+                  aria-hidden
+                >
+                  <span className="gc-spawn-group-tag">绑定界面 · {grp.bars.length}</span>
+                </div>
+                {grp.bars.map((bar) => {
+                  const dragKey = `${SPAWN_END_DRAG_PREFIX}${bar.id}`
+                  const width = barWidth(bar)
+                  const selected = selectedSpawnBarId === bar.id
+                  return (
+                    <div
+                      key={bar.id}
+                      // 复用材料条的视觉基座（gc-mclip）：圆角/高度/底色/左侧色条/选中描边与
+                      // 挂载界面条一致，只用 is-spawn 区分配色，避免第二套条样式漂移。
+                      className={`gc-mclip is-spawn gc-spawn-bar${bar.openEnded ? ' is-open-ended' : ''}${selected ? ' is-selected' : ''}${drag?.key === dragKey ? ' is-dragging' : ''}`}
+                      data-spawn-bar={bar.id}
+                      style={{
+                        left: `${bar.startMs * pxPerMs}px`,
+                        width: `${width}px`,
+                        top: `${layerTop(spawnBarTrack(lifecycleTrack, grp.uBase, bar.rowInGroup))}px`,
+                      }}
+                      aria-label={`绑定界面 · ${bar.label}`}
+                      title={`绑定界面 · ${bar.label} · 出现于结算 ${fmtDur(bar.startMs)}${bar.openEnded ? ' · 常驻到节点结束（拖右端改为按时长）' : ` - ${fmtDur(bar.endMs)}`}`}
+                      onPointerDown={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        if (!selectable) return
+                        // 先点亮宿主结算，再定位到具体这条界面，右侧表单与预览画布同时对齐。
+                        onSelectPointMarker?.(grp.markerId)
+                        onSelectSpawnBar?.(bar.id)
+                      }}
+                    >
+                      {width >= CLIP_LABEL_MIN_PX ? <span className="gc-mclip-label">{bar.label}</span> : null}
+                      {editable && selected && onDeleteSpawnBar ? (
+                        <button
+                          type="button"
+                          className="gc-mdelete"
+                          aria-label="解除界面绑定"
+                          title="解除绑定（界面配置从本结算移除）"
+                          onPointerDown={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onDeleteSpawnBar(bar.id)
+                          }}
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                      {editable ? (
+                        <button
+                          type="button"
+                          className="gc-mhandle is-right"
+                          aria-label="调整界面结束时间"
+                          onPointerDown={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            // 调时间不选中（同挂载条手柄），但要暂停：否则播放头会在拖动中继续走。
+                            onScrubStart?.()
+                            timelineRef.current?.setPointerCapture(e.pointerId)
+                            setDrag({
+                              key: dragKey,
+                              mode: 'end',
+                              pointerX: e.clientX,
+                              startMs: bar.startMs,
+                              endMs: bar.endMs,
+                              zIndex: 0,
+                            })
+                          }}
+                        />
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </Fragment>
             )
           })}
           {conditionMarkers?.length ? (
@@ -952,6 +1104,53 @@ const MATERIAL_TIMELINE_CSS = `
 }
 .mtl-root .gc-point-mark.is-dragging { border-left-style: solid; }
 
+/* 结算绑定界面：组框圈住同一结算下的全部界面，条本身只有右手柄（起点归菱形）。 */
+.mtl-root .gc-spawn-group {
+  position: absolute;
+  border: 1px dashed rgba(90,212,192,.5);
+  border-radius: 10px;
+  background: rgba(90,212,192,.06);
+  pointer-events: none;
+  z-index: 1;
+}
+/* 宿主菱形被选中：整组连同标签一起提亮，与菱形的选中态同步。 */
+.mtl-root .gc-spawn-group.is-selected {
+  border-color: rgba(143,240,224,.95);
+  background: rgba(90,212,192,.16);
+  box-shadow: 0 0 12px rgba(90,212,192,.3);
+}
+.mtl-root .gc-spawn-group.is-selected .gc-spawn-group-tag { color: #e8fffb; }
+/* 标签放在组框右外侧、纵向居中：框现在上下平铺，标签若压在框顶就会盖住上一组。
+   右侧那片区域一定是空的——每行只有一条界面，行也从不共用。 */
+.mtl-root .gc-spawn-group-tag {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--gc-panel2);
+  color: rgba(143,240,224,.9);
+  font-size: 10px;
+  white-space: nowrap;
+}
+/* 绑定界面条：配色与挂载界面条同源（见 .is-mount 规则），只多一个层级压在组框之上。
+   它属于「界面」这条视觉线；归属哪个结算由虚线组框和位置表达，不靠改色。 */
+.mtl-root .gc-mclip.is-spawn {
+  z-index: 2;
+  cursor: pointer;
+}
+.mtl-root .gc-mclip.is-spawn.is-dragging { border-color: var(--gc-accent); }
+/* 常驻界面没有确定的结束时刻：右端以虚线 + 渐隐开口表达「一直到节点结束」。 */
+.mtl-root .gc-mclip.is-spawn.is-open-ended {
+  border-right-style: dashed;
+  mask-image: linear-gradient(to right, #000 0%, #000 72%, rgba(0,0,0,.25) 100%);
+}
+/* 选中态要露出条外的解除绑定按钮，遮罩会把它裁掉，所以选中时撤掉遮罩。 */
+.mtl-root .gc-mclip.is-spawn.is-open-ended.is-selected { mask-image: none; }
+.mtl-root.is-readonly .gc-mclip.is-spawn { cursor: default; }
+
 /* 结算轨：独占材料轨之后的一行；定时/推导时刻显示菱形。 */
 .mtl-root .gc-life-lane {
   position: absolute;
@@ -1219,8 +1418,11 @@ const MATERIAL_TIMELINE_CSS = `
 .mtl-root .gc-mclip.is-fx::before { background: #ff8ac4; }
 .mtl-root .gc-mclip.is-component { border-color: rgba(180,190,210,.55); color: #e2e8f0; }
 .mtl-root .gc-mclip.is-component::before { background: #94a3b8; }
-.mtl-root .gc-mclip.is-mount { border-color: rgba(240,136,64,.6); color: #ffe6d2; background: rgba(240,136,64,.14); }
-.mtl-root .gc-mclip.is-mount::before { background: var(--gc-accent); }
+/* 界面条配色（挂载界面 + 结算绑定界面共用一套：作者眼里它们都是「界面」）。 */
+.mtl-root .gc-mclip.is-mount,
+.mtl-root .gc-mclip.is-spawn { border-color: rgba(240,136,64,.6); color: #ffe6d2; background: rgba(240,136,64,.14); }
+.mtl-root .gc-mclip.is-mount::before,
+.mtl-root .gc-mclip.is-spawn::before { background: var(--gc-accent); }
 /* 条内文字自持裁剪（父层 padding 收窄时省略号，而不是溢出压住手柄）。 */
 .mtl-root .gc-mclip-label {
   min-width: 0;

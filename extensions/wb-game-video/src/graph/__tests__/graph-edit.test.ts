@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, patchSettlementSpawnLayout, reconnect, removeNode, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, setSettlementAdvanceTarget, setSettlementReactionMs, updateEventRouteTiming } from '../edit/graph-edit'
+import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, patchSettlementSpawnLayout, reconnect, removeNode, removeSettlementSpawn, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, setSettlementAdvanceTarget, setSettlementReactionMs, setSettlementSpawnTtlMs, updateEventRouteTiming } from '../edit/graph-edit'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
 import { getSubProcess } from '../../runtime/schema/graph-schema'
 
@@ -157,6 +157,103 @@ describe('graph-edit', () => {
     })
     expect(graph.nodes[0]?.data.reactions?.[0]?.do[1]).not.toHaveProperty('layout')
     expect(patchSettlementSpawnLayout(graph, 'a', 0, 0, { left: 1 })).toBe(graph)
+  })
+
+  describe('setSettlementSpawnTtlMs：拖绑定界面右端只改 ttlMs', () => {
+    const bound = (): GameGraph => ({
+      nodes: [{
+        ...n('a'),
+        data: {
+          name: 'a',
+          durationMs: 4000,
+          reactions: [
+            { when: { type: 'watch', of: 'score', on: 'inc' }, do: [] },
+            {
+              when: { type: 'at', ms: 3000 },
+              do: [
+                { kind: 'effect', effects: [] },
+                { kind: 'spawn', from: 'hud/rage', ttlMs: 500 },
+                { kind: 'spawn', from: 'hud/cheer' },
+              ],
+            },
+          ],
+        },
+      }],
+      edges: [],
+    })
+    const spawnAt = (graph: GameGraph, index: number) => graph.nodes[0]?.data.reactions?.[1]?.do[index]
+
+    it('writes the dragged duration onto the addressed spawn only', () => {
+      const next = setSettlementSpawnTtlMs(bound(), 'a', 1, 1, 1800)
+      expect(spawnAt(next, 1)).toEqual({ kind: 'spawn', from: 'hud/rage', ttlMs: 1800 })
+      expect(spawnAt(next, 2)).toEqual({ kind: 'spawn', from: 'hud/cheer' })
+    })
+
+    it('turns a persistent spawn into a timed one when its end is dragged', () => {
+      expect(spawnAt(setSettlementSpawnTtlMs(bound(), 'a', 1, 2, 900), 2))
+        .toEqual({ kind: 'spawn', from: 'hud/cheer', ttlMs: 900 })
+    })
+
+    it('clamps the duration to the node performance length', () => {
+      expect(spawnAt(setSettlementSpawnTtlMs(bound(), 'a', 1, 1, 99999), 1))
+        .toEqual({ kind: 'spawn', from: 'hud/rage', ttlMs: 4000 })
+    })
+
+    it('addresses by settlement subset index, so leading condition settlements do not shift it', () => {
+      // 下标 0 是 watch 结算，它的 do 里没有 spawn —— 按绝对下标寻址就会误命中。
+      expect(setSettlementSpawnTtlMs(bound(), 'a', 0, 1, 1800)).toEqual(bound())
+    })
+
+    it('is a no-op when the addressed action is not a spawn', () => {
+      const graph = bound()
+      expect(setSettlementSpawnTtlMs(graph, 'a', 1, 0, 1800)).toBe(graph)
+      expect(setSettlementSpawnTtlMs(graph, 'a', 1, 9, 1800)).toBe(graph)
+    })
+
+    it('does not produce a new object when the duration is unchanged', () => {
+      const graph = bound()
+      expect(setSettlementSpawnTtlMs(graph, 'a', 1, 1, 500)).toBe(graph)
+    })
+  })
+
+  describe('removeSettlementSpawn：从时间轴解除界面绑定', () => {
+    const bound = (): GameGraph => ({
+      nodes: [{
+        ...n('a'),
+        data: {
+          name: 'a',
+          durationMs: 4000,
+          reactions: [
+            { when: { type: 'watch', of: 'score', on: 'inc' }, do: [] },
+            {
+              when: { type: 'at', ms: 3000 },
+              do: [
+                { kind: 'effect', effects: [] },
+                { kind: 'spawn', from: 'hud/rage', ttlMs: 500 },
+                { kind: 'spawn', from: 'hud/cheer' },
+              ],
+            },
+          ],
+        },
+      }],
+      edges: [],
+    })
+
+    it('drops only the addressed spawn and keeps the settlement itself', () => {
+      const next = removeSettlementSpawn(bound(), 'a', 1, 1)
+      expect(next.nodes[0]?.data.reactions?.[1]?.when).toEqual({ type: 'at', ms: 3000 })
+      expect(next.nodes[0]?.data.reactions?.[1]?.do).toEqual([
+        { kind: 'effect', effects: [] },
+        { kind: 'spawn', from: 'hud/cheer' },
+      ])
+    })
+
+    it('is a no-op when the addressed action is not a spawn', () => {
+      const graph = bound()
+      expect(removeSettlementSpawn(graph, 'a', 1, 0)).toBe(graph)
+      expect(removeSettlementSpawn(graph, 'a', 1, 9)).toBe(graph)
+      expect(removeSettlementSpawn(graph, 'a', 0, 1)).toBe(graph)
+    })
   })
 
   it('setSettlementAdvanceTarget：按目标节点复用或创建边，并保持 advance.edgeId 契约', () => {

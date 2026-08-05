@@ -82,6 +82,48 @@ export interface TimelineConditionMarker {
   label: string
 }
 
+/**
+ * 结算**绑定界面**（某结算 `do` 内的一个 `spawn`）在时间轴上的投影；不落盘。
+ *
+ * 与 `MaterialItem` 的分工：材料条可自由拖 start / end / 换轨；绑定界面的起始恒等于宿主结算
+ * 时刻、行号由装箱派生，只有结束（= `ttlMs`）可编辑。混进材料流会被迫伪造 zIndex / locked。
+ */
+export interface TimelineSpawnBar {
+  /** 稳定 id：`settlement-spawn:${settlementIndex}:${actionIndex}`；与预览画布投影同串。 */
+  id: string
+  label: string
+  /** 恒等于宿主结算的 `when.ms`，不可单独编辑。 */
+  startMs: number
+  /** 有 `ttlMs` 时 = startMs + ttlMs；常驻时 = 节点末端。 */
+  endMs: number
+  /** 常驻（无 `ttlMs`）：右端画开口，拖动即就地转成按时长隐藏。 */
+  openEnded: boolean
+  /** 组内行号，0 = 最靠近菱形轨的一行。 */
+  rowInGroup: number
+}
+
+/** 同一结算点下的绑定界面组；虚线框覆盖组内全部行 × [startMs, endMs]。 */
+export interface TimelineSpawnGroup {
+  /** = 宿主菱形标记 id（`life:${settlementIndex}`），点选时复用既有 focus 联动。 */
+  markerId: string
+  settlementIndex: number
+  startMs: number
+  endMs: number
+  /** 自菱形轨向上数的起始行，从 1 开始；绝对轨号由渲染层换算。 */
+  uBase: number
+  bars: TimelineSpawnBar[]
+}
+
+/** 界面组占用的最高相对行；渲染层据此把菱形轨整体下移让出空间。 */
+export function spawnGroupsMaxRow(groups: readonly TimelineSpawnGroup[]): number {
+  return groups.reduce((mx, g) => Math.max(mx, g.uBase + g.bars.length - 1), 0)
+}
+
+/** 相对行（自菱形轨向上数）→ 绝对轨号。 */
+export function spawnBarTrack(lifecycleTrack: number, uBase: number, rowInGroup: number): number {
+  return lifecycleTrack - (uBase + rowInGroup)
+}
+
 /** 全流程预览在同一时间轴上展示的节点片段；仅为编辑器内存投影，不进入蓝图协议。 */
 export interface TimelineSegment {
   id: string

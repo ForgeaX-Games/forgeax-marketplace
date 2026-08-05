@@ -10,6 +10,7 @@ import { getSubProcess } from '../../runtime/schema/graph-schema'
 import type { NodeAction, Reaction } from '../../runtime/schema/node-config-schema'
 import { isLifecycleReaction, isSettlementReaction } from '../../runtime/schema/node-config-schema'
 import { isSettlementAdvanceHandle, SETTLEMENT_ADVANCE_HANDLE_PREFIX } from '../flow-handle-labels'
+import { clampSettlementSpawnTtlMs, nodePlayDurationMs } from '../canvas/timeline-geometry'
 
 let _seq = 0
 function newId(prefix: string): string {
@@ -580,6 +581,59 @@ export function patchSettlementSpawnLayout(
             ? { ...action, layout }
             : candidateAction),
         }
+      : candidate),
+  })
+}
+
+/**
+ * 结算绑定界面在时间轴上被拖动右端后写回显示时长。
+ * 起始时刻永远是宿主结算的 `when.ms`，所以这里只碰 `ttlMs`；原本「常驻」（无 ttlMs）的
+ * 界面被拖右端即就地转成按时长隐藏。时长夹到本节点演出长度，避免拖出节点之外。
+ */
+export function setSettlementSpawnTtlMs(
+  graph: GameGraph,
+  nodeId: string,
+  settlementIndex: number,
+  actionIndex: number,
+  ttlMs: number,
+): GameGraph {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId)
+  const reactions = node?.data.reactions
+  if (!node || !reactions) return graph
+  const absolute = settlementReactionAbsoluteIndex(reactions, settlementIndex)
+  const reaction = reactions[absolute]
+  const action = reaction?.do[actionIndex]
+  if (!reaction || action?.kind !== 'spawn') return graph
+  const next = clampSettlementSpawnTtlMs(ttlMs, nodePlayDurationMs(node))
+  if (action.ttlMs === next) return graph
+  return updateNodeData(graph, nodeId, {
+    reactions: reactions.map((candidate, reactionIndex) => reactionIndex === absolute
+      ? {
+          ...candidate,
+          do: candidate.do.map((candidateAction, candidateActionIndex) => candidateActionIndex === actionIndex
+            ? { ...action, ttlMs: next }
+            : candidateAction),
+        }
+      : candidate),
+  })
+}
+
+/** 从时间轴解除一条界面绑定 = 从宿主结算的 `do` 里移除该 spawn 动作；结算本身保留。 */
+export function removeSettlementSpawn(
+  graph: GameGraph,
+  nodeId: string,
+  settlementIndex: number,
+  actionIndex: number,
+): GameGraph {
+  const node = graph.nodes.find((candidate) => candidate.id === nodeId)
+  const reactions = node?.data.reactions
+  if (!node || !reactions) return graph
+  const absolute = settlementReactionAbsoluteIndex(reactions, settlementIndex)
+  const reaction = reactions[absolute]
+  if (reaction?.do[actionIndex]?.kind !== 'spawn') return graph
+  return updateNodeData(graph, nodeId, {
+    reactions: reactions.map((candidate, reactionIndex) => reactionIndex === absolute
+      ? { ...candidate, do: candidate.do.filter((_, index) => index !== actionIndex) }
       : candidate),
   })
 }

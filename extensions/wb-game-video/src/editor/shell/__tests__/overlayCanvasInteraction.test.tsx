@@ -78,6 +78,60 @@ function Harness({
   )
 }
 
+describe('canvasHitStack 平级取舍', () => {
+  const boxItem = (id: string, box: CanvasBox, zIndex = 0): CanvasInteractionItem => ({
+    id,
+    label: id,
+    position: { x: box.left, y: box.top },
+    frame: { kind: 'box', ...box },
+    zIndex,
+    movable: true,
+    resizable: false,
+  })
+  const stage = { width: 200, height: 100 }
+
+  it('prefers the smallest box containing the point when zIndex ties', () => {
+    // 大框套小框、层级相同：作者点的是那个小的，不该被大框抢走。
+    // 小框刻意排在数组更前面 —— 若只按数组序倒取，赢的会是 big。
+    const small = boxItem('small', { left: 0.4, top: 0.4, width: 0.1, height: 0.1 })
+    const big = boxItem('big', { left: 0.1, top: 0.1, width: 0.8, height: 0.8 })
+    const stack = canvasHitStack([small, big], { x: 0.45, y: 0.45 }, stage)
+
+    expect(stack.map((item) => item.id)).toEqual(['small', 'big'])
+  })
+
+  it('still lets an explicit zIndex win over a smaller box', () => {
+    const big = boxItem('big', { left: 0.1, top: 0.1, width: 0.8, height: 0.8 }, 5)
+    const small = boxItem('small', { left: 0.4, top: 0.4, width: 0.1, height: 0.1 }, 1)
+    const stack = canvasHitStack([big, small], { x: 0.45, y: 0.45 }, stage)
+
+    expect(stack.map((item) => item.id)).toEqual(['big', 'small'])
+  })
+
+  it('falls back to the later item when boxes coincide exactly', () => {
+    const first = boxItem('first', { left: 0.4, top: 0.4, width: 0.1, height: 0.1 })
+    const second = boxItem('second', { left: 0.4, top: 0.4, width: 0.1, height: 0.1 })
+    const stack = canvasHitStack([first, second], { x: 0.45, y: 0.45 }, stage)
+
+    expect(stack.map((item) => item.id)).toEqual(['second', 'first'])
+  })
+})
+
+describe('OverlayCanvasInteraction 选中态与陪衬态', () => {
+  it('draws a highlighted sibling differently from the selected item', () => {
+    const sibling: CanvasInteractionItem = { ...ITEM, id: 'second', label: 'second' }
+    const { container } = render(
+      <Harness items={[ITEM, sibling]} selectedId="item" highlightedIds={['item', 'second']} />,
+    )
+
+    const selected = getComputedStyle(container.querySelector('[data-canvas-item="item"]')!)
+    const highlighted = getComputedStyle(container.querySelector('[data-canvas-item="second"]')!)
+    // 两者必须一眼可分：陪衬态只是"我在这儿"，不能读成"我被选中了"。
+    expect(highlighted.borderStyle).not.toBe(selected.borderStyle)
+    expect(highlighted.boxShadow).not.toBe(selected.boxShadow)
+  })
+})
+
 describe('OverlayCanvasInteraction geometry', () => {
   it('converts a centered point hit target from pixels to normalized coordinates', () => {
     expect(resolveCanvasFrame(

@@ -98,6 +98,69 @@ describe('validateGraph', () => {
     expect(validateGraph({ nodes: [a.node], edges: [] }, { overlays }).map((issue) => issue.code)).not.toContain('ref.spawn.missing')
   })
 
+  describe('spawn locals (delta / prev / next)', () => {
+    const overlays: Record<string, Overlay> = {
+      hud: {
+        id: 'hud',
+        children: [{ id: 'rage', component: 'DamageFloatText', trigger: { when: 'enter' }, inputs: {} }],
+      },
+    }
+    const codesFor = (reactions: NonNullable<GameNode['data']['reactions']>): string[] => {
+      const a = perf('a')
+      a.node.data.reactions = reactions
+      return validateGraph({ nodes: [a.node], edges: [] }, { overlays, entities: ['ent-boss'] })
+        .map((issue) => issue.code)
+    }
+
+    it('rejects a timed settlement spawn reading delta with no effect before it', () => {
+      expect(codesFor([{
+        when: { type: 'at', ms: 300 },
+        do: [{ kind: 'spawn', from: 'hud/rage', inputs: { dmg: { expr: 'abs(delta)' } } }],
+      }])).toContain('ref.spawn.locals.unavailable')
+    })
+
+    it('accepts a timed settlement spawn reading delta after a numeric effect', () => {
+      expect(codesFor([{
+        when: { type: 'at', ms: 300 },
+        do: [
+          { kind: 'effect', effects: [{ kind: 'attr', entityId: 'ent-boss', attr: 'hp', op: 'add', value: -10 }] },
+          { kind: 'spawn', from: 'hud/rage', inputs: { dmg: { expr: 'abs(delta)' } } },
+        ],
+      }])).not.toContain('ref.spawn.locals.unavailable')
+    })
+
+    it('rejects delta after a flag effect, which has no numeric target to sample', () => {
+      expect(codesFor([{
+        when: { type: 'at', ms: 300 },
+        do: [
+          { kind: 'effect', effects: [{ kind: 'flag', varId: 'lotusClue', value: true }] },
+          { kind: 'spawn', from: 'hud/rage', inputs: { dmg: { expr: 'abs(delta)' } } },
+        ],
+      }])).toContain('ref.spawn.locals.unavailable')
+    })
+
+    it('accepts delta in a watch reaction, where the engine supplies it from the watched value', () => {
+      expect(codesFor([{
+        when: { type: 'watch', of: 'score', on: 'change' },
+        do: [{ kind: 'spawn', from: 'hud/rage', inputs: { dmg: { expr: 'abs(delta)' } } }],
+      }])).not.toContain('ref.spawn.locals.unavailable')
+    })
+
+    it('rejects delta in a state reaction, where the engine supplies no locals', () => {
+      expect(codesFor([{
+        when: { type: 'state', condition: { all: [{ type: 'score', op: 'gte', value: 1 }] } },
+        do: [{ kind: 'spawn', from: 'hud/rage', inputs: { dmg: { expr: 'abs(delta)' } } }],
+      }])).toContain('ref.spawn.locals.unavailable')
+    })
+
+    it('does not mistake a dotted reference for a bare local', () => {
+      expect(codesFor([{
+        when: { type: 'at', ms: 300 },
+        do: [{ kind: 'spawn', from: 'hud/rage', inputs: { hp: { expr: 'entity.ent-boss.attr.hp' } } }],
+      }])).not.toContain('ref.spawn.locals.unavailable')
+    })
+  })
+
   it('validates that hideOverlay targets an existing interface mount in the same node', () => {
     const valid = perf('valid')
     valid.node.data.overlayNodes = [{ id: 'boss-hud', overlay: 'hud' }]

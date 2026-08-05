@@ -75,3 +75,4 @@ dist/
 .codebuddy/
 assets/a peer agent CLIAssets/
 .playwright-mcp/
+.playwright-cli/

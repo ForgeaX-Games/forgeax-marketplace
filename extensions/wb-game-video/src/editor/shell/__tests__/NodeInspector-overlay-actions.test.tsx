@@ -83,7 +83,7 @@ describe('NodeInspector · 界面事件动作入口', () => {
     expect(screen.getAllByRole('button', { name: '＋ 添加效果' })).toHaveLength(2)
     expect(screen.getAllByRole('button', { name: '＋ 沿边推进' })).toHaveLength(2)
     expect(screen.queryByText('走边')).toBeNull()
-    expect(screen.queryByRole('combobox', { name: '添加显示界面' })).toBeNull()
+    expect(screen.queryByRole('combobox', { name: '绑定界面' })).toBeNull()
     expect(screen.getByText('界面')).toBeTruthy()
     expect(screen.queryByText('覆盖物事件')).toBeNull()
     const overlaySelect = screen.getByTitle(/从目录追加一张 overlay 挂载/) as HTMLSelectElement

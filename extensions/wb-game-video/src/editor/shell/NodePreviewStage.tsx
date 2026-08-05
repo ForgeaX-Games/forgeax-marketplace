@@ -32,7 +32,7 @@ import { resolveVideoFxForNode } from '../../runtime/fx/video-fx'
 import { CATALOG_CSS } from './catalogCss'
 import { renderOverlayChildPreview } from './overlayChildPreview'
 import { advancePreviewMediaClock, PreviewClockProvider, previewClockLayerClassName, type PreviewMediaClock } from './previewClock'
-import { NodePreviewRuntimeProjector, projectNodePreviewState, projectSelectedConditionSpawns } from './nodePreviewState'
+import { NodePreviewRuntimeProjector, projectNodePreviewState, projectSelectedSettlementSpawns } from './nodePreviewState'
 import { resolveMediaSrc } from './media'
 import { videoDurationCapReached } from '../../runtime/play/videoTiming'
 import { resolveMountLayoutForChildren } from '../../runtime/schema/layout'
@@ -46,7 +46,14 @@ import {
   overlayMountId,
 } from '../../runtime/schema/node-config-schema'
 import { expandNodeChildren, resolveMountChildren } from '../../runtime/schema/expand-overlay'
-import { patchSettlementSpawnLayout, setSettlementReactionMs, setRoutingSettlementMs } from '../../graph/edit/graph-edit'
+import {
+  patchSettlementSpawnLayout,
+  removeSettlementSpawn,
+  setRoutingSettlementMs,
+  setSettlementReactionMs,
+  setSettlementSpawnTtlMs,
+} from '../../graph/edit/graph-edit'
+import { SETTLEMENT_SPAWN_ID_PREFIX, collectSettlementSpawnGroups, settlementSpawnAddress } from '../video/settlementSpawnGroups'
 import { overlayFitTargets } from './overlay-fit-targets'
 import {
   OverlayCanvasInteraction,
@@ -59,6 +66,7 @@ import {
   mountOverlayGraph,
   patchMaterialGraph,
   patchOverlayMountLayoutGraph,
+  childVisibleSpan,
   previewSkinChildrenInWindow,
   shiftMountWindowGraph,
 } from '../video/graphMaterialOps'
@@ -171,21 +179,25 @@ function fmtTime(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function isNumericFloatText(componentId: string): boolean {
-  return componentId === 'DamageFloatText' || componentId === 'GainFloatText'
-}
+/**
+ * 代表帧取窗口的 40% 处：自计时组件此时已过入场、尚未开始淡出，是最成形的一帧。
+ * 这个比例沿用飘字原有取值，别改成 50%——那会让所有飘字的预览定帧整体后移。
+ */
+const FOCUSED_PREVIEW_FRAME_RATIO = 0.4
 
-function resolveFloatTextDurationMs(value: unknown, fallback = 1100): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
-}
-
-function focusedFloatPreviewTimeMs(child: OverlayInstanceChild, playheadMs: number): number {
-  const startMs = child.window?.startMs
-    ?? (child.trigger.when === 'at' ? child.trigger.ms : 0)
-  const durationMs = resolveFloatTextDurationMs(child.inputs.durationMs)
-  const localMs = playheadMs - startMs
-  if (localMs > 0 && localMs < durationMs) return playheadMs
-  return startMs + Math.round(durationMs * 0.4 * 1000) / 1000
+/**
+ * 选中某个界面时用哪一刻定帧。
+ *
+ * 播放头在该子件可见窗内就用播放头本身；不在窗内则取窗口中段——自计时组件（飘字、转场、QTE）
+ * 的第 0 帧通常是「还没出现」，直接按播放头定帧会让作者看到一个空白框，没法摆位。
+ * 只在暂停且该挂载被选中时用，播放中一律跟随播放头（见调用点的 `isVideoPlaying` 判断）。
+ */
+function focusedPreviewTimeMs(child: OverlayInstanceChild, playheadMs: number, maxMs: number): number {
+  const span = childVisibleSpan(child, maxMs)
+  if (!span) return playheadMs
+  if (playheadMs > span.start && playheadMs < span.end) return playheadMs
+  const localMs = (span.end - span.start) * FOCUSED_PREVIEW_FRAME_RATIO
+  return span.start + Math.round(localMs * 1000) / 1000
 }
 
 export interface NodePreviewStageProps {
@@ -313,15 +325,15 @@ function EditableNodePreviewStage({
   const [isVideoPlaying, setIsVideoPlaying] = useState(false)
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null)
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null)
-  const [selectedConditionSpawnId, setSelectedConditionSpawnId] = useState<string | null>(null)
+  const [selectedSettlementSpawnId, setSelectedSettlementSpawnId] = useState<string | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const mountPreviewRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const conditionSpawnPreviewRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const settlementSpawnPreviewRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [mountContentBoxes, setMountContentBoxes] = useState<Record<string, { left: number; top: number; width: number; height: number }>>({})
-  const [conditionSpawnContentBoxes, setConditionSpawnContentBoxes] = useState<Record<string, { left: number; top: number; width: number; height: number }>>({})
+  const [settlementSpawnContentBoxes, setSettlementSpawnContentBoxes] = useState<Record<string, { left: number; top: number; width: number; height: number }>>({})
   const mountBoxSigRef = useRef('')
-  const conditionSpawnBoxSigRef = useRef('')
+  const settlementSpawnBoxSigRef = useRef('')
 
   const mediaRef = node.data.media?.ref ?? ''
   const playMode = node.data.mediaPlayMode ?? 'once'
@@ -368,13 +380,13 @@ function EditableNodePreviewStage({
   const previewSkinChildren = useMemo(() => {
     const visible = previewSkinChildrenInWindow(scenario, node, playheadMs, maxMs)
     if (isVideoPlaying || !selectedMountId) return visible
+    // 选中即强制可见：作者点了某个界面就是要摆它，不能因为播放头不在它的窗口内就让它消失
+    // （改用这条替代原先「选中即把播放头拖到窗口中段」，播放头归作者掌握）。
     const visibleIds = new Set(visible.map((child) => child.id))
-    const focusedFloats = expandNodeChildren(scenario, node).filter((child) => (
-      child.source.mountId === selectedMountId
-      && isNumericFloatText(child.component)
-      && !visibleIds.has(child.id)
+    const focused = expandNodeChildren(scenario, node).filter((child) => (
+      child.source.mountId === selectedMountId && !visibleIds.has(child.id)
     ))
-    return focusedFloats.length ? [...visible, ...focusedFloats] : visible
+    return focused.length ? [...visible, ...focused] : visible
   }, [isVideoPlaying, maxMs, node, playheadMs, scenario, selectedMountId])
   const runtimeProjector = useMemo(
     () => new NodePreviewRuntimeProjector(scenario, node),
@@ -386,15 +398,15 @@ function EditableNodePreviewStage({
   }, [playheadMs, runtimeProjector])
   const previewSpawns = runtimeProjection.spawns
   const runtimeVisibleMountIds = runtimeProjection.configuredMountIds
-  const selectedConditionSpawns = useMemo(
-    () => projectSelectedConditionSpawns(scenario, node, focusedLifecycleIndex),
+  const selectedSettlementSpawns = useMemo(
+    () => projectSelectedSettlementSpawns(scenario, node, focusedLifecycleIndex),
     [focusedLifecycleIndex, node, scenario],
   )
-  const activeConditionSpawnId = selectedConditionSpawns.some((preview) => preview.id === selectedConditionSpawnId)
-    ? selectedConditionSpawnId
-    : selectedConditionSpawns[0]?.id ?? null
+  const activeSettlementSpawnId = selectedSettlementSpawns.some((preview) => preview.id === selectedSettlementSpawnId)
+    ? selectedSettlementSpawnId
+    : selectedSettlementSpawns[0]?.id ?? null
   // 选中条件结算时使用稳定作者投影，避免与播放头真实触发的动态实例重叠。
-  const visibleRuntimeSpawns = selectedConditionSpawns.length ? [] : previewSpawns
+  const visibleRuntimeSpawns = selectedSettlementSpawns.length ? [] : previewSpawns
   const authorVisibleMountIds = useMemo(() => {
     const ids = new Set(runtimeVisibleMountIds)
     if (!isVideoPlaying && selectedMountId) ids.add(selectedMountId)
@@ -486,7 +498,7 @@ function EditableNodePreviewStage({
 
   useEffect(() => {
     setSelectedOverlayId(selectedMountId)
-    if (selectedMountId) setSelectedConditionSpawnId(null)
+    if (selectedMountId) setSelectedSettlementSpawnId(null)
   }, [selectedMountId])
 
   // 换节点/换视频：清播放态与选中（视频因 key 变化 remount 自动重播）。
@@ -585,6 +597,42 @@ function EditableNodePreviewStage({
     [node, scenario],
   )
   const { pointMarkers, conditionMarkers } = settlementTimeline
+  const spawnGroups = useMemo(
+    () => collectSettlementSpawnGroups(scenario, node, maxMs),
+    [maxMs, node, scenario],
+  )
+
+  /** 拖绑定界面右端 → 显示时长；起点仍由宿主结算的 at.ms 决定。 */
+  const resizeSpawnBar = (id: string, endMs: number): void => {
+    const address = settlementSpawnAddress(id)
+    const bar = spawnGroups.flatMap((group) => group.bars).find((candidate) => candidate.id === id)
+    if (!address || !bar) return
+    onEditScenario((scenarioToEdit, nodeToEdit) => ({
+      ...scenarioToEdit,
+      graph: setSettlementSpawnTtlMs(
+        scenarioToEdit.graph,
+        nodeToEdit.id,
+        address.settlementIndex,
+        address.actionIndex,
+        endMs - bar.startMs,
+      ),
+    }))
+  }
+
+  const unbindSpawnBar = (id: string): void => {
+    const address = settlementSpawnAddress(id)
+    if (!address) return
+    if (selectedSettlementSpawnId === id) setSelectedSettlementSpawnId(null)
+    onEditScenario((scenarioToEdit, nodeToEdit) => ({
+      ...scenarioToEdit,
+      graph: removeSettlementSpawn(
+        scenarioToEdit.graph,
+        nodeToEdit.id,
+        address.settlementIndex,
+        address.actionIndex,
+      ),
+    }))
+  }
 
   const lifecycleIndexOf = (id: string): number | null => {
     if (!id.startsWith('life:')) return null
@@ -628,8 +676,8 @@ function EditableNodePreviewStage({
       bottom: undefined,
     }))
   }
-  function patchConditionSpawnPosition(
-    preview: (typeof selectedConditionSpawns)[number],
+  function patchSettlementSpawnPosition(
+    preview: (typeof selectedSettlementSpawns)[number],
     position: { x: number; y: number },
   ): void {
     const effectiveLayout = preview.mount.mountLayout ?? {}
@@ -658,8 +706,8 @@ function EditableNodePreviewStage({
       : Math.min(0, ...zValues) - 1
     onEditScenario((s, n) => patchOverlayMountLayoutGraph(s, n, mountId, { zIndex }))
   }
-  function reorderConditionSpawn(
-    preview: (typeof selectedConditionSpawns)[number],
+  function reorderSettlementSpawn(
+    preview: (typeof selectedSettlementSpawns)[number],
     direction: 'front' | 'back',
   ): void {
     const zValues = allInteractionItems.map((item) => item.zIndex)
@@ -722,9 +770,9 @@ function EditableNodePreviewStage({
       setMountContentBoxes(next)
     }
 
-    const nextConditionSpawns: Record<string, { left: number; top: number; width: number; height: number }> = {}
-    for (const { id } of selectedConditionSpawns) {
-      const wrap = conditionSpawnPreviewRefs.current[id]
+    const nextSettlementSpawns: Record<string, { left: number; top: number; width: number; height: number }> = {}
+    for (const { id } of selectedSettlementSpawns) {
+      const wrap = settlementSpawnPreviewRefs.current[id]
       if (!wrap) continue
       let left = Infinity
       let top = Infinity
@@ -745,21 +793,21 @@ function EditableNodePreviewStage({
         right = fallback.right
         bottom = fallback.bottom
       }
-      nextConditionSpawns[id] = {
+      nextSettlementSpawns[id] = {
         left: (left - stageRect.left) / stageRect.width,
         top: (top - stageRect.top) / stageRect.height,
         width: (right - left) / stageRect.width,
         height: (bottom - top) / stageRect.height,
       }
     }
-    const conditionSig = Object.entries(nextConditionSpawns)
+    const conditionSig = Object.entries(nextSettlementSpawns)
       .map(([id, box]) => `${id}:${box.left.toFixed(3)},${box.top.toFixed(3)},${box.width.toFixed(3)},${box.height.toFixed(3)}`)
       .join('|')
-    if (conditionSig !== conditionSpawnBoxSigRef.current) {
-      conditionSpawnBoxSigRef.current = conditionSig
-      setConditionSpawnContentBoxes(nextConditionSpawns)
+    if (conditionSig !== settlementSpawnBoxSigRef.current) {
+      settlementSpawnBoxSigRef.current = conditionSig
+      setSettlementSpawnContentBoxes(nextSettlementSpawns)
     }
-  }, [previewMountGroups, selectedConditionSpawns, playheadMs, contentRect])
+  }, [previewMountGroups, selectedSettlementSpawns, playheadMs, contentRect])
 
   const interactionItems = useMemo<CanvasInteractionItem[]>(() =>
     previewMountGroups.map(({ mountId, mount, children, layout }) => {
@@ -801,10 +849,10 @@ function EditableNodePreviewStage({
       }
     }), [mountContentBoxes, overlays, previewMountGroups])
 
-  const conditionSpawnInteractionItems = useMemo<CanvasInteractionItem[]>(() =>
-    selectedConditionSpawns.map((preview) => {
+  const settlementSpawnInteractionItems = useMemo<CanvasInteractionItem[]>(() =>
+    selectedSettlementSpawns.map((preview) => {
       const layout = preview.mount.mountLayout
-      const content = conditionSpawnContentBoxes[preview.id]
+      const content = settlementSpawnContentBoxes[preview.id]
       const explicitBox: CanvasBox | null =
         !isFullStageMountLayout(layout)
         && typeof layout?.left === 'number'
@@ -833,11 +881,11 @@ function EditableNodePreviewStage({
         movable: true,
         resizable: false,
       }
-    }), [conditionSpawnContentBoxes, selectedConditionSpawns])
+    }), [settlementSpawnContentBoxes, selectedSettlementSpawns])
 
   const allInteractionItems = useMemo(
-    () => [...interactionItems, ...conditionSpawnInteractionItems],
-    [conditionSpawnInteractionItems, interactionItems],
+    () => [...interactionItems, ...settlementSpawnInteractionItems],
+    [settlementSpawnInteractionItems, interactionItems],
   )
 
   const previewContentStyle: CSSProperties | undefined = contentRect
@@ -897,7 +945,7 @@ function EditableNodePreviewStage({
         ) : null}
         <div ref={contentAnchorRef} className="gc-content-anchor" style={previewContentStyle}>
           <div className="gc-preview-overlays" data-node-preview-overlay-scale="none">
-            {previewSkinChildren.length > 0 || visibleRuntimeSpawns.length > 0 || selectedConditionSpawns.length > 0 ? (
+            {previewSkinChildren.length > 0 || visibleRuntimeSpawns.length > 0 || selectedSettlementSpawns.length > 0 ? (
               <PreviewClockProvider value={previewClockValue}>
                 <div className={`gc-preview-skin-layer ${previewClockLayerClassName(isVideoPlaying)}`} aria-hidden>
                   {previewMountGroups.map(({ mountId, children, layout }) => (
@@ -915,8 +963,7 @@ function EditableNodePreviewStage({
                             previewSkinCtx,
                             !isVideoPlaying
                               && child.source.mountId === selectedMountId
-                              && isNumericFloatText(child.component)
-                              ? focusedFloatPreviewTimeMs(child, playheadMs)
+                              ? focusedPreviewTimeMs(child, playheadMs, maxMs)
                               : playheadMs,
                             layout,
                             isVideoPlaying,
@@ -939,11 +986,11 @@ function EditableNodePreviewStage({
                       )}
                     </div>
                   ))}
-                  {selectedConditionSpawns.map((preview) => (
+                  {selectedSettlementSpawns.map((preview) => (
                     <div
                       key={preview.id}
-                      ref={(element) => { conditionSpawnPreviewRefs.current[preview.id] = element }}
-                      data-preview-condition-spawn-id={preview.id}
+                      ref={(element) => { settlementSpawnPreviewRefs.current[preview.id] = element }}
+                      data-preview-settlement-spawn-id={preview.id}
                       style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
                     >
                       {previewSkinReg.renderOverlayMount(
@@ -960,27 +1007,28 @@ function EditableNodePreviewStage({
             <OverlayCanvasInteraction
               stageRef={contentAnchorRef}
               items={allInteractionItems}
-              selectedId={activeConditionSpawnId ?? selectedOverlayId}
-              highlightedIds={selectedConditionSpawns.map((preview) => preview.id)}
+              selectedId={activeSettlementSpawnId ?? selectedOverlayId}
+              // 同结算的其它界面画陪衬虚框：看得见才点得中（选中态是实线+发光，两者一眼可分）。
+              highlightedIds={selectedSettlementSpawns.map((preview) => preview.id)}
               frameVisibility="active"
               ariaLabel="节点视频覆盖物画布"
               onSelect={(id) => {
-                if (id?.startsWith('condition-spawn:')) {
-                  setSelectedConditionSpawnId(id)
+                if (id?.startsWith(SETTLEMENT_SPAWN_ID_PREFIX)) {
+                  setSelectedSettlementSpawnId(id)
                   setSelectedOverlayId(null)
                   if (focusedLifecycleIndex != null) onFocusLifecycle?.(focusedLifecycleIndex)
                   return
                 }
                 setSelectedOverlayId(id)
-                setSelectedConditionSpawnId(null)
+                setSelectedSettlementSpawnId(null)
                 focusMount(id)
                 if (id == null) onFocusLifecycle?.(null)
               }}
               onMove={(id, position) => {
                 pauseForScrub()
-                const conditionPreview = selectedConditionSpawns.find((preview) => preview.id === id)
-                if (conditionPreview) {
-                  patchConditionSpawnPosition(conditionPreview, position)
+                const settlementPreview = selectedSettlementSpawns.find((preview) => preview.id === id)
+                if (settlementPreview) {
+                  patchSettlementSpawnPosition(settlementPreview, position)
                   return
                 }
                 patchMountPosition(id, position)
@@ -990,9 +1038,9 @@ function EditableNodePreviewStage({
               }}
               onReorder={(id, direction) => {
                 pauseForScrub()
-                const conditionPreview = selectedConditionSpawns.find((preview) => preview.id === id)
-                if (conditionPreview) {
-                  reorderConditionSpawn(conditionPreview, direction)
+                const settlementPreview = selectedSettlementSpawns.find((preview) => preview.id === id)
+                if (settlementPreview) {
+                  reorderSettlementSpawn(settlementPreview, direction)
                   return
                 }
                 reorderMount(id, direction)
@@ -1073,6 +1121,16 @@ function EditableNodePreviewStage({
             pointMarkers={pointMarkers}
             conditionMarkers={conditionMarkers}
             selectedPointMarkerId={focusedLifecycleIndex != null ? `life:${focusedLifecycleIndex}` : null}
+            spawnGroups={spawnGroups}
+            // 时间轴用作者真正点中的那条，而不是画布的 activeSettlementSpawnId ——
+            // 后者在未命中时会回落到组内首条，会在焦点传播完成前点亮错误的界面。
+            selectedSpawnBarId={selectedSettlementSpawnId}
+            onSpawnBarEndChange={resizeSpawnBar}
+            onDeleteSpawnBar={unbindSpawnBar}
+            onSelectSpawnBar={(id) => {
+              setSelectedSettlementSpawnId(id)
+              setSelectedOverlayId(null)
+            }}
             context="video"
             editable
             emptyHint="该节点暂无挂载覆盖物——用上方「添加控件」挂载一张覆盖物"
@@ -1081,12 +1139,9 @@ function EditableNodePreviewStage({
             onSelectMaterial={(key) => {
               const mid = key.startsWith('mount:') ? key.slice('mount:'.length) : null
               focusMount(mid)
-              const it = mountMaterials.find((m) => m.key === key)
-              if (it) {
-                // 选中即定格到该覆盖物可见窗的中段并暂停；动画按该局部时刻精确定帧。
-                seekTo(it.startMs + (it.endMs - it.startMs) / 2)
-                pauseForScrub()
-              }
+              // 只暂停，不动播放头：选中界面不该改作者当前停在的时刻（与结算绑定界面一致）。
+              // 该界面即使不在此刻的窗口内也会被强制渲染并按代表帧定帧，见 previewSkinChildren。
+              pauseForScrub()
             }}
             onPatchMaterial={patchMaterial}
             onPointMarkerChange={movePointMarker}

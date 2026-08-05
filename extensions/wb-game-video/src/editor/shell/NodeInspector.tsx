@@ -680,9 +680,10 @@ function LifecycleReactionsEditor({
               spawnOptions={spawnOptions}
               overlays={overlays}
               pickers={pickers}
-              allowSpawn={triggerType === 'condition'}
+              // 定时结算也能绑界面：出现时刻跟随本结算的 at.ms，时间轴上作为组跟着菱形走。
+              allowSpawn={triggerType === 'condition' || triggerType === 'at'}
+              // hideOverlay 只命中挂载界面，命中不了 spawn 出来的界面，因此不在定时结算里放开。
               allowHideOverlay={triggerType === 'condition'}
-              defaultSpawnTtlMs={1200}
               hideOverlayOptions={hideOverlayOptions}
               onCreateEntityAttribute={onCreateEntityAttribute}
               onCreateEntity={onCreateEntity}

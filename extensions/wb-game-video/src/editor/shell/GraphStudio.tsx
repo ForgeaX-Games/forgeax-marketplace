@@ -613,7 +613,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative', zIndex: 0, overflow: 'hidden', isolation: 'isolate' }}>
       {/* 左：可编辑画布 + 运行时高亮（点节点=选中编辑；双击子流程容器下钻） */}
       <div ref={canvasHostRef} className="gv-canvas-host" style={{ flex: 1, minWidth: 0, borderRight: '1px solid #2e2924', position: 'relative', overflow: 'hidden', contain: 'paint' }}>
-        {/* Figma 15195_74423：画布顶部 bar（58px，#2C2C2C）常驻。左侧面包屑；
+        {/* 画布顶部 bar（58px，#2C2C2C）常驻。左侧面包屑；
   右侧三按钮由 GraphCanvas 的 .gv-canvas-chrome 用 CSS 定位到本 bar 右侧对齐。 */}
         <div
   style={{
@@ -648,30 +648,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             })}
           </span>
         </div>
-        {isDraft && (
-          <div
-            title="当前显示的是 localStorage 未保存草稿，尚未写入权威 blueprint.json。点右侧「💾 保存」提交。"
-            style={{
-              position: 'absolute',
-              top: 8,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              zIndex: 5,
-              padding: '4px 12px',
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 600,
-              color: '#3a2a00',
-              background: '#ffc53d',
-              border: '1px solid #d48806',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
-              pointerEvents: 'none',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            ⚠ 当前为未保存草稿
-          </div>
-        )}
         <GraphCanvas
           // 切蓝图 remount：清掉画布本地 selectedIds（store 已清 selectedNodeId，本地不跟会残留旧 id）。
           // 节点剪贴板在 GraphCanvas 模块级，不跟 remount 走，故主↔子蓝图可粘贴。

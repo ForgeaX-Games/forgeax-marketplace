@@ -15,7 +15,7 @@ function effectsBrief(actions: NodeAction[]): string {
     return `${effect.itemId} ${effect.op === 'give' ? '+' : '-'}${effect.count}`
   })
   if (effects.length > 2) parts.push(`等 ${effects.length} 项`)
-  if (spawns > 0) parts.push(`显示 ${spawns} 个界面`)
+  if (spawns > 0) parts.push(`绑定 ${spawns} 个界面`)
   if (hiddenOverlays > 0) parts.push(`隐藏 ${hiddenOverlays} 个界面`)
   if (actions.some((action) => action.kind === 'advance')) parts.push('沿边推进')
   return parts.length ? parts.join(' · ') : '未配置动作'

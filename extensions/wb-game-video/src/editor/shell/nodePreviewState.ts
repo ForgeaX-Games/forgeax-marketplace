@@ -4,6 +4,7 @@ import { applyEffects, type MutableState } from '../../runtime/engine/apply-effe
 import { evaluateCondition } from '../../runtime/engine/condition'
 import { initState } from '../../runtime/engine/engine-init'
 import { GraphSession, type OverlayMountSnap, type SessionSnapshot } from '../../runtime/engine/session'
+import { settlementSpawnId } from '../video/settlementSpawnGroups'
 
 function applyEffectActions(state: MutableState, actions: readonly NodeAction[]): void {
   for (const action of actions) {
@@ -51,13 +52,16 @@ export function projectNodePreviewState(
   return state
 }
 
+/** 能在预览画布上摆位的结算触发面：定时相位 + 条件。事件类界面由组件入口自己管理。 */
+const SPAWN_PREVIEW_TRIGGERS = new Set(['at', 'enter', 'watch', 'state'])
+
 export interface NodePreviewSpawn {
   mount: OverlayMountSnap
   /** 节点局部时间；只用于编辑器预览冻结/拖动动画，不进入配置协议。 */
   startedAtMs: number
 }
 
-export interface SelectedConditionSpawnPreview {
+export interface SelectedSettlementSpawnPreview {
   id: string
   settlementIndex: number
   actionIndex: number
@@ -66,17 +70,19 @@ export interface SelectedConditionSpawnPreview {
 }
 
 /**
- * 选中条件结算时，为作者稳定投影其中的显示界面；不要求条件此刻已经在播放头处真实触发。
+ * 选中某个结算时，为作者稳定投影它绑定的界面；不要求该结算此刻已在播放头处真实触发。
+ * 定时结算（`at` / 历史 `enter`）与条件结算（`watch` / `state`）走同一条投影，作者因此
+ * 能用同一套画布手势给两类结算的界面摆位。
  * 每个动作独立走一次正式 GraphSession，使模板合并、表达式兜底和 layout 解析与运行时一致。
  */
-export function projectSelectedConditionSpawns(
+export function projectSelectedSettlementSpawns(
   scenario: GameScenario,
   node: GameNode,
   settlementIndex: number | null | undefined,
-): SelectedConditionSpawnPreview[] {
+): SelectedSettlementSpawnPreview[] {
   if (settlementIndex == null) return []
   const reaction = (node.data.reactions ?? []).filter(isSettlementReaction)[settlementIndex]
-  if (!reaction || (reaction.when.type !== 'watch' && reaction.when.type !== 'state')) return []
+  if (!reaction || !SPAWN_PREVIEW_TRIGGERS.has(reaction.when.type)) return []
 
   return reaction.do.flatMap((action, actionIndex) => {
     if (action.kind !== 'spawn') return []
@@ -103,7 +109,7 @@ export function projectSelectedConditionSpawns(
     })
     const projected = snapshot.overlayMounts.find((mount) => mount.mountId.startsWith('spawn:'))
     if (!projected) return []
-    const id = `condition-spawn:${settlementIndex}:${actionIndex}`
+    const id = settlementSpawnId(settlementIndex, actionIndex)
     const overlayId = action.from.split('/')[0] ?? ''
     return [{
       id,

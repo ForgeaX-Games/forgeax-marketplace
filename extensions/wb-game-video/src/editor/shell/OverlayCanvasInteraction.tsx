@@ -97,7 +97,12 @@ const CSS = `
 }
 .oci-frame.is-passive { border-color:transparent; }
 .oci-frame.is-passive.is-hovered { border-color:rgba(200,149,90,.48); }
-.oci-frame.is-selected, .oci-frame.is-highlighted {
+/* 陪衬态：只说明"我也在这儿、可以点我"，必须明显弱于选中态，否则一起亮就分不出选的是哪个。 */
+.oci-frame.is-highlighted {
+  border-style:dashed; border-color:rgba(200,149,90,.5);
+  box-shadow:none;
+}
+.oci-frame.is-selected {
   border-style:solid; border-color:var(--gc-accent,#c8955a);
   box-shadow:0 0 0 1px rgba(200,149,90,.42),0 0 12px rgba(200,149,90,.2);
 }
@@ -212,7 +217,12 @@ export function canvasHitStack(
       && point.x <= box.left + box.width
       && point.y >= box.top
       && point.y <= box.top + box.height)
-    .sort((a, b) => b.item.zIndex - a.item.zIndex || b.index - a.index)
+    // 显式层级优先；层级相同时取**更小**的框 —— 小控件常压在大框之上，按面积取才是
+    // 「点到最具体的那个」。都一样大（如刚绑定、还没摆位的两个界面）才回落到后来者优先。
+    .sort((a, b) =>
+      b.item.zIndex - a.item.zIndex
+      || (a.box.width * a.box.height) - (b.box.width * b.box.height)
+      || b.index - a.index)
     .map(({ item }) => item)
 }
 

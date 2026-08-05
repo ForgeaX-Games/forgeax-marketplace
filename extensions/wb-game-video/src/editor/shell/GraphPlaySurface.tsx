@@ -232,7 +232,12 @@ export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.
     }
     if (getSubProcess(node.data)) pinDrillPath([...drillPath, nodeId])
   }
-  const traversed = useMemo(() => new Set(snap?.traversedEdgeIds ?? []), [snap?.traversedEdgeIds])
+  const traversed = useMemo(() => {
+    const merged = new Set(snap?.traversedEdgeIds ?? [])
+    const live = sessionRef.current?.runtime.state.traversedEdgeIds
+    if (live) for (const id of live) merged.add(id)
+    return merged
+  }, [snap?.traversedEdgeIds, snap?.currentNodeId, snap?.clipSeq])
   // 打开蓝图浮层 / 进出自蓝图（含面包屑回看）时平移到高亮节点；同图内推进不抢视口。
   const revealNodeId = useRevealOnScopeChange(
     showBlueprint ? `${viewMode}:${displayBlueprintId}:${drillPath.join('/')}` : null,

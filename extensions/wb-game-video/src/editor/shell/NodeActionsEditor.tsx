@@ -8,6 +8,7 @@ import type {
   VariableCreateHandler,
 } from './component-form-fields'
 import { ComponentInputsDisclosure } from './ComponentInputsDisclosure'
+import { DEFAULT_SPAWN_TTL_MS, spawnTemplateTtlMs } from '../../graph/canvas/timeline-geometry'
 
 export interface ActionOption {
   value: string
@@ -32,6 +33,18 @@ function resolveSpawnTemplate(from: string, overlays?: Record<string, Overlay>) 
   return overlays?.[overlayId]?.children.find((child) => child.id === childId)
 }
 
+/**
+ * 新绑定一个界面时的显示时长：优先读模板 `window` 声明的可见长度，模板没声明结束时用
+ * `DEFAULT_SPAWN_TTL_MS`。
+ *
+ * 不落成常驻是刻意的：常驻的结束固定在节点末端，拖动结算点会把界面拉长/压短，而作者的心智
+ * 是「这个界面有个时长，整体跟着结算点平移」。要常驻在「消失方式」里显式选。
+ */
+function initialSpawnTtlMs(from: string, overlays?: Record<string, Overlay>): number {
+  const template = resolveSpawnTemplate(from, overlays)
+  return (template ? spawnTemplateTtlMs(template) : undefined) ?? DEFAULT_SPAWN_TTL_MS
+}
+
 function field(
   label: string,
   control: ReactNode,
@@ -47,7 +60,7 @@ function field(
 
 function removeActionLabel(action: NodeAction): string {
   if (action.kind === 'effect') return '移除效果'
-  if (action.kind === 'spawn') return '移除界面'
+  if (action.kind === 'spawn') return '解除绑定'
   if (action.kind === 'hideOverlay') return '移除隐藏动作'
   return '移除推进'
 }
@@ -60,7 +73,6 @@ export function NodeActionsEditor({
   allowAdvance = true,
   allowSpawn = true,
   allowHideOverlay = false,
-  defaultSpawnTtlMs,
   hideOverlayOptions = [],
   onCreateEntityAttribute,
   onCreateEntity,
@@ -78,8 +90,6 @@ export function NodeActionsEditor({
   allowAdvance?: boolean
   allowSpawn?: boolean
   allowHideOverlay?: boolean
-  /** 新增瞬态界面时的默认显示时长；省略则保持既有的节点内常驻语义。 */
-  defaultSpawnTtlMs?: number
   /** 当前节点内可被条件隐藏的已有界面挂载。 */
   hideOverlayOptions?: ActionOption[]
   onCreateEntityAttribute?: EntityAttributeCreateHandler
@@ -111,7 +121,7 @@ export function NodeActionsEditor({
               {action.kind === 'effect'
                 ? '施加效果'
                 : action.kind === 'spawn'
-                  ? '显示界面'
+                  ? '绑定界面'
                   : action.kind === 'hideOverlay'
                     ? '隐藏界面'
                     : '沿边推进'}
@@ -164,7 +174,8 @@ export function NodeActionsEditor({
                     }
                     patchAt(i, {
                       ...action,
-                      ttlMs: action.ttlMs ?? defaultSpawnTtlMs ?? 1200,
+                      // 从常驻切回定时：同样先问模板，模板没写结束才用默认值。
+                      ttlMs: action.ttlMs ?? initialSpawnTtlMs(action.from, overlays),
                     })
                   }}
                   style={{ flex: 1, minWidth: 0 }}
@@ -230,21 +241,20 @@ export function NodeActionsEditor({
         ) : null}
         {allowSpawn ? (
           <select
-            aria-label="添加显示界面"
+            aria-label="绑定界面"
             value=""
             disabled={spawnOptions.length === 0}
-            title={spawnOptions.length === 0 ? '请先在「界面」中创建可用的界面模板' : '显示一个界面模板；位置沿用模板配置'}
+            title={spawnOptions.length === 0
+              ? '请先在「界面」中创建可用的界面模板'
+              : '把一个界面模板绑到本动作上；出现时刻跟随本结算，位置沿用模板配置'}
             onChange={(event) => {
-              if (!event.target.value) return
-              onChange([...actions, {
-                kind: 'spawn',
-                from: event.target.value,
-                ...(defaultSpawnTtlMs != null ? { ttlMs: defaultSpawnTtlMs } : {}),
-              }])
+              const from = event.target.value
+              if (!from) return
+              onChange([...actions, { kind: 'spawn', from, ttlMs: initialSpawnTtlMs(from, overlays) }])
             }}
             style={{ maxWidth: 140, fontSize: 11 }}
           >
-            <option value="">+ 添加界面</option>
+            <option value="">+ 绑定界面</option>
             {spawnOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         ) : null}
