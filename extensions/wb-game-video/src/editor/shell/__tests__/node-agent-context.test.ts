@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { GameScenario } from '../../../runtime/schema/graph-schema'
-import { buildNodeReferencePill } from '../node-agent-context'
+import type { GameNode, GameScenario } from '../../../runtime/schema/graph-schema'
+import { buildNodeContextReference, buildNodeReferencePill } from '../node-agent-context'
 
 describe('buildNodeReferencePill', () => {
   it('把节点、关联路由、挂载界面及状态目录放进同一个可理解引用', () => {
@@ -65,5 +65,102 @@ describe('buildNodeReferencePill', () => {
     expect(pill.detail).not.toContain('未挂载界面')
     expect(pill.detail).toContain('"boss"')
     expect(pill.detail).toContain('"rage"')
+  })
+})
+
+describe('buildNodeContextReference', () => {
+  const scenario: GameScenario = {
+    version: 'wb-game-video.graph.v1',
+    graph: {
+      nodes: [
+        {
+          id: 'fight',
+          type: 'perf',
+          position: { x: 200, y: 0 },
+          inputs: [],
+          outputs: [],
+          data: { name: '首领战', durationMs: 8_000, media: { kind: 'VIDEO', ref: 'boss-clip', prompt: '巨兽冲锋' } },
+        },
+      ],
+      edges: [],
+    },
+  }
+  const node = scenario.graph.nodes[0]!
+
+  it('把节点投影成带 tools 写回提示的通用 ContextReference 信封', () => {
+    const reference = buildNodeContextReference({
+      gameId: 'game-nodia-fighting',
+      blueprintId: 'bp-main',
+      blueprintTitle: '主线',
+      graphPath: [{ id: 'phase-2', name: '第二阶段' }],
+      graph: scenario.graph,
+      node,
+      scenario,
+    })
+
+    expect(reference.refKind).toBe('wb-game-video.blueprint-node.v1')
+    expect(reference.sourceExtensionId).toBe('@forgeax-extension/wb-game-video')
+    expect(reference.display).toEqual({ title: '首领战', icon: '🔷', subtitle: '第二阶段' })
+    expect(reference.action).toEqual({
+      protocol: 'tools',
+      toolHints: ['wb-game-video:get-graph', 'wb-game-video:save-graph'],
+    })
+    const payload = reference.payload as Record<string, unknown>
+    expect(payload.kind).toBe('wb-game-video.blueprint-node-reference.v1')
+    expect(payload.gameId).toBe('game-nodia-fighting')
+    expect((payload.node as GameNode).id).toBe('fight')
+  })
+
+  it('无 graphPath 时 subtitle 回退为「根图」', () => {
+    const reference = buildNodeContextReference({
+      gameId: 'game-nodia-fighting',
+      blueprintId: 'bp-main',
+      graphPath: [],
+      graph: scenario.graph,
+      node,
+      scenario,
+    })
+    expect(reference.display.subtitle).toBe('根图')
+  })
+
+  it('payload 超 30KB 时降级为身份字段 + 截断快照，不再是权威数据', () => {
+    const bigOverlayId = 'hud'
+    const bigScenario: GameScenario = {
+      ...scenario,
+      ui: {
+        overlays: {
+          [bigOverlayId]: {
+            id: bigOverlayId,
+            title: '大界面',
+            children: Array.from({ length: 4_000 }, (_, index) => ({
+              id: `child-${index}`,
+              component: 'Bar',
+              inputs: { value: `padding-to-exceed-thirty-kilobytes-${index}` },
+            })),
+          },
+        },
+      },
+    }
+    const bigNode: GameNode = {
+      ...node,
+      data: { ...node.data, overlayNodes: [{ id: 'mount-hud', overlay: bigOverlayId }] },
+    }
+
+    const reference = buildNodeContextReference({
+      gameId: 'game-nodia-fighting',
+      blueprintId: 'bp-main',
+      graphPath: [],
+      graph: { nodes: [bigNode], edges: [] },
+      node: bigNode,
+      scenario: bigScenario,
+    })
+
+    const json = JSON.stringify(reference.payload)
+    expect(json.length).toBeLessThanOrEqual(30_000)
+    const payload = reference.payload as Record<string, unknown>
+    expect(payload.truncated).toBe(true)
+    expect(payload.gameId).toBe('game-nodia-fighting')
+    expect((payload.node as { id: string }).id).toBe('fight')
+    expect(typeof payload.snapshot).toBe('string')
   })
 })

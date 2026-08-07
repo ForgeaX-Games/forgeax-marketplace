@@ -114,6 +114,7 @@ export function projectFlowTimeline(
   ledger: FlowTimelineLedger,
   localPlayheadMs: number,
   resolveNode: (segment: FlowTimelineSegment) => FlowTimelineNodeSource | null,
+  resolveVideoSrc?: (segment: FlowTimelineSegment, source: FlowTimelineNodeSource | null) => string | undefined,
 ): ProjectedFlowTimeline {
   const materials: MaterialItem[] = []
   const pointMarkers: TimelinePointMarker[] = []
@@ -121,6 +122,7 @@ export function projectFlowTimeline(
 
   ledger.segments.forEach((segment) => {
     const prefix = `${segment.instanceKey}\u0002`
+    const source = resolveNode(segment)
     materials.push({
       key: `${prefix}video`,
       id: `${prefix}video`,
@@ -129,8 +131,9 @@ export function projectFlowTimeline(
       startMs: segment.startMs,
       endMs: segment.endMs,
       zIndex: 0,
+      locked: true,
+      videoSrc: resolveVideoSrc?.(segment, source),
     })
-    const source = resolveNode(segment)
     if (!source) return
     for (const material of collectMountItemsFromNode(source.scenario, source.node, segment.durationMs)) {
       materials.push({

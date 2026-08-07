@@ -156,7 +156,7 @@ describe('NodeInspector · 结算选中联动', () => {
 
     fireEvent.click(screen.getByRole('combobox', { name: '实体' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '新增实体' }))
-    expect(screen.getByRole('textbox', { name: '效果目标的新实体 ID' })).toHaveValue('entity1')
+    expect(screen.queryByRole('textbox', { name: '效果目标的新实体 ID' })).toBeNull()
     fireEvent.keyDown(document, { key: 'Escape' })
 
     fireEvent.click(screen.getByRole('combobox', { name: '数值来源' }))
@@ -234,7 +234,7 @@ describe('NodeInspector · 结算选中联动', () => {
     const second = container.querySelector<HTMLElement>('[data-lifecycle-effect-index="1"]')
     expect(first).toHaveAttribute('data-selected', 'false')
     expect(second).toHaveAttribute('data-selected', 'true')
-    expect(second?.style.border).toContain('#5ad4c0')
+    expect(second?.style.border).toContain('#b9d79c')
     expect(second?.style.background).toBe('')
     expect(second?.style.boxShadow).toBe('')
     expect(screen.getByText('结算')).toBeTruthy()
