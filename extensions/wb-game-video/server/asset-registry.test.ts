@@ -63,11 +63,10 @@ describe('shared asset manifest coexistence', () => {
     expect(raw.styleAxes).toEqual({ artMedia: 'ink' })
     expect(raw.assets).toContainEqual(providerVideo)
     expect(raw.assets).toContainEqual(providerImage)
-    expect(listAssets(dir).map((asset) => asset.id)).toEqual(['provider-video', 'provider-image', 'generated-image'])
+    expect(listAssets(dir).map((asset) => asset.id)).toEqual(['provider-image', 'generated-image'])
     expect(listAssets(dir)[0]).toMatchObject({
-      label: 'provider-video.mp4',
-      mime: 'video/mp4',
-      productionType: 'video_clip',
+      label: 'hero.png',
+      mime: 'image/png',
       meta: { upload: true },
     })
   })

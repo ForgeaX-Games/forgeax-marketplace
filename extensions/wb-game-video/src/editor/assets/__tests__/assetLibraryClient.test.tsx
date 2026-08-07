@@ -170,7 +170,7 @@ function kino(): KinoVideoClient {
       upload_mimes: [...KINO_CAPABILITIES.upload_mimes],
     })),
     prepareUpload: vi.fn(async () => ({
-      upload: { method: 'PUT' as const, url: 'https://storage.example/upload', headers: {}, expires_at: '2099-01-01', chunk_size: 512 * 1024, chunk_count: 1 },
+      upload: { method: 'PUT' as const, url: 'https://storage.example/upload', headers: {}, expires_at: '2099-01-01' },
       object_url: 'https://storage.example/object',
       upload_token: 'token',
     })),

@@ -95,8 +95,7 @@ export function BattleParry({
       style={preview ? previewTStyle(previewTimeMs ?? 0) : undefined}
       aria-label="防反 QTE"
     >
-      <div className="pvb-parry-keys" data-overlay-hit-target>
-        <span className="pvb-parry-visual-bounds" data-overlay-hit-target aria-hidden="true" />
+      <div className="pvb-parry-keys">
         <button
           type="button"
           className={`pvb-key${hitKeys.includes('first') ? ' hit' : ''}`}
@@ -138,7 +137,6 @@ const PARRY_CSS = `
 .pvb-parry.is-frozen .pvb-key{animation-delay:calc(var(--qte-entry-delay,0ms) - var(--preview-t,0ms))}
 .pvb-parry.is-frozen .pvb-key::after{animation-delay:calc(var(--qte-entry-delay,0ms) - var(--preview-t,0ms))}
 .pvb-parry-keys{position:relative;inline-size:20cqmin;block-size:20cqmin;pointer-events:auto}
-.pvb-parry-visual-bounds{position:absolute;inset:-5cqmin;pointer-events:none}
 .pvb-key{position:relative;inline-size:8cqmin;block-size:8cqmin;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4cqh;cursor:pointer;background:none;border:none;padding:0;color:#efe7d6;transition:transform .14s,opacity .14s;animation:pvbParryKeyLifetime var(--qte-ring-duration,1400ms) linear var(--qte-entry-delay,0ms) both}
 .pvb-key:nth-child(1){position:absolute;inset-block-start:1cqmin;inset-inline-start:1cqmin}
 .pvb-key:nth-child(2){position:absolute;inset-block-end:1cqmin;inset-inline-end:1cqmin}

@@ -7,8 +7,8 @@
  */
 import { create } from 'zustand'
 
-export type GraphView = 'graph' | 'video' | 'video-generate' | 'assets' | 'ui' | 'rule' | 'play'
-const VIEWS: readonly GraphView[] = ['graph', 'video', 'video-generate', 'assets', 'ui', 'rule', 'play']
+export type GraphView = 'graph' | 'video' | 'assets' | 'ui' | 'rule' | 'play'
+const VIEWS: readonly GraphView[] = ['graph', 'video', 'assets', 'ui', 'rule', 'play']
 
 const LS_KEY = 'wb-game-video:graph:view'
 const CHANNEL = 'wb-game-video:graph:view-sync'

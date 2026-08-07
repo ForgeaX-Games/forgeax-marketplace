@@ -7,27 +7,6 @@ import { GraphStudio } from '../GraphStudio'
 
 const useKinoVideoResources = vi.hoisted(() => vi.fn())
 const useProjectAssets = vi.hoisted(() => vi.fn())
-const hostClient = vi.hoisted(() => ({
-  context: {
-    gameId: 'game-nodia-fighting',
-    endpoints: { gamePackage: 'https://host.test/__workbench__/v1/games/game-nodia-fighting/package' },
-  },
-  extension: {
-    fetch: vi.fn(),
-    url: vi.fn((path: string) => `https://host.test/extension/runtime/${path.replace(/^\//, '')}`),
-  },
-  tool: { call: vi.fn() },
-}))
-
-vi.mock('../../../lib/workbench-host', () => ({
-  getWorkbenchHost: () => hostClient,
-  ExtensionResponseError: class ExtensionResponseError extends Error {
-    constructor(readonly status: number, message: string) {
-      super(message)
-    }
-  },
-  readExtensionJson: vi.fn(),
-}))
 
 vi.mock('../../assets/kinoVideoCacheStore', () => {
   return {
