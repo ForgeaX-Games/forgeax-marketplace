@@ -98,20 +98,17 @@ injectStyleOnce('color-picker', `
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 8px; border: 1px solid var(--color-border-default, #404040);
   border-radius: var(--radius-sm, 4px); background: var(--color-background-base, #191919);
-  cursor: pointer; font-size: 11px; font-family: var(--font-mono, monospace); color: inherit; flex: 1; min-width:0;
+  cursor: pointer; font-size: 11px; font-family: var(--font-mono, monospace); color: inherit; flex: 1;
 }
 .gc-cp-swatch {
-  position:relative; overflow:hidden; box-sizing:border-box;
-  width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
-  border: 1px solid rgba(162, 162, 162, 1);
+  width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.25);
   background-image:
     linear-gradient(45deg, #666 25%, transparent 25%), linear-gradient(-45deg, #666 25%, transparent 25%),
     linear-gradient(45deg, transparent 75%, #666 75%), linear-gradient(-45deg, transparent 75%, #666 75%);
   background-size: 6px 6px; background-position: 0 0, 0 3px, 3px -3px, -3px 0;
   background-color: #999;
 }
-.gc-cp-swatch-color { position:absolute; inset:0; border-radius:inherit; }
-.gc-cp-value { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
 .gc-cp-panel {
   z-index: var(--z-top, 9999); box-sizing: border-box;
   width: 220px; padding: 10px; border-radius: var(--radius-md, 8px);
@@ -181,7 +178,7 @@ export function ColorPicker({
   const alphaRef = useRef<HTMLDivElement>(null)
   const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null)
 
-  const seed = parseColor(value) ?? parseColor(placeholder) ?? { r: 255, g: 255, b: 255, a: 1 }
+  const seed = parseColor(value) ?? { r: 255, g: 255, b: 255, a: 1 }
   const [hsv, setHsv] = useState<Hsv>(() => rgbToHsv(seed))
   const [alpha, setAlpha] = useState(seed.a)
   const [hexDraft, setHexDraft] = useState<string | null>(null)
@@ -192,11 +189,11 @@ export function ColorPicker({
   useEffect(() => {
     if (value === lastEmitted.current) return
     lastEmitted.current = value
-    const p = parseColor(value) ?? parseColor(placeholder)
+    const p = parseColor(value)
     if (!p) return
     setHsv(rgbToHsv(p))
     setAlpha(p.a)
-  }, [placeholder, value])
+  }, [value])
 
   useEffect(() => {
     if (!open) return
@@ -248,8 +245,6 @@ export function ColorPicker({
 
   function emit(nextHsv: Hsv, nextAlpha: number): void {
     const next = formatColor({ ...hsvToRgb(nextHsv), a: nextAlpha })
-    // 拖动选色时退出手动文本草稿，让弹层输入框立即展示同一份实时色值。
-    setHexDraft(null)
     lastEmitted.current = next
     onChange(next)
   }
@@ -272,7 +267,7 @@ export function ColorPicker({
   const rgb = hsvToRgb(hsv)
   const opaqueHex = formatColor({ ...rgb, a: 1 })
   const currentColor = formatColor({ ...rgb, a: alpha })
-  const hexShown = hexDraft ?? currentColor.toUpperCase()
+  const hexShown = hexDraft ?? currentColor
 
   function commitHex(text: string): void {
     const p = parseColor(text.trim())
@@ -343,13 +338,8 @@ export function ColorPicker({
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0 }}>
       <button ref={triggerRef} type="button" className="gc-cp-trigger" onClick={() => setOpen((v) => !v)}>
-        <span className="gc-cp-swatch">
-          <span
-            className="gc-cp-swatch-color"
-            style={{ backgroundColor: value?.trim() ? currentColor : undefined }}
-          />
-        </span>
-        <span className="gc-cp-value">{(value?.trim() || placeholder).toUpperCase()}</span>
+        <span className="gc-cp-swatch" style={{ backgroundColor: value?.trim() ? currentColor : undefined }} />
+        <span>{value?.trim() || placeholder}</span>
       </button>
       {typeof document !== 'undefined' && panel ? createPortal(panel, document.body) : null}
     </div>
