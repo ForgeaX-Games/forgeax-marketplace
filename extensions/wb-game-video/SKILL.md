@@ -34,7 +34,16 @@ wb-game-video:get-graph({})
 ```
 
 如果 `get-graph` 返回 `project: null`，先创建空的 `GraphLibraryDocument`；不要自动注入 demo。Nodia demo 只用于用户显式重置。
-游戏身份始终来自宿主绑定；所有 11 个工具都不接受 `gameSlug` 或其它游戏选择参数。
+通常省略 `gameSlug` 并使用宿主绑定游戏；若显式传入，它必须与宿主绑定 id 逐字一致。
+中文和单字符 id 均受支持，路径分隔符及 `.` / `..` 不合法。
+
+## 子流程契约
+
+- 私有内嵌子流程写在容器节点的 `data.subProcess`：`{ entry: string, graph: { nodes, edges } }`。
+- `entry` 必须指向该容器直属子图中的节点；子图边只能连接同一层的节点，禁止跨父子边界连线。
+- 同一蓝图及其全部内嵌层中的节点 id、边 id 分别保持唯一。
+- 可复用、可独立编辑的子蓝图使用 `data.subFlowPack` 引用 `manifest.packs`，不要把它内联进 `subProcess`。
+- 不写旧 `subFlow` / `subFlowRef` 字段；保存校验会拒绝它们。
 
 ## 视频生产闭环
 
@@ -46,16 +55,11 @@ import-character-refs + import-scene-refs
   → 把返回的 asset.id 绑定到节点 media.ref
 ```
 
-素材写入宿主绑定工作区的逻辑目录 `assets/`。蓝图写入 `blueprint.json`，首次保存补
-`project.json`；物理目录布局由宿主决定。
+`generate-node-video` 超过 15 秒时逐段串行：优先使用 Provider 原生视频续接（Kino
+直接把上一段作为 `@视频N`）；没有该能力时，服务端用 `ffmpeg` 提取真实尾帧并作为
+下一段 `first_frame`。`strict` 模式会在首笔付费任务前预检，不会做到一半才因缺少
+`ffmpeg` 失败；只有调用方显式传 `continuityMode="independent"` 时才允许独立分段。
+
+素材写入 `.forgeax/games/<slug>/assets/`。蓝图写入 `.forgeax/games/<slug>/blueprint.json`，首次保存补 `.forgeax/games/<slug>/project.json`。
 
 本扩展不替代纯叙事影片、BGM、低模 3D 或 ECS 游戏工具；它专注于视频承载的玩法交互。
-
-## 宿主契约
-
-发布时需要 `@forgeax/extension-platform@0.0.2` 与
-`/workbench-host.2.3`。宿主加载 `@forgeax-extension/wb-game-video/host` 的 `host`
-导出，并注入游戏工作区、版本、媒体、模型、视频生成与服务 capability。所有工具和扩展 HTTP 路由共享同一
-`WorkbenchExtensionContext`；不支持根据 URL、进程环境、全局 active game 或工具参数选择游戏。
-浏览器必须等待 nonce-bound handshake，并只使用 handshake 返回的游戏身份和端点。版本与游戏
-组件是可选 capability；缺失时不得猜测或拼接备用 URL。

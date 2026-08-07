@@ -2,7 +2,7 @@
  * 场景 meta 目录 —— 实体 / 属性 / 变量下拉选项（展示名称，写入 id）。
  * 新数据格式：EntitySpec→Entity、VarSpec→Variable（Variable 不再有 number/flag 之分）。
  */
-import { isNumericScalar, type AttrMeta, type Entity, type Variable } from '../../runtime/schema/graph-schema'
+import type { AttrMeta, Entity, Variable } from '../../runtime/schema/graph-schema'
 import {
   parseFormulaAuthoringText,
   type Formula,
@@ -222,18 +222,14 @@ export function listAttrOptions(ent: Entity | undefined): Array<{ id: string; la
 }
 
 /**
- * 变量下拉。新数据格式不再声明独立类型；numbersOnly 排除已知字符串初值，
- * 未设置初值的旧变量继续保留，避免仅因缺少元数据而丢失合法数值引用。
+ * 变量下拉。新数据格式的 Variable 不再区分 number/flag，`opts` 仅作调用点意图声明，
+ * 目前一律返回全部变量（flag 语义交由使用处按值 true/false 处理）。
  */
 export function listVarOptions(
   variables: Record<string, Variable> | undefined,
-  opts?: { flagsOnly?: boolean; numbersOnly?: boolean },
+  _opts?: { flagsOnly?: boolean; numbersOnly?: boolean },
 ): Array<{ id: string; label: string }> {
-  return Object.entries(variables ?? {}).filter(([, variable]) => (
-    !opts?.numbersOnly
-    || variable.initial === undefined
-    || isNumericScalar(variable.initial)
-  )).map(([key, v]) => {
+  return Object.entries(variables ?? {}).map(([key, v]) => {
     const id = v.id ?? key
     const name = (v.name ?? '').trim()
     return { id, label: authoringOptionLabel(name, id) }

@@ -69,8 +69,7 @@ describe('ComponentEventsEditor', () => {
         onCatalogChange={onCatalogChange}
       />,
     )
-    expect(screen.queryByText('q:pass')).toBeNull()
-    expect(screen.queryByText('目录动作（所有挂载继承）')).toBeNull()
+    expect(screen.getByText('q:pass')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /沿边推进/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /效果/ }))
     expect(onCatalogChange).toHaveBeenCalledWith([
@@ -344,42 +343,7 @@ describe('NodeInspector overlay events', () => {
 })
 
 describe('OverlaySchemeEditor selected child', () => {
-  it('separates the canvas workspace, bottom tabs, and component property panel', () => {
-    const onRemoveChild = vi.fn()
-    render(
-      <OverlaySchemeEditor
-        overlayId="hud"
-        overlay={{
-          id: 'hud',
-          children: [
-            { id: 'damage', component: 'DamageFloatText', inputs: { parameter: '-25' } },
-            { id: 'gain', component: 'GainFloatText', inputs: { parameter: '+50' } },
-          ],
-        }}
-        entities={{}}
-        variables={{}}
-        usageCount={0}
-        onRename={vi.fn()}
-        onRemove={vi.fn()}
-        onAddChild={vi.fn()}
-        onRemoveChild={onRemoveChild}
-        onPatchChild={vi.fn()}
-        onReactionsChange={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByTestId('overlay-scheme-workspace')).toBeTruthy()
-    expect(screen.getByTestId('component-property-panel')).toBeTruthy()
-    expect(screen.getByRole('tab', { name: '图层' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByTestId('overlay-layers')).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: /伤害飘字 · damage/ }))
-    expect(screen.getByRole('heading', { name: '文本信息' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '删除组件' }))
-    expect(onRemoveChild).toHaveBeenCalledWith('damage')
-  })
-
-  it('does not render scheme management inside the canvas', () => {
+  it('does not show the internal scheme id below the name input', () => {
     render(
       <OverlaySchemeEditor
         overlayId="scheme-9"
@@ -396,12 +360,13 @@ describe('OverlaySchemeEditor selected child', () => {
       />,
     )
 
-    expect(screen.queryByDisplayValue('第1个新方案')).toBeNull()
+    expect(screen.getByDisplayValue('第1个新方案')).toBeTruthy()
     expect(screen.queryByText('scheme-9')).toBeNull()
   })
 
-  it('leaves custom scheme deletion to the global navigation', () => {
+  it('requires confirmation before deleting a custom interface scheme', () => {
     const onRemove = vi.fn()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(
       <OverlaySchemeEditor
         overlayId="custom-hud"
@@ -418,8 +383,13 @@ describe('OverlaySchemeEditor selected child', () => {
       />,
     )
 
-    expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(confirm).toHaveBeenCalledWith('确定删除自定义界面方案「战斗界面」？当前仍被 2 个节点引用，删除后这些挂载将无法解析界面。')
     expect(onRemove).not.toHaveBeenCalled()
+
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '删除' }))
+    expect(onRemove).toHaveBeenCalledTimes(1)
   })
 
   it('defaults overlapping components to the visually topmost child', async () => {
@@ -542,7 +512,7 @@ describe('OverlaySchemeEditor selected child', () => {
     expect(screen.getByTestId('overlay-selected-child-editor')).toBeTruthy()
     expect(screen.getByText(/^参数 ·/)).toBeTruthy()
     expect(screen.getByText('事件')).toBeTruthy()
-    expect(screen.queryByText('q:pass')).toBeNull()
+    expect(screen.getByText('q:pass')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /调整qte大小/ })).toBeNull()
   })
 
@@ -571,20 +541,17 @@ describe('OverlaySchemeEditor selected child', () => {
         onReactionsChange={vi.fn()}
       />,
     )
-    const currentField = screen.getAllByText('血量')
-      .find((element) => element.tagName !== 'H2')!.parentElement!
+    const currentField = screen.getByText('血量').parentElement!
     expect(screen.getByText(/不能增删或拖动组件/)).toBeTruthy()
-    expect(screen.queryByRole('tab', { name: '控件库' })).toBeNull()
-    expect(screen.getByRole('tab', { name: '图层' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.queryByRole('button', { name: '删除组件' })).toBeNull()
     expect(document.querySelector('[data-overlay-design-canvas]')).toBeNull()
     expect(document.querySelector('[data-overlay-centered-child="hp"]')).toBeTruthy()
     expect(screen.getByLabelText('基础界面组件边界')).toBeTruthy()
     expect(document.querySelector('[data-canvas-item="hp"]')).toHaveClass('is-selected')
     expect(screen.queryByText('虚拟画布尺寸')).toBeNull()
     expect(screen.queryByRole('button', { name: /调整BattlePlayerHpBar大小/ })).toBeNull()
-    expect(currentField.classList.contains('editor-property-cascade-field')).toBe(true)
-    expect(currentField.querySelector(':scope > span')?.textContent).toBe('血量')
+    expect(currentField.style.gridTemplateColumns).toBe('7em minmax(0, 1fr)')
+    expect(currentField.style.columnGap).toBe('8px')
+    expect(currentField.style.fontSize).toBe('11px')
     expect(screen.queryByRole('radiogroup', { name: '血量来源' })).toBeNull()
     const current = currentField
       .querySelector('input[aria-label="常量数值"]') as HTMLInputElement
@@ -649,16 +616,14 @@ describe('OverlaySchemeEditor selected child', () => {
     expect(screen.queryByLabelText('界面方案画布')).toBeNull()
     expect(screen.getByLabelText('基础界面组件边界')).toBeTruthy()
     expect(container.querySelector('[data-canvas-item="choice"]')).toHaveClass('is-selected')
-    expect(screen.getByTestId('overlay-event-editor')).not.toHaveAttribute('disabled')
-    expect(screen.queryByText('choice:ying')).toBeNull()
-    const effectButtons = screen.getAllByRole('button', { name: '添加效果' })
-    const spawnButtons = screen.getAllByRole('button', { name: '添加界面' })
+    expect((screen.getByTestId('overlay-event-editor') as HTMLFieldSetElement).disabled).toBe(false)
+    expect(screen.getByText('choice:ying')).toBeTruthy()
+    const effectButtons = screen.getAllByRole('button', { name: '＋ 添加效果' })
+    const spawnButtons = screen.getAllByRole('combobox', { name: '绑定界面' })
     expect(effectButtons[0]).not.toBeDisabled()
     expect(spawnButtons[0]).not.toBeDisabled()
     fireEvent.click(effectButtons[0]!)
     expect(onReactionsChange).toHaveBeenCalled()
-    fireEvent.click(spawnButtons[0]!)
-    expect(onReactionsChange).toHaveBeenCalledTimes(2)
   })
 
   it('does not render an event section for a component without exported events', () => {
@@ -730,21 +695,6 @@ describe('ComponentFormFields defaults', () => {
     expect(controlRow).toHaveStyle({ flexDirection: 'column', alignItems: 'stretch' })
     expect(picker.parentElement).toHaveClass('is-narrow-safe')
     expect(literalInput).toHaveStyle({ width: '100%', minWidth: '0' })
-  })
-
-  it('lets fixed text span the full property-panel row', () => {
-    render(
-      <ComponentFormFields
-        componentId="StatusNotice"
-        values={{ fixedText: '获得道具' }}
-        density="property"
-        onChange={() => undefined}
-      />,
-    )
-
-    const field = screen.getByText('固定文本', { selector: 'span' }).closest('.cff-property-field')
-    expect(field).toHaveClass('is-full-width')
-    expect(field).toHaveStyle({ gridColumn: '1 / -1' })
   })
 
   it('stacks formula selection above its parameter bindings in compact component fields', () => {
@@ -837,7 +787,7 @@ describe('ComponentFormFields defaults', () => {
       '我方',
       '新增属性',
     )
-    expect(screen.queryByRole('textbox', { name: '我方的新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '我方的新属性 ID' })).toHaveValue('hpMax')
     expect(screen.getByRole('button', { name: '确认' })).toBeEnabled()
   })
 
@@ -1225,12 +1175,15 @@ describe('ComponentFormFields defaults', () => {
     expect(screen.queryByRole('menuitem', { name: 'attack' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'defense' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: '攻击力' })).toBeNull()
-    expect(screen.queryByRole('textbox', { name: '小怪的新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '小怪的新属性 ID' })).toHaveValue('hp2')
     expect(screen.getByRole('textbox', { name: '小怪的新属性显示名' })).toHaveValue('当前血量')
     expect(screen.getByRole('textbox', { name: '小怪的新属性初始值' })).toHaveValue('100')
     expect(screen.queryByRole('menuitem', { name: '最小值：0' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: '最大值：100' })).toBeNull()
 
+    fireEvent.change(screen.getByRole('textbox', { name: '小怪的新属性 ID' }), {
+      target: { value: 'lifeNow' },
+    })
     fireEvent.change(screen.getByRole('textbox', { name: '小怪的新属性显示名' }), {
       target: { value: '生命值' },
     })
@@ -1240,12 +1193,12 @@ describe('ComponentFormFields defaults', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     expect(screen.getByTestId('entities-state')).toHaveTextContent(
-      '"attrs":{"attack":20,"defense":10,"hp":30,"hp2":88}',
+      '"attrs":{"attack":20,"defense":10,"hp":30,"lifeNow":88}',
     )
     expect(screen.getByTestId('entities-state')).toHaveTextContent(
-      '"hp2":{"label":"生命值","initial":88,"min":0,"max":100}',
+      '"lifeNow":{"label":"生命值","initial":88,"min":0,"max":100}',
     )
-    expect(latestValues.current).toMatchObject({ expr: 'entity.boss.attr.hp2' })
+    expect(latestValues.current).toMatchObject({ expr: 'entity.boss.attr.lifeNow' })
     expect(onChange).toHaveBeenCalled()
   })
 
@@ -1276,19 +1229,22 @@ describe('ComponentFormFields defaults', () => {
       .getByRole('combobox', { name: '文本内容' })
     chooseCascade(labelPicker, '实体', '新增实体')
 
-    expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('ent-boss')
     expect(screen.getByRole('textbox', { name: '新实体显示名' })).toHaveValue('敌方')
     expect(screen.queryByRole('textbox', { name: '新实体类型' })).toBeNull()
 
+    fireEvent.change(screen.getByRole('textbox', { name: '新实体 ID' }), {
+      target: { value: 'enemy-chief' },
+    })
     fireEvent.change(screen.getByRole('textbox', { name: '新实体显示名' }), {
       target: { value: '首领' },
     })
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     expect(screen.getByTestId('entities-state')).toHaveTextContent(
-      '"ent-boss":{"id":"ent-boss","name":"首领","attrs":{},"attrMeta":{}}',
+      '"enemy-chief":{"id":"enemy-chief","name":"首领","attrs":{},"attrMeta":{}}',
     )
-    expect(latestValues.label).toEqual({ ref: 'entity.ent-boss.name' })
+    expect(latestValues.label).toEqual({ ref: 'entity.enemy-chief.name' })
   })
 
   it('creates an entity and the required hp property from an empty catalog', () => {
@@ -1321,17 +1277,23 @@ describe('ComponentFormFields defaults', () => {
       .getByRole('combobox', { name: '数值内容' })
     chooseCascade(hpPicker, '实体属性', '新增实体')
 
-    expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('ent-boss')
     expect(screen.getByRole('textbox', { name: '新实体显示名' })).toHaveValue('敌方')
     expect(screen.queryByRole('textbox', { name: '新实体类型' })).toBeNull()
-    expect(screen.queryByRole('textbox', { name: '新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新属性 ID' })).toHaveValue('hp')
     expect(screen.getByRole('textbox', { name: '新属性显示名' })).toHaveValue('当前血量')
     expect(screen.getByRole('textbox', { name: '新属性初始值' })).toHaveValue('100')
     expect(screen.queryByRole('menuitem', { name: '最小值：0' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: '最大值：100' })).toBeNull()
 
+    fireEvent.change(screen.getByRole('textbox', { name: '新实体 ID' }), {
+      target: { value: 'enemy-boss' },
+    })
     fireEvent.change(screen.getByRole('textbox', { name: '新实体显示名' }), {
       target: { value: '魔王' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新属性 ID' }), {
+      target: { value: 'vitality' },
     })
     fireEvent.change(screen.getByRole('textbox', { name: '新属性显示名' }), {
       target: { value: '生命值' },
@@ -1342,12 +1304,12 @@ describe('ComponentFormFields defaults', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     expect(screen.getByTestId('entities-state')).toHaveTextContent(
-      '"ent-boss":{"id":"ent-boss","name":"魔王","attrs":{"hp":90}',
+      '"enemy-boss":{"id":"enemy-boss","name":"魔王","attrs":{"vitality":90}',
     )
     expect(screen.getByTestId('entities-state')).toHaveTextContent(
-      '"hp":{"label":"生命值","initial":90,"min":0,"max":100}',
+      '"vitality":{"label":"生命值","initial":90,"min":0,"max":100}',
     )
-    expect(latestValues.current).toMatchObject({ expr: 'entity.ent-boss.attr.hp' })
+    expect(latestValues.current).toMatchObject({ expr: 'entity.enemy-boss.attr.vitality' })
   })
 
   it('uses dynamic text pickers for subtitle speaker and dialogue text', () => {

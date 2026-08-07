@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { VideoReplaceUpload, type VideoLibraryEntry } from '../assets/VideoAssetLibrary'
 import type { VideoAssetsController } from '../assets/useVideoAssets'
 import { MissingVideoNotice } from '../../runtime/play/MissingVideoNotice'
-import { VideoFullscreenDialog } from './VideoFullscreenDialog'
 
 interface GraphVideoPreviewPanelProps {
   timelineEntry: VideoLibraryEntry
@@ -12,19 +11,6 @@ interface GraphVideoPreviewPanelProps {
   uploading: VideoAssetsController['uploading']
   onReplace: VideoAssetsController['replaceResource']
   onDurationChange(ms: number): void
-  fullscreenRequest?: number
-  fullscreenOnly?: boolean
-}
-
-export interface GraphVideoPlaybackProps {
-  timelineEntry: VideoLibraryEntry
-  previewEntry?: VideoLibraryEntry
-  previewSrc?: string
-  maxMs: number
-  uploading: VideoAssetsController['uploading']
-  onReplace: VideoAssetsController['replaceResource']
-  onDurationChange(ms: number): void
-  onOpenFullscreen?: () => void
 }
 
 function fmtTime(ms: number): string {
@@ -35,27 +21,6 @@ function fmtTime(ms: number): string {
 }
 
 export function GraphVideoPreviewPanel({
-  timelineEntry,
-  previewEntry,
-  previewSrc,
-  maxMs,
-  uploading,
-  onReplace,
-  onDurationChange,
-  fullscreenRequest,
-  fullscreenOnly = false,
-}: GraphVideoPreviewPanelProps): JSX.Element {
-  const [fullscreenOpen, setFullscreenOpen] = useState(false)
-
-  useEffect(() => {
-    setFullscreenOpen(false)
-  }, [timelineEntry.id, previewSrc])
-
-  useEffect(() => {
-    if (fullscreenRequest !== undefined) setFullscreenOpen(true)
-  }, [fullscreenRequest])
-
-  const playbackProps: GraphVideoPlaybackProps = {
     timelineEntry,
     previewEntry,
     previewSrc,
@@ -63,39 +28,7 @@ export function GraphVideoPreviewPanel({
     uploading,
     onReplace,
     onDurationChange,
-  }
-
-  return (
-    <>
-      {fullscreenOnly ? null : (
-        <GraphVideoPlayback
-          {...playbackProps}
-          onOpenFullscreen={() => setFullscreenOpen(true)}
-        />
-      )}
-      <VideoFullscreenDialog
-        open={fullscreenOpen}
-        src={previewSrc}
-        label={timelineEntry.label}
-        durationMs={maxMs}
-        onClose={() => setFullscreenOpen(false)}
-      >
-        <GraphVideoPlayback {...playbackProps} />
-      </VideoFullscreenDialog>
-    </>
-  )
-}
-
-export function GraphVideoPlayback({
-  timelineEntry,
-  previewEntry,
-  previewSrc,
-  maxMs,
-  uploading,
-  onReplace,
-  onDurationChange,
-  onOpenFullscreen,
-}: GraphVideoPlaybackProps): JSX.Element {
+}: GraphVideoPreviewPanelProps): JSX.Element {
     const videoRef = useRef<HTMLVideoElement | null>(null)
     const isScrubbingRef = useRef(false)
     const playheadMsRef = useRef(0)
@@ -196,7 +129,6 @@ export function GraphVideoPlayback({
             muted
             playsInline
             loop={isLooping}
-            onClick={onOpenFullscreen}
             onLoadedMetadata={(event) => {
               setMissingPreviewId(null)
               const duration = event.currentTarget.duration

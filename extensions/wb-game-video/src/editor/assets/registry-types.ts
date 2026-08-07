@@ -47,19 +47,19 @@ export interface MediaAsset {
   status: MediaStatus
   /** 展示名（缺省由 productionType + id 兜底）。 */
   label?: string
-  /** Provider-backed manifests use this display-name alias. */
+  /** Remote-provider manifest compatibility; provider-backed records require this alias. */
   name?: string
   /** 生成用/记录用 prompt。 */
   prompt?: string
   /**
    * 自产资产：相对 `assets/` 根的磁盘路径（如 `media/a-xxx.mp4`）。就绪后必有。
-   * 播放 URL 由前端 resolveMediaSrc 通过宿主绑定的 media capability 派生，不直接暴露磁盘路径。
+   * 播放 URL 由前端 resolveMediaSrc → `/__gva__/media/<id>` 派生，不直接暴露磁盘路径。
    */
   file?: string
   /**
    * 稳定可播放访问地址（D8 目标态）：一旦上传能力就绪，成片以稳定 `url` 登记，
    * 播放优先用它（`resolveMediaSrc` 见 media.ts 优先序）；在此之前为空，回落 D9 兜底
-   * （zhandou basename / 宿主绑定的 media content 流）。graph/blueprint 只挂 id，URL 只住 manifest。
+   * （zhandou basename / 本地 `/__gva__/media/<id>` 流）。graph/blueprint 只挂 id，URL 只住 manifest。
    */
   url?: string
   /** 跨模块只读产物：对方文件的绝对磁盘路径（**不复制**进本 registry 的 media/）。 */
@@ -71,7 +71,7 @@ export interface MediaAsset {
   /** 产出来源：'wb-game-video' | 'wb-character' | '<scene-module>' 等。 */
   sourceModule?: string
   mime?: string
-  /** Provider-backed manifests use this MIME alias. */
+  /** Remote-provider manifest compatibility; provider-backed records require this alias. */
   mimeType?: string
   bytes?: number
   /** 视频时长（ms）。 */
@@ -105,37 +105,12 @@ export interface StyleAxes {
   filmLook?: string
 }
 
-/**
- * 资产浏览器的项目级目录元数据。
- *
- * 云端对象仍由 Kino/COS 持有；这里仅记录文件夹与资源在浏览器中的归位。
- * 一级类型根目录由前端固定规则派生，永远不作为 folder 记录写入。
- */
-export type AssetLibraryRootKind = 'image' | 'video' | 'control' | 'sound' | 'audio' | 'settings' | 'font'
-
-export interface AssetLibraryFolder {
-  id: string
-  parentId?: string
-  name: string
-  rootKind: AssetLibraryRootKind
-  createdAt: number
-  updatedAt: number
-}
-
-export interface AssetLibraryState {
-  version: 1
-  folders: AssetLibraryFolder[]
-  placements: Record<string, string>
-}
-
 /** manifest.json 顶层容器。 */
 export interface AssetManifest {
   version: 2
   assets: Array<MediaAsset | ForeignAssetRecord>
   /** 游戏级风格三轴默认（可选）；缺省=各轴不加。 */
   styleAxes?: StyleAxes
-  /** 资产浏览器的文件夹和资源归位元数据。 */
-  assetLibrary?: AssetLibraryState
   [key: string]: unknown
 }
 

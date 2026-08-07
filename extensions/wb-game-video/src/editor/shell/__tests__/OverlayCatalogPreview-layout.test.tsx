@@ -5,9 +5,7 @@ import {
   interfaceCanvasPreviewTimeMs,
   isOverlayBoxCentered,
   OVERLAY_GRID_STEP_VMIN,
-  overlayAiControlSide,
   overlayBoxCenterAlignment,
-  overlaySizeLabelSide,
   OverlayCatalogPreview,
   placeOverlayBox,
 } from '../OverlayCatalogPreview'
@@ -213,8 +211,7 @@ describe('OverlayCatalogPreview fixed canvas', () => {
     expect(placed.top).toBeCloseTo(expected.top)
   })
 
-  it('shows selected size on a visible side and only reveals disabled AI controls on hover', async () => {
-    const onKeyConflictIconClick = vi.fn()
+  it('reports a selected component that is centered on both axes', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.hasAttribute('data-overlay-fit-target')) {
         return {
@@ -258,8 +255,6 @@ describe('OverlayCatalogPreview fixed canvas', () => {
         selectedChildId="damage"
         onSelectChild={vi.fn()}
         onPatchChildLayout={vi.fn()}
-        keyConflictChildIds={new Set(['damage'])}
-        onKeyConflictIconClick={onKeyConflictIconClick}
       />,
     )
 
@@ -275,27 +270,8 @@ describe('OverlayCatalogPreview fixed canvas', () => {
       LOGICAL_CANVAS,
       { left: 0.2, top: 0.4, width: 0.2, height: 0.2 },
     )).toBe('y-center')
-    expect(overlaySizeLabelSide(
-      { left: 0.4, top: 0.8, width: 0.2, height: 0.2 },
-      { w: 200, h: 100 },
-    )).toBe('top')
-    expect(overlayAiControlSide(
-      { left: 0.4, top: 0.4, width: 0.2, height: 0.2 },
-      { w: 200, h: 100 },
-      'bottom',
-    )).toBe('right')
-    const size = await screen.findByText('40 × 20')
-    expect(size).toHaveAttribute('data-size-label-side', 'bottom')
-    fireEvent.click(screen.getByRole('button', { name: '按键重复' }))
-    expect(onKeyConflictIconClick).toHaveBeenCalledWith('damage')
-    const previewStyles = document.querySelector(
-      'style[data-reel-style="overlay-catalog-preview"]',
-    )?.textContent
-    expect(previewStyles).toContain(
-      '.ocp-key-warn-icon:hover:not(:disabled),\n.ocp-key-warn-icon:active:not(:disabled) {\n  background:#d8d8d8; color:#ff5b5b;',
-    )
-    expect(screen.queryByText(/轴居中/)).toBeNull()
-    expect(screen.queryByRole('button', { name: 'AI 补全参数' })).toBeNull()
+    const alignmentTag = await screen.findByText('XY 轴居中')
+    expect(getComputedStyle(alignmentTag).visibility).toBe('hidden')
 
     fireEvent.pointerMove(screen.getByRole('application', { name: '界面方案画布' }), {
       clientX: 100,
@@ -304,58 +280,7 @@ describe('OverlayCatalogPreview fixed canvas', () => {
 
     await waitFor(() => {
       expect(container.querySelector('[data-canvas-item="damage"]')).toHaveClass('is-hovered')
-      const ai = screen.getByRole('button', { name: 'AI 补全参数' })
-      expect(ai).toBeDisabled()
-      expect(ai).toHaveStyle({ cursor: 'not-allowed' })
-      expect(ai.querySelector('img')).toHaveAttribute('width', '18')
-      expect(ai.querySelector('img')).toHaveAttribute('height', '18')
-      expect(screen.getByTestId('ai-hover-zone-damage')).toHaveAttribute('data-ai-control-side', 'right')
+      expect(getComputedStyle(alignmentTag).visibility).toBe('visible')
     })
-
-    const aiZone = screen.getByTestId('ai-hover-zone-damage')
-    fireEvent.pointerEnter(aiZone)
-    fireEvent.pointerMove(screen.getByRole('application', { name: '界面方案画布' }), {
-      clientX: 199,
-      clientY: 99,
-    })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'AI 补全参数' })).toBeDisabled())
-    fireEvent.pointerLeave(screen.getByTestId('ai-hover-zone-damage'))
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'AI 补全参数' })).toBeNull())
-  })
-
-  it('keeps an unselected hover to a yellow frame without helper copy', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      if (this.hasAttribute('data-overlay-fit-target')) {
-        return {
-          left: 80, top: 40, right: 120, bottom: 60, width: 40, height: 20,
-          x: 80, y: 40, toJSON: () => ({}),
-        } as DOMRect
-      }
-      return {
-        left: 0, top: 0, right: 200, bottom: 100, width: 200, height: 100,
-        x: 0, y: 0, toJSON: () => ({}),
-      } as DOMRect
-    })
-    const { container } = render(
-      <OverlayCatalogPreview
-        overlay={{
-          id: 'scheme',
-          children: [{ id: 'damage', component: 'DamageFloatText', inputs: { value: -25 } }],
-        }}
-        entities={{}}
-        variables={{}}
-        onSelectChild={vi.fn()}
-        onPatchChildLayout={vi.fn()}
-      />,
-    )
-
-    fireEvent.pointerMove(screen.getByRole('application', { name: '界面方案画布' }), {
-      clientX: 100,
-      clientY: 50,
-    })
-    await waitFor(() => expect(container.querySelector('[data-canvas-item="damage"]')).toHaveClass('is-hovered'))
-    expect(container.querySelector('[data-canvas-item="damage"]')).toHaveClass('is-passive')
-    expect(screen.queryByText(/轴居中|×/)).toBeNull()
-    expect(screen.queryByText('DamageFloatText')).toBeNull()
   })
 })

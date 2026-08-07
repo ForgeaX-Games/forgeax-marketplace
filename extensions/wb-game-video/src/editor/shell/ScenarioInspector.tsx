@@ -243,7 +243,6 @@ export function ScenarioInspector({
   value,
   section,
   overlayUsage,
-  focusItemId,
   onChange,
   onRenameId = () => ({ ok: false, reason: 'not_found' }),
 }: {
@@ -251,8 +250,6 @@ export function ScenarioInspector({
   section?: ScenarioSection
   /** overlayId → 被多少节点挂载引用（资源池「已用/未用」角标）。 */
   overlayUsage?: Record<string, number>
-  /** 外侧规则树请求定位的同域条目。 */
-  focusItemId?: string | null
   onChange: (next: ScenarioMeta) => void
   onRenameId?: (rename: ScenarioIdRename) => { ok: true } | { ok: false; reason: 'empty_id' | 'duplicate_id' | 'not_found' }
 }): JSX.Element {
@@ -266,10 +263,6 @@ export function ScenarioInspector({
   const schemeIds = sortSchemeIds(Object.keys(allOverlays).filter((id) => !id.startsWith('node:')))
   // 标题输入本地缓存：onChange 自由输入，onBlur 时提交到 renameScheme 做重名校验。
   const [schemeLocalTitles, setSchemeLocalTitles] = useState<Record<string, string>>({})
-  useEffect(() => {
-    if (!focusItemId) return
-    document.getElementById(`rule-item:${focusItemId}`)?.scrollIntoView({ block: 'nearest' })
-  }, [focusItemId, section])
   const setOverlays = (overlays: Record<string, Overlay>) => onChange({ ...value, ui: { ...value.ui, overlays } })
   const patchOverlayChildInMeta = (
     overlayId: string,
@@ -450,7 +443,6 @@ export function ScenarioInspector({
           {Object.entries(variables).map(([key, v]) => (
             <div
               key={key}
-              id={`rule-item:${key}`}
               style={{
                 ...box,
                 display: 'grid',
@@ -521,19 +513,18 @@ export function ScenarioInspector({
             </button>
           </div>
           {Object.entries(entities).map(([key, ent]) => (
-            <div key={key} id={`rule-item:${key}`}>
-              <EntityRow
-                entKey={key}
-                ent={ent}
-                entities={entities}
-                onChange={(next) => setEntities({ ...entities, [key]: { ...next, id: key } })}
-                onRename={onRenameId}
-                onDelete={() => {
-                  const { [key]: _drop, ...rest } = entities
-                  setEntities(rest)
-                }}
-              />
-            </div>
+            <EntityRow
+              key={key}
+              entKey={key}
+              ent={ent}
+              entities={entities}
+              onChange={(next) => setEntities({ ...entities, [key]: { ...next, id: key } })}
+              onRename={onRenameId}
+              onDelete={() => {
+                const { [key]: _drop, ...rest } = entities
+                setEntities(rest)
+              }}
+            />
           ))}
         </>
       )}
@@ -564,21 +555,20 @@ export function ScenarioInspector({
           </div>
           {Object.keys(formulas).length === 0 ? <div style={{ opacity: 0.5 }}>暂无公式</div> : null}
           {Object.entries(formulas).map(([key, f]) => (
-            <div key={key} id={`rule-item:${key}`}>
-              <FormulaRow
-                formulaKey={key}
-                formula={f}
-                formulas={formulas}
-                entities={entities}
-                variables={variables}
-                onChange={(next) => setFormulas({ ...formulas, [key]: { ...next, id: key } })}
-                onRename={onRenameId}
-                onDelete={() => {
-                  const { [key]: _drop, ...rest } = formulas
-                  setFormulas(rest)
-                }}
-              />
-            </div>
+            <FormulaRow
+              key={key}
+              formulaKey={key}
+              formula={f}
+              formulas={formulas}
+              entities={entities}
+              variables={variables}
+              onChange={(next) => setFormulas({ ...formulas, [key]: { ...next, id: key } })}
+              onRename={onRenameId}
+              onDelete={() => {
+                const { [key]: _drop, ...rest } = formulas
+                setFormulas(rest)
+              }}
+            />
           ))}
         </>
       )}

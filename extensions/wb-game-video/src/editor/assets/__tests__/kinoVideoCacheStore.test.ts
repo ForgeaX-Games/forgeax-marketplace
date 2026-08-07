@@ -56,21 +56,6 @@ describe('kinoVideoCacheStore', () => {
     expect(useKinoVideoCache.getState().byGame['project-b']).toBeUndefined()
   })
 
-  it('excludes non-video records from an upstream video response', async () => {
-    const image = { ...resource('cover'), media_type: 'image' as const }
-    const list = vi.fn().mockResolvedValue({
-      items: [resource('clip'), image],
-      total: 2,
-      page: 1,
-      page_size: 100,
-    })
-
-    await useKinoVideoCache.getState().refresh('project-a', client(list))
-
-    expect(useKinoVideoCache.getState().byGame['project-a']?.items.map((item) => item.resource_id))
-      .toEqual(['clip'])
-  })
-
   it('updates a cached resource immediately', () => {
     useKinoVideoCache.getState().upsert('project-a', resource('one'))
     useKinoVideoCache.getState().remove('project-a', 'one')

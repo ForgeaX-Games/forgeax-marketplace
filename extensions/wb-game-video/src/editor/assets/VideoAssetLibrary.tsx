@@ -1,7 +1,6 @@
 import {
   useEffect,
   useId,
-  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -13,15 +12,6 @@ import { tf, useT } from '../../i18n'
 import type { MediaStatus } from './registry-types'
 import { findVideoReferences } from './video-references'
 import type { VideoAssetsController, VideoAssetListItem } from './useVideoAssets'
-import {
-  listVideoLibraryFolderNames,
-  normalizeVideoLibraryFolderName,
-  readVideoLibraryMetadata,
-  resolveVideoLibraryEntryTag,
-  writeVideoLibraryFolderName,
-  writeVideoLibraryEntryTag,
-  type VideoLibraryMetadata,
-} from './video-library-metadata'
 
 export interface VideoLibraryEntry {
   id: string
@@ -35,8 +25,6 @@ export interface VideoLibraryEntry {
   durMs?: number
   type?: string
   updatedAt?: number
-  /** Optional future server-provided tag; current Kino resources use local metadata instead. */
-  tag?: string
 }
 
 export type { VideoAssetsController }
@@ -186,102 +174,6 @@ function RenameDialog({
   )
 }
 
-function FolderDialog({
-  title,
-  label,
-  initialValue,
-  submitLabel,
-  existingFolders,
-  allowClear,
-  onConfirm,
-  onCancel,
-  busy,
-  error,
-  restoreFocus,
-}: {
-  title: string
-  label: string
-  initialValue: string
-  submitLabel: string
-  existingFolders?: readonly string[]
-  allowClear?: boolean
-  onConfirm: (name: string) => void
-  onCancel: () => void
-  busy: boolean
-  error: string | null
-  restoreFocus: HTMLElement | null
-}): JSX.Element {
-  const t = useT()
-  const titleId = useId()
-  const inputId = useId()
-  const [name, setName] = useState(initialValue)
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const normalizedName = name.trim()
-
-  useEffect(() => {
-    inputRef.current?.focus()
-    inputRef.current?.select()
-    return () => restoreFocus?.focus()
-  }, [restoreFocus])
-
-  return (
-    <div className="val-dialog-backdrop" role="presentation">
-      <form
-        className="val-dialog val-folder-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if ((allowClear || normalizedName.length > 0) && !busy) onConfirm(normalizedName)
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape' && !busy) {
-            event.preventDefault()
-            onCancel()
-          }
-        }}
-      >
-        <h2 id={titleId}>{title}</h2>
-        <label htmlFor={inputId}>{label}</label>
-        <input
-          ref={inputRef}
-          id={inputId}
-          value={name}
-          maxLength={32}
-          disabled={busy}
-          onChange={(event) => setName(event.target.value)}
-        />
-        {existingFolders && existingFolders.length > 0 ? (
-          <div className="val-folder-suggestions" aria-label="已有文件夹">
-            {existingFolders.map((folder) => (
-              <button key={folder} type="button" disabled={busy} onClick={() => setName(folder)}>
-                {folder}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        {allowClear ? (
-          <button type="button" className="val-folder-clear" disabled={busy} onClick={() => onConfirm('')}>
-            {t('videoAssets.folder.removeTag')}
-          </button>
-        ) : null}
-        {!allowClear && normalizedName.length === 0 ? (
-          <div className="val-dialog-error">{t('videoAssets.folder.emptyName')}</div>
-        ) : null}
-        {normalizedName.length > 32 ? <div className="val-dialog-error">{t('videoAssets.folder.nameTooLong')}</div> : null}
-        {error ? <div className="val-dialog-error" role="alert">{error}</div> : null}
-        <div className="val-dialog-actions">
-          <button type="button" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
-          <button type="submit" disabled={busy || (!allowClear && (normalizedName.length === 0 || normalizedName.length > 32))}>
-            {busy ? t('common.processing') : submitLabel}
-          </button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
 function mapApiItem(item: VideoAssetListItem, group: string): VideoLibraryEntry {
   return {
     id: item.id,
@@ -348,11 +240,7 @@ export interface VideoAssetLibraryProps {
   supplementalEntries?: VideoLibraryEntry[]
   selectedId: string
   boundId?: string
- onSelect: (id: string) => void
-  onOpenPreview?: (id: string) => void
-  onOpenGenerate?: () => void
-  /** Opens the host-owned external-video import dialog when that integration is available. */
-  onOpenExternalImport?: () => void
+  onSelect: (id: string) => void
   onDeleted?: (id: string) => void
   controller: VideoAssetsController
   listBodyRef?: Ref<HTMLDivElement>
@@ -373,11 +261,8 @@ export function VideoAssetLibrary({
   bundledEntries = [],
   supplementalEntries = [],
   selectedId,
- boundId,
- onSelect,
-  onOpenPreview,
-  onOpenGenerate,
-  onOpenExternalImport,
+  boundId,
+  onSelect,
   onDeleted,
   controller,
   listBodyRef,
@@ -396,30 +281,11 @@ export function VideoAssetLibrary({
   const [pendingBatchDelete, setPendingBatchDelete] = useState(false)
   const renameTriggerRef = useRef<HTMLElement | null>(null)
   const deleteTriggerRef = useRef<HTMLElement | null>(null)
-  const folderTriggerRef = useRef<HTMLElement | null>(null)
-  const tagTriggerRef = useRef<HTMLElement | null>(null)
-  const initialMetadata = useMemo(() => readVideoLibraryMetadata(gameId), [gameId])
-  const [metadata, setMetadata] = useState<VideoLibraryMetadata>(() => (
-    initialMetadata.status === 'ready'
-      ? { tagsByEntryId: initialMetadata.tagsByEntryId, folderNames: initialMetadata.folderNames }
-      : { tagsByEntryId: {}, folderNames: [] }
-  ))
-  const [metadataError, setMetadataError] = useState<string | null>(
-    initialMetadata.status === 'ready' ? null : '本地文件夹状态不可用，标签不会被持久化。',
-  )
-  const [activeFolder, setActiveFolder] = useState('all')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [pendingFolder, setPendingFolder] = useState(false)
-  const [pendingTag, setPendingTag] = useState<VideoLibraryEntry | null>(null)
-  const [metadataBusy, setMetadataBusy] = useState(false)
-  const [metadataOperationError, setMetadataOperationError] = useState<string | null>(null)
-  const folderContentId = useId()
   const batchUploading = batchUpload?.status === 'uploading'
   const actionsBusy = controller.uploading
     || controller.mutating
     || renameBusy
     || deleteBusy
-    || metadataBusy
     || batchUploading
 
   const apiEntries = controller.items.map((item) => mapApiItem(item, uploadGroup))
@@ -437,107 +303,15 @@ export function VideoAssetLibrary({
     return out
   })()
 
-  useEffect(() => {
-    const result = readVideoLibraryMetadata(gameId)
-    if (result.status === 'ready') {
-      setMetadata({ tagsByEntryId: result.tagsByEntryId, folderNames: result.folderNames })
-      setMetadataError(null)
-    } else {
-      setMetadata({ tagsByEntryId: {}, folderNames: [] })
-      setMetadataError('本地文件夹状态不可用，标签不会被持久化。')
-    }
-    setActiveFolder('all')
-  }, [gameId])
-
-  const folderNames = useMemo(
-    () => listVideoLibraryFolderNames(metadata),
-    [metadata],
-  )
-  const entryTag = (entry: VideoLibraryEntry): string | null => (
-    normalizeVideoLibraryFolderName(entry.tag)
-      ?? resolveVideoLibraryEntryTag(entry.id, metadata)
-  )
-  const filteredEntries = useMemo(() => {
-    const query = searchQuery.trim().toLocaleLowerCase()
-    return entries.filter((entry) => {
-      const tag = entryTag(entry)
-      if (activeFolder === 'untagged' && tag !== null) return false
-      if (activeFolder !== 'all' && activeFolder !== 'untagged' && tag !== activeFolder) return false
-      if (!query) return true
-      return `${entry.label} ${entry.group} ${tag ?? ''}`.toLocaleLowerCase().includes(query)
-    })
-  }, [activeFolder, entries, metadata, searchQuery])
-  const selectedLibraryEntry = entries.find((entry) => entry.id === selectedId)
-
   const showUploadStatus = batchUpload != null
     || controller.uploadProgress != null
     || controller.uploadError != null
-
-  const applyEntryTag = (entry: VideoLibraryEntry, rawTag: string): boolean => {
-    const tag = rawTag.trim()
-    setMetadataBusy(true)
-    setMetadataOperationError(null)
-    try {
-      const result = writeVideoLibraryEntryTag(gameId, entry.id, tag)
-      if (result.status !== 'written') {
-        setMetadataOperationError('文件夹状态无法保存，请检查浏览器本地存储权限。')
-        return false
-      }
-      setMetadata({ tagsByEntryId: result.tagsByEntryId, folderNames: result.folderNames })
-      return true
-    } catch (error) {
-      setMetadataOperationError(error instanceof Error ? error.message : '文件夹状态无法保存。')
-      return false
-    } finally {
-      setMetadataBusy(false)
-    }
-  }
-
-  const clearEntryTag = (entry: VideoLibraryEntry): void => {
-    const result = writeVideoLibraryEntryTag(gameId, entry.id, null)
-    if (result.status === 'written') {
-      setMetadata({ tagsByEntryId: result.tagsByEntryId, folderNames: result.folderNames })
-    }
-  }
-
-  const confirmTag = (tag: string): void => {
-    if (!pendingTag || !applyEntryTag(pendingTag, tag)) return
-    setPendingTag(null)
-  }
-
-  const confirmFolder = (name: string): void => {
-    const folderName = normalizeVideoLibraryFolderName(name)
-    if (!folderName) return
-    setMetadataBusy(true)
-    setMetadataOperationError(null)
-    try {
-      const result = writeVideoLibraryFolderName(gameId, folderName)
-      if (result.status !== 'written') {
-        setMetadataOperationError('文件夹状态无法保存，请检查浏览器本地存储权限。')
-        return
-      }
-      setMetadata({ tagsByEntryId: result.tagsByEntryId, folderNames: result.folderNames })
-    } catch (error) {
-      setMetadataOperationError(error instanceof Error ? error.message : '文件夹状态无法保存。')
-      return
-    } finally {
-      setMetadataBusy(false)
-    }
-    setActiveFolder(folderName)
-    setPendingFolder(false)
-  }
 
   const openRenameDialog = (entry: VideoLibraryEntry, trigger: HTMLElement) => {
     setOperationError(null)
     setRenameError(null)
     renameTriggerRef.current = trigger
     setPendingRename(entry)
-  }
-
-  const openTagDialog = (entry: VideoLibraryEntry, trigger: HTMLElement) => {
-    setMetadataOperationError(null)
-    tagTriggerRef.current = trigger
-    setPendingTag(entry)
   }
 
   const confirmRename = async (name: string) => {
@@ -574,7 +348,6 @@ export function VideoAssetLibrary({
     setOperationError(null)
     try {
       await controller.deleteResource(id)
-      clearEntryTag(pendingDelete)
       onDeleted?.(id)
       setPendingDelete(null)
     } catch (error) {
@@ -598,11 +371,7 @@ export function VideoAssetLibrary({
     setOperationError(null)
     const result = await controller.deleteResources(ids)
     if (result.failedId) setOperationError(`批量删除在“${result.failedId}”失败，已完成 ${result.completed}/${ids.length} 项。`)
-    else ids.forEach((id) => {
-      const entry = entries.find((candidate) => candidate.id === id)
-      if (entry) clearEntryTag(entry)
-      onDeleted?.(id)
-    })
+    else ids.forEach((id) => onDeleted?.(id))
     setBatchSelection(new Set())
     setDeleteBusy(false)
     setPendingBatchDelete(false)
@@ -680,37 +449,21 @@ export function VideoAssetLibrary({
       <div className="gc-list-head">
         <span className="gc-list-ico" aria-hidden>🎥</span>
         <span className="gc-list-title">{t('videoAssets.title')}</span>
-        <div className="val-library-sources" aria-label="视频素材入口">
-          <button
-            type="button"
-            className="val-source-action val-source-generate"
-            disabled={!onOpenGenerate}
-            onClick={onOpenGenerate}
-          >
-            <span aria-hidden>✨</span> {t('videoAssets.generate.entry')}
-          </button>
-          <label className="val-head-upload val-source-action" aria-disabled={actionsBusy}>
-            <span aria-hidden>＋</span> {t('videoAssets.localUpload')}
-            <input
-              className="val-head-upload-input"
-              type="file"
-              accept="video/mp4"
-              multiple
-              aria-label={t('videoAssets.upload')}
-              disabled={actionsBusy}
-              onChange={(event) => void onFileChange(event)}
-            />
-          </label>
-          <button
-            type="button"
-            className="val-source-action val-source-external"
-            disabled={!onOpenExternalImport}
-            title={onOpenExternalImport ? undefined : '外部视频导入即将接入'}
-            onClick={onOpenExternalImport}
-          >
-            <span aria-hidden>↗</span> 外部视频导入
-          </button>
-        </div>
+        <label
+          className="val-head-upload"
+          aria-disabled={actionsBusy}
+        >
+          <span aria-hidden>＋</span>
+          <input
+            className="val-head-upload-input"
+            type="file"
+            accept="video/mp4"
+            multiple
+            aria-label={t('videoAssets.upload')}
+            disabled={actionsBusy}
+            onChange={(e) => void onFileChange(e)}
+          />
+        </label>
         <button type="button" className={`val-head-select${selectionMode ? ' is-on' : ''}`} aria-label={selectionMode ? '退出多选' : '多选视频'} disabled={actionsBusy} onClick={() => { setSelectionMode((current) => !current); setBatchSelection(new Set()) }}>☑</button>
         {showUploadStatus ? (
           <div className="val-head-status" role="status" aria-live="polite">
@@ -766,193 +519,90 @@ export function VideoAssetLibrary({
         </div>
       ) : null}
 
-      <div className="val-library-layout">
-        <nav className="val-folder-rail" aria-label={t('videoAssets.folder.aria')} role="tablist" aria-orientation="vertical">
-          <div className="val-folder-rail-head">
-            <span>{t('videoAssets.folder.title')}</span>
-            <button
-              type="button"
-              className="val-folder-add"
-              aria-label={t('videoAssets.folder.create')}
-              disabled={actionsBusy}
-              onClick={(event) => {
-                folderTriggerRef.current = event.currentTarget
-                setPendingFolder(true)
-              }}
-            >
-              ＋
-            </button>
-          </div>
-          <button
-            type="button"
-            role="tab"
-            className={`val-folder-item${activeFolder === 'all' ? ' is-on' : ''}`}
-            aria-controls={folderContentId}
-            aria-selected={activeFolder === 'all'}
-            onClick={() => setActiveFolder('all')}
-          >
-            <span aria-hidden>▦</span>
-            <span>{t('videoAssets.folder.all')}</span>
-            <span className="val-folder-count">{entries.length}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`val-folder-item${activeFolder === 'untagged' ? ' is-on' : ''}`}
-            aria-controls={folderContentId}
-            aria-selected={activeFolder === 'untagged'}
-            onClick={() => setActiveFolder('untagged')}
-          >
-            <span aria-hidden>□</span>
-            <span>{t('videoAssets.folder.untagged')}</span>
-            <span className="val-folder-count">{entries.filter((entry) => entryTag(entry) === null).length}</span>
-          </button>
-          {folderNames.map((folder) => (
-            <button
-              key={folder}
-              type="button"
-              role="tab"
-              className={`val-folder-item${activeFolder === folder ? ' is-on' : ''}`}
-              aria-controls={folderContentId}
-              aria-selected={activeFolder === folder}
-              onClick={() => setActiveFolder(folder)}
-            >
-              <span aria-hidden>▰</span>
-              <span className="val-folder-label">{folder}</span>
-              <span className="val-folder-count">{entries.filter((entry) => entryTag(entry) === folder).length}</span>
-            </button>
-          ))}
-        </nav>
+      <div className="gc-list-body" ref={listBodyRef}>
+        {controller.loading && entries.length === 0 ? (
+          <div className="val-empty" role="status">{t('videoAssets.loading')}</div>
+        ) : null}
 
-        <section id={folderContentId} className="val-library-content" role="tabpanel" aria-label={t('videoAssets.folder.contentAria')}>
-          <div className="val-library-toolbar">
-            <div className="val-breadcrumb" aria-label={t('videoAssets.folder.breadcrumbAria')}>
-              <span>{t('videoAssets.folder.root')}</span>
-              <span aria-hidden>/</span>
-              <strong>{activeFolder === 'all' ? t('videoAssets.title') : activeFolder === 'untagged' ? t('videoAssets.folder.untagged') : activeFolder}</strong>
-            </div>
-            <input
-              className="val-library-search"
-              type="search"
-              value={searchQuery}
-              placeholder={t('videoAssets.folder.searchPlaceholder')}
-              aria-label={t('videoAssets.folder.searchAria')}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-            {selectedLibraryEntry ? (
+        {!controller.loading && entries.length === 0 ? (
+          <div className="val-empty">{t('videoAssets.empty')}</div>
+        ) : null}
+
+        {entries.map((entry) => {
+          const isSelected = entry.id === selectedId
+          const isBound = entry.id === boundId
+          const label = displayLabel(entry)
+          return (
+            <div key={entry.id} className={`val-row${isSelected ? ' is-on' : ''}${selectionMode ? ' is-selecting' : ''}`}>
               <button
                 type="button"
-                className="val-tag-action"
-                disabled={actionsBusy}
-                onClick={(event) => openTagDialog(selectedLibraryEntry, event.currentTarget)}
+                data-clip-id={entry.id}
+                className={`gc-row${isSelected ? ' is-on' : ''}`}
+                aria-label={label}
+                onClick={() => onSelect(entry.id)}
+                onDoubleClick={(event) => {
+                  if (entry.fromApi && !actionsBusy) {
+                    openRenameDialog(entry, event.currentTarget)
+                  }
+                }}
               >
-                {entryTag(selectedLibraryEntry) ? t('videoAssets.folder.changeTag') : t('videoAssets.folder.setTag')}
+                {isBound ? <span className="gc-row-mark" aria-hidden>✓</span> : null}
+                <span className="gc-row-label">{label}</span>
+                {entry.status && entry.status !== 'ready' ? (
+                  <span className={`gvv-row-status is-${entry.status}`}>
+                    {entry.status === 'generating'
+                      ? t('videoAssets.status.generating')
+                      : entry.status === 'failed'
+                        ? t('videoAssets.status.failed')
+                        : t('videoAssets.status.placeholder')}
+                  </span>
+                ) : null}
               </button>
-            ) : null}
-          </div>
-          {metadataError || metadataOperationError ? (
-            <div className="val-meta-warning" role="status">{metadataOperationError ?? metadataError}</div>
-          ) : null}
-          <div className="gc-list-body" ref={listBodyRef}>
-            {controller.loading && entries.length === 0 ? (
-              <div className="val-empty" role="status">{t('videoAssets.loading')}</div>
-            ) : null}
-
-            {!controller.loading && entries.length === 0 ? (
-              <div className="val-empty">{t('videoAssets.empty')}</div>
-            ) : null}
-
-            {!controller.loading && entries.length > 0 && filteredEntries.length === 0 ? (
-              <div className="val-empty">{t('videoAssets.folder.empty')}</div>
-            ) : null}
-
-            {filteredEntries.map((entry) => {
-              const isSelected = entry.id === selectedId
-              const isBound = entry.id === boundId
-              const label = displayLabel(entry)
-              const tag = entryTag(entry)
-              return (
-                <div key={entry.id} className={`val-row${isSelected ? ' is-on' : ''}${selectionMode ? ' is-selecting' : ''}`}>
+              {entry.fromApi && !selectionMode ? (
+                <>
                   <button
                     type="button"
-                    data-clip-id={entry.id}
-                    className={`gc-row${isSelected ? ' is-on' : ''}`}
-                    aria-label={label}
-                    onClick={() => { onSelect(entry.id); onOpenPreview?.(entry.id) }}
-                    onDoubleClick={(event) => {
-                      if (entry.fromApi && !actionsBusy) {
-                        openRenameDialog(entry, event.currentTarget)
-                      }
+                    className="val-row-action val-row-rename"
+                    aria-label={tf('videoAssets.renameAria', { name: entry.label })}
+                    disabled={actionsBusy}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openRenameDialog(entry, event.currentTarget)
                     }}
                   >
-                    {isBound ? <span className="gc-row-mark" aria-hidden>✓</span> : null}
-                    <span className="val-card-thumb" aria-hidden>
-                      {entry.url ? <video src={entry.url} muted playsInline preload="metadata" /> : <span>▶</span>}
-                    </span>
-                    <span className="val-card-copy">
-                      <span className="gc-row-label" title={label}>{label}</span>
-                      <span className="val-card-meta" aria-hidden>
-                        {tag ? <span className="val-card-tag">{tag}</span> : <span>{t('videoAssets.folder.untagged')}</span>}
-                        {entry.type ? <span>{entry.type}</span> : null}
-                      </span>
-                    </span>
-                    {entry.status && entry.status !== 'ready' ? (
-                      <span className={`gvv-row-status is-${entry.status}`}>
-                        {entry.status === 'generating'
-                          ? t('videoAssets.status.generating')
-                          : entry.status === 'failed'
-                            ? t('videoAssets.status.failed')
-                            : t('videoAssets.status.placeholder')}
-                      </span>
-                    ) : null}
+                    {t('videoAssets.rename')}
                   </button>
-                  {entry.fromApi && !selectionMode ? (
-                    <>
-                      <button
-                        type="button"
-                        className="val-row-action val-row-rename"
-                        aria-label={tf('videoAssets.renameAria', { name: entry.label })}
-                        disabled={actionsBusy}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          openRenameDialog(entry, event.currentTarget)
-                        }}
-                      >
-                        {t('videoAssets.rename')}
-                      </button>
-                      <button
-                        type="button"
-                        className="val-row-action val-row-delete"
-                        aria-label={tf('videoAssets.deleteAria', { name: entry.label })}
-                        disabled={actionsBusy}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          openDeleteDialog(entry, event.currentTarget)
-                        }}
-                      >
-                        {t('videoAssets.delete')}
-                      </button>
-                    </>
-                  ) : null}
-                  {selectionMode && entry.fromApi ? <label className="val-row-select"><input type="checkbox" checked={batchSelection.has(entry.id)} disabled={actionsBusy} onChange={() => toggleBatchSelection(entry.id)} aria-label={`选择 ${entry.label}`} /></label> : null}
-                </div>
-              )
-            })}
-          </div>
-
-          {controller.hasMore ? (
-            <button
-              type="button"
-              className="val-load-more"
-              aria-label={t('videoAssets.loadMore')}
-              disabled={controller.loading}
-              onClick={() => void controller.loadMore()}
-            >
-              {controller.loading ? t('videoAssets.loadingMore') : t('videoAssets.loadMore')}
-            </button>
-          ) : null}
-        </section>
+                  <button
+                    type="button"
+                    className="val-row-action val-row-delete"
+                    aria-label={tf('videoAssets.deleteAria', { name: entry.label })}
+                    disabled={actionsBusy}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      openDeleteDialog(entry, event.currentTarget)
+                    }}
+                  >
+                    {t('videoAssets.delete')}
+                  </button>
+                </>
+              ) : null}
+              {selectionMode && entry.fromApi ? <label className="val-row-select"><input type="checkbox" checked={batchSelection.has(entry.id)} disabled={actionsBusy} onChange={() => toggleBatchSelection(entry.id)} aria-label={`选择 ${entry.label}`} /></label> : null}
+            </div>
+          )
+        })}
       </div>
+
+      {controller.hasMore ? (
+        <button
+          type="button"
+          className="val-load-more"
+          aria-label={t('videoAssets.loadMore')}
+          disabled={controller.loading}
+          onClick={() => void controller.loadMore()}
+        >
+          {controller.loading ? t('videoAssets.loadingMore') : t('videoAssets.loadMore')}
+        </button>
+      ) : null}
 
       {pendingDelete ? (
         <ConfirmDialog
@@ -975,34 +625,6 @@ export function VideoAssetLibrary({
           busy={renameBusy}
           error={renameError}
           restoreFocus={renameTriggerRef.current}
-        />
-      ) : null}
-      {pendingFolder ? (
-        <FolderDialog
-          title={t('videoAssets.folder.createTitle')}
-          label={t('videoAssets.folder.name')}
-          initialValue=""
-          submitLabel={t('videoAssets.folder.create')}
-          onConfirm={confirmFolder}
-          onCancel={() => setPendingFolder(false)}
-          busy={metadataBusy}
-          error={metadataOperationError}
-          restoreFocus={folderTriggerRef.current}
-        />
-      ) : null}
-      {pendingTag ? (
-        <FolderDialog
-          title={tf('videoAssets.folder.setTagTitle', { name: pendingTag.label })}
-          label={t('videoAssets.folder.tagName')}
-          initialValue={entryTag(pendingTag) ?? ''}
-          submitLabel={t('common.save')}
-          existingFolders={folderNames}
-          allowClear
-          onConfirm={confirmTag}
-          onCancel={() => setPendingTag(null)}
-          busy={metadataBusy}
-          error={metadataOperationError}
-          restoreFocus={tagTriggerRef.current}
         />
       ) : null}
     </aside>

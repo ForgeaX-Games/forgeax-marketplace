@@ -1,89 +1,42 @@
 /**
  * OverlaySchemeEditor —— 单个「界面方案」（overlay）的展示 + 编辑。
- * 中栏 = 标题 + 画布 + 控件库/图层 tabs；右栏 = 选中组件的参数与事件。
- * 基础界面保留只读居中预览，但不显示设计框、不允许结构编辑，也不展示控件库。
+ * 右栏两列：左 = 标题 + 画布（拖拽定位、选中）+ 组件清单（仅显示 + 选中联动，不含参数配置）；
+ * 右 = 组件库（拖 chip 落地）。基础界面保留只读居中预览，但不显示设计框且不允许拖动。
  * 组件增删改经回调交给持有 scenario.ui.overlays 的上层（GraphConfigView）。
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { JSX } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, JSX } from 'react'
 import type { Entity, Layout, Overlay, OverlayReaction, Variable } from '../../runtime/schema/graph-schema'
-import { OverlayCatalogPreview } from './OverlayCatalogPreview'
+import {
+  OverlayCatalogPreview,
+} from './OverlayCatalogPreview'
 import { ComponentLibrary } from './ComponentLibrary'
 import { componentTypeLabel } from './editors'
+import { aggregateOverlayEvents } from '../../runtime/schema/overlay-events'
+import { getComponentManifest } from '../../runtime/registry/component-registry'
 import type { Formula } from '../persist/formula-authoring'
+import { authoringOptionLabel } from '../authoring-option-label'
 import {
+  ComponentFormFields,
   type EntityAttributeCreateHandler,
   type EntityCreateHandler,
   type FormulaCreateHandler,
   type VariableCreateHandler,
 } from './component-form-fields'
-import { ComponentPropertyPanel } from './ComponentPropertyPanel'
-import {
-  collectCurrentOverlayKeyBindingSites,
-  findKeyBindingConflicts,
-  keyConflictChildIds,
-} from './keyBindingConflicts'
-import { injectStyleOnce } from '../../styles/injectStyle'
+import { ComponentEventsEditor } from './ComponentEventsEditor'
 
-const WORKSPACE_CSS = `
-.ose-root {
-  display:flex; overflow:hidden; flex:1; min-width:0; min-height:0; height:100%;
-  font-size:12px; background:#2c2c2c; color:#d2d2d2;
+const del: CSSProperties = { color: '#ff6b6b', marginLeft: 'auto' }
+/** 组件行的删除 × ——小而醒目。 */
+const rowDelBtn: CSSProperties = {
+  flex: 'none',
+  color: '#ff6b6b',
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: 16,
+  lineHeight: 1,
+  padding: '0 4px',
 }
-.ose-workspace {
-  position:relative; display:flex; flex:1; flex-direction:column; min-width:0; min-height:0;
-  overflow:hidden; background:#2c2c2c; container-type:inline-size;
-}
-.ose-stage {
-  position:relative; flex:none; min-height:180px;
-  max-height:min(calc(100% - 190px), 56.25cqw);
-  overflow:hidden; background:#000;
-}
-.ose-bottom {
-  display:flex; flex:1 1 0; flex-direction:column; min-height:184px; overflow:hidden;
-  background:#2c2c2c;
-}
-.ose-stage-resizer {
-  position:relative; z-index:90; flex:0 0 5px; width:100%; padding:0; border:0;
-  border-top:1px solid rgba(255,255,255,.2); border-bottom:1px solid #1f1f1f;
-  background:#2c2c2c; cursor:ns-resize; touch-action:none;
-}
-.ose-stage-resizer::after {
-  content:''; position:absolute; left:50%; top:1px; width:28px; height:1px;
-  transform:translateX(-50%); background:rgba(255,255,255,.28);
-}
-.ose-stage-resizer:hover,.ose-stage-resizer:focus-visible { background:#3a3a3a; outline:none; }
-.ose-stage-resizer:hover::after,.ose-stage-resizer:focus-visible::after { background:#ff9c2a; }
-.ose-stage-resizer:active { cursor:ns-resize; }
-.ose-tabs {
-  display:flex; flex:none; align-items:stretch; gap:18px; height:42px; padding:0 14px;
-  border-bottom:1px solid rgba(255,255,255,.2);
-}
-.ose-tabs button {
-  position:relative; border:0; padding:0 2px; background:transparent; color:#a4a4a4;
-  font:inherit; font-size:14px; cursor:pointer;
-}
-.ose-tabs button:hover { background:transparent; }
-.ose-tabs button[aria-selected="true"] { color:#ff9c2a; }
-.ose-panel { flex:1; min-height:0; overflow:hidden; }
-.ose-layers { height:100%; padding:12px 14px 16px; box-sizing:border-box; overflow:auto; }
-.ose-layer {
-  display:flex; width:100%; gap:8px; align-items:center; box-sizing:border-box; min-height:32px;
-  padding:5px 8px; border:1px solid transparent; border-bottom-color:rgba(255,255,255,.1);
-  border-radius:0; cursor:pointer;
-  text-align:left; background:transparent; color:#bbb;
-}
-.ose-layer:hover { background:#363636; }
-.ose-layer[aria-pressed="true"] { border-color:#ff9c2a; background:rgba(255,156,42,.1); color:#f1f1f1; }
-.ose-layer-dot { flex:none; width:7px; height:7px; border-radius:50%; background:#686868; }
-.ose-layer[aria-pressed="true"] .ose-layer-dot { background:#ff9c2a; box-shadow:0 0 0 3px rgba(255,156,42,.16); }
-.ose-layer-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.ose-layer-id { opacity:.42; margin-left:6px; }
-.ose-root > [data-testid="component-property-panel"] {
-  flex:0 1 480px !important; width:39.3% !important; max-width:480px !important; min-width:280px !important;
-  border-left-color:#1f1f1f !important; background:#2c2c2c !important;
-}
-`
 
 function topmostChildId(children: Overlay['children']): string {
   return children.reduce<{ id: string; zIndex: number; index: number } | null>((top, child, index) => {
@@ -93,20 +46,6 @@ function topmostChildId(children: Overlay['children']): string {
     }
     return top
   }, null)?.id ?? ''
-}
-
-const MIN_STAGE_PERCENT = 30
-const MIN_BOTTOM_HEIGHT_PX = 190
-
-/** 舞台拉伸上限：既保留底部工作区，又不超过当前可用宽度对应的完整 16:9 高度。 */
-export function overlayStageMaxPercent(
-  workspace: Pick<DOMRect, 'width' | 'height'> | undefined,
-): number {
-  if (!workspace || workspace.width <= 0 || workspace.height <= 0) return 100
-  const aspectHeight = workspace.width * 9 / 16
-  const bottomLimitedHeight = Math.max(0, workspace.height - MIN_BOTTOM_HEIGHT_PX)
-  const maxHeight = Math.min(aspectHeight, bottomLimitedHeight)
-  return Math.max(MIN_STAGE_PERCENT, Math.min(100, maxHeight / workspace.height * 100))
 }
 
 /**
@@ -211,7 +150,11 @@ export function OverlaySchemeEditor({
   variables,
   formulas,
   itemIds = [],
+  usageCount,
   locked = false,
+  duplicateOf = [],
+  onRename,
+  onRemove,
   onAddChild,
   onRemoveChild,
   onPatchChild,
@@ -221,38 +164,35 @@ export function OverlaySchemeEditor({
   onCreateVariable,
   onCreateFormula,
 }: OverlaySchemeEditorProps): JSX.Element {
-  injectStyleOnce('overlay-scheme-workspace', WORKSPACE_CSS)
   const [selectedChildId, setSelectedChildId] = useState('')
-  const workspaceRef = useRef<HTMLElement>(null)
-  const resizingStageRef = useRef(false)
-  const [stagePercent, setStagePercent] = useState(56)
-  const [bottomTab, setBottomTab] = useState<'library' | 'layers'>(
-    locked || overlay.children.length > 0 ? 'layers' : 'library',
-  )
-  const [keyConflictFocusRequest, setKeyConflictFocusRequest] = useState<
-    { childId: string; nonce: number } | undefined
-  >()
   // 交互热区重叠冲突（DOM 实测，来自画布回调）——组件清单里对应行标红。
   const [warnIds, setWarnIds] = useState<Set<string>>(() => new Set())
-  const overlays = useMemo(
-    () => overlayCatalog ?? { [overlayId]: overlay },
-    [overlay, overlayCatalog, overlayId],
-  )
-  const keyConflicts = useMemo(
-    () => findKeyBindingConflicts(
-      collectCurrentOverlayKeyBindingSites(overlay, overlays),
-    ),
-    [overlay, overlays],
-  )
-  const keyConflictIds = useMemo(
-    () => keyConflictChildIds(overlayId, keyConflicts),
-    [keyConflicts, overlayId],
-  )
-  const selectedChild = overlay.children.find((child) => child.id === selectedChildId)
-
+  // 标题输入本地状态：onChange 自由输入，onBlur 时提交到父组件做重名校验。
+  const [localTitle, setLocalTitle] = useState(overlay.title ?? '')
+  const overlayTitleRef = useRef(overlay.title)
   useEffect(() => {
-    setBottomTab(locked || overlay.children.length > 0 ? 'layers' : 'library')
-  }, [locked, overlayId])
+    if (overlay.title !== overlayTitleRef.current) {
+      overlayTitleRef.current = overlay.title
+      setLocalTitle(overlay.title ?? '')
+    }
+  }, [overlay.title])
+  const selectedChild = overlay.children.find((child) => child.id === selectedChildId)
+  const selectedEvents = selectedChild
+    ? aggregateOverlayEvents(
+        { id: overlay.id, children: [selectedChild] },
+        getComponentManifest,
+        { mountId: overlay.id },
+      )
+    : []
+  const overlays = overlayCatalog ?? { [overlay.id]: overlay }
+  const spawnOptions = Object.values(overlays).flatMap((definition) =>
+    definition.children.map((child) => {
+      const value = `${definition.id}/${child.id}`
+      const name = [definition.title?.trim(), componentTypeLabel(child.component)]
+        .filter((part, index, all) => part && all.indexOf(part) === index)
+        .join(' · ')
+      return { value, label: authoringOptionLabel(name, value) }
+    }))
 
   // 进入方案时默认选中视觉最上层组件（zIndex 高者优先，同层级后渲染者优先）；
   // 双字幕等完全重叠时，默认选择因此与眼前实际可见的那一层一致。
@@ -284,179 +224,207 @@ export function OverlaySchemeEditor({
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedChildId, onRemoveChild, locked])
 
-  return (
-    <div className="ose-root">
-      <main
-        ref={workspaceRef}
-        data-testid="overlay-scheme-workspace"
-        className="ose-workspace"
-      >
-        <div
-          className="ose-stage"
-          data-testid="overlay-stage-region"
-          style={{ height: `${stagePercent}%` }}
-        >
-          <OverlayCatalogPreview
-            overlay={overlay}
-            entities={entities}
-            variables={variables}
-            selectedChildId={selectedChildId}
-            onSelectChild={setSelectedChildId}
-            onAddChild={
-              locked
-                ? undefined
-                : (presetId, place) => {
-                    const id = onAddChild(presetId, place)
-                    if (typeof id === 'string') setSelectedChildId(id)
-                    return id
-                  }
-            }
-            onPatchChildLayout={locked
-              ? undefined
-              : (childId, patch) => onPatchChild(childId, { layout: patch })}
-            onWarnChange={locked ? undefined : setWarnIds}
-            keyConflictChildIds={keyConflictIds}
-            onKeyConflictIconClick={(childId) => {
-              setSelectedChildId(childId)
-              setKeyConflictFocusRequest((current) => ({
-                childId,
-                nonce: (current?.nonce ?? 0) + 1,
-              }))
-            }}
-            showDesignCanvas={!locked}
-            centerChildren={locked}
-            showTimeScrubber={false}
-            showSelectionFrames={locked}
-            fillAvailableHeight
-          />
-        </div>
+  const confirmRemove = (): void => {
+    const label = overlay.title?.trim() || overlayId
+    const usageWarning = usageCount > 0
+      ? `当前仍被 ${usageCount} 个节点引用，删除后这些挂载将无法解析界面。`
+      : ''
+    if (
+      typeof window !== 'undefined'
+      && typeof window.confirm === 'function'
+      && !window.confirm(`确定删除自定义界面方案「${label}」？${usageWarning}`)
+    ) return
+    onRemove()
+  }
 
-        <button
-          type="button"
-          className="ose-stage-resizer"
-          role="separator"
-          aria-label="调整画布区域高度"
-          aria-orientation="horizontal"
-          aria-valuemin={MIN_STAGE_PERCENT}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(stagePercent)}
-          onPointerDown={(event) => {
-            resizingStageRef.current = true
-            event.currentTarget.setPointerCapture(event.pointerId)
-          }}
-          onPointerMove={(event) => {
-            if (!resizingStageRef.current) return
-            const rect = workspaceRef.current?.getBoundingClientRect()
-            if (!rect || rect.height <= 0) return
-            const next = ((event.clientY - rect.top) / rect.height) * 100
-            setStagePercent(Math.max(
-              MIN_STAGE_PERCENT,
-              Math.min(overlayStageMaxPercent(rect), next),
-            ))
-          }}
-          onPointerUp={(event) => {
-            resizingStageRef.current = false
-            event.currentTarget.releasePointerCapture(event.pointerId)
-          }}
-          onPointerCancel={() => {
-            resizingStageRef.current = false
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
-            event.preventDefault()
-            const max = overlayStageMaxPercent(workspaceRef.current?.getBoundingClientRect())
-            setStagePercent((current) => Math.max(
-              MIN_STAGE_PERCENT,
-              Math.min(max, current + (event.key === 'ArrowDown' ? 2 : -2)),
-            ))
-          }}
+  return (
+    <div style={{ display: 'flex', gap: 12, padding: 12, overflow: 'auto', fontSize: 12, flex: 1, minWidth: 0 }}>
+      {/* ── 左列：标题 + 画布 + 组件清单 ── */}
+      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+          <input
+            value={localTitle}
+            placeholder={overlayId}
+            onChange={(e) => setLocalTitle(e.target.value)}
+            onBlur={(e) => {
+              if (localTitle !== (overlay.title ?? '')) {
+                onRename(localTitle)
+                // 重置本地草稿（重名校验失败时 overlay.title 未变，避免下次 blur 再次弹窗）
+                setLocalTitle(overlay.title ?? '')
+                // 延迟聚焦：避免同步 blur→focus 触发重复 blur 事件
+                setTimeout(() => {
+                  ;(e.target as HTMLInputElement).focus()
+                }, 0)
+              }
+            }}
+            style={{ flex: 1, fontWeight: 600 }}
+          />
+          <UsageBadge count={usageCount} />
+          <DuplicateBadge others={duplicateOf} />
+          {!locked && <button style={del} onClick={confirmRemove}>删除</button>}
+        </div>
+        {duplicateOf.length > 0 && (
+          <div
+            style={{
+              margin: '0 0 8px',
+              padding: '6px 8px',
+              borderRadius: 6,
+              fontSize: 11,
+              lineHeight: 1.5,
+              background: 'rgba(200,149,90,0.12)',
+              border: '1px solid rgba(200,149,90,0.4)',
+              color: '#e0a35f',
+            }}
+          >
+            ⧉ 本方案与 {duplicateOf.join('、')} 内容重复（组件 + 位置 + 参数一致），可考虑删除其一。
+          </div>
+        )}
+
+        <OverlayCatalogPreview
+          overlay={overlay}
+          entities={entities}
+          variables={variables}
+          selectedChildId={selectedChildId}
+          onSelectChild={setSelectedChildId}
+          onAddChild={
+            locked
+              ? undefined
+              : (presetId, place) => {
+                  const id = onAddChild(presetId, place)
+                  if (typeof id === 'string') setSelectedChildId(id)
+                  return id
+                }
+          }
+          onPatchChildLayout={locked
+            ? undefined
+            : (childId, patch) => onPatchChild(childId, { layout: patch })}
+          onWarnChange={locked ? undefined : setWarnIds}
+          showDesignCanvas={!locked}
+          centerChildren={locked}
+          showTimeScrubber={false}
+          showSelectionFrames={locked}
         />
 
-        <section className="ose-bottom" data-testid="overlay-library-region">
-          <div role="tablist" aria-label="界面方案工具" className="ose-tabs">
-            {!locked ? (
-              <button
-                type="button"
-                role="tab"
-                aria-selected={bottomTab === 'library'}
-                onClick={() => setBottomTab('library')}
-              >
-                控件库
-              </button>
-            ) : null}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={bottomTab === 'layers'}
-              onClick={() => setBottomTab('layers')}
-            >
-              图层
-            </button>
-          </div>
-          {bottomTab === 'library' && !locked ? (
-            <div role="tabpanel" aria-label="控件库" className="ose-panel">
-              <ComponentLibrary />
-            </div>
-          ) : (
-            <div role="tabpanel" aria-label="图层" data-testid="overlay-layers" className="ose-panel ose-layers">
-              {overlay.children.length === 0 ? (
-                <div style={{ fontSize: 11, opacity: 0.5 }}>从控件库拖组件到画布添加。</div>
-              ) : null}
-              {overlay.children.map((child) => {
-                const selected = child.id === selectedChildId
-                const hotspotWarn = warnIds.has(child.id)
-                const keyWarn = keyConflictIds.has(child.id)
-                const warn = hotspotWarn || keyWarn
-                const warnTitle = keyWarn
-                  ? '交互按键与其它界面或组件重复'
-                  : '与另一交互组件热区重叠，运行时点击会互相遮挡'
-                return (
-                  <button
-                    type="button"
-                    key={child.id}
-                    onClick={() => setSelectedChildId(child.id)}
-                    title={child.id}
-                    aria-pressed={selected}
-                    className="ose-layer"
-                    style={warn ? { borderColor: '#ff6b6b', background: 'rgba(255,107,107,.08)' } : undefined}
-                  >
-                    <span className="ose-layer-dot" />
-                    <span className="ose-layer-label">
-                      {componentTypeLabel(child.component)}
-                      <span className="ose-layer-id">· {child.id}</span>
-                    </span>
-                    {warn ? (
-                      <span style={{ flex: 'none', color: '#ff6b6b', fontSize: 11 }} title={warnTitle}>⚠</span>
-                    ) : null}
-                  </button>
-                )
-              })}
-            </div>
+        {/* 组件清单：仅显示画布里有哪些组件 + 与画布双向选中，不含参数配置。 */}
+        <div style={{ marginTop: 10, borderTop: '1px solid #333', paddingTop: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6 }}>组件（{overlay.children.length}）</div>
+          {overlay.children.length === 0 && (
+            <div style={{ fontSize: 11, opacity: 0.5 }}>从右侧组件库拖组件到画布添加。</div>
           )}
-        </section>
-      </main>
-      <ComponentPropertyPanel
-        overlay={overlay}
-        overlays={overlayCatalog}
-        selectedChild={selectedChild}
-        entities={entities}
-        variables={variables}
-        formulas={formulas}
-        itemIds={itemIds}
-        locked={locked}
-        onRemoveChild={(childId) => {
-          onRemoveChild(childId)
-          if (selectedChildId === childId) setSelectedChildId('')
-        }}
-        onPatchChild={onPatchChild}
-        onReactionsChange={onReactionsChange}
-        onCreateEntityAttribute={onCreateEntityAttribute}
-        onCreateEntity={onCreateEntity}
-        onCreateVariable={onCreateVariable}
-        onCreateFormula={onCreateFormula}
-        keyConflicts={keyConflicts}
-        keyConflictFocusRequest={keyConflictFocusRequest}
-      />
+          {overlay.children.map((child) => {
+            const selected = child.id === selectedChildId
+            const warn = warnIds.has(child.id)
+            return (
+              <div
+                key={child.id}
+                onPointerDown={() => setSelectedChildId(child.id)}
+                title={child.id}
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  padding: '5px 8px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  border: `1px solid ${warn ? '#ff6b6b' : selected ? 'var(--gc-accent, #c8955a)' : 'transparent'}`,
+                  background: selected ? 'rgba(200,149,90,0.12)' : warn ? 'rgba(255,107,107,0.08)' : 'transparent',
+                }}
+              >
+                {/* 前方 active 标识：选中=实心强调点，未选中=暗点。 */}
+                <span
+                  style={{
+                    flex: 'none',
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: selected ? 'var(--gc-accent, #c8955a)' : 'rgba(255,255,255,0.2)',
+                    boxShadow: selected ? '0 0 0 3px rgba(200,149,90,0.25)' : 'none',
+                  }}
+                />
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: selected ? '#f6f1e9' : '#c9c0b2' }}>
+                  {componentTypeLabel(child.component)}
+                  <span style={{ opacity: 0.45, marginLeft: 6 }}>· {child.id}</span>
+                </span>
+                {warn && <span style={{ flex: 'none', color: '#ff6b6b', fontSize: 11 }} title="与另一交互组件热区重叠，运行时点击会互相遮挡">⚠</span>}
+                {!locked && (
+                  <button
+                    style={rowDelBtn}
+                    title="移除组件"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onRemoveChild(child.id)
+                      if (selected) setSelectedChildId('')
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {selectedChild ? (
+          <div data-testid="overlay-selected-child-editor" style={{ marginTop: 10, borderTop: '1px solid #333', paddingTop: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6 }}>
+              参数 · {componentTypeLabel(selectedChild.component)}
+            </div>
+            {locked ? (
+              <div style={{ fontSize: 10, opacity: 0.55, marginBottom: 6 }}>
+                基础界面不能增删或拖动组件；可以修改参数和事件动作。
+              </div>
+            ) : null}
+            <ComponentFormFields
+              componentId={selectedChild.component}
+              values={selectedChild.inputs ?? {}}
+              pickers={{ entities, variables, formulas, itemIds }}
+              density="compact"
+              labelWidth="7em"
+              onChange={(inputs) => onPatchChild(selectedChild.id, { inputs })}
+              onCreateEntityAttribute={onCreateEntityAttribute}
+              onCreateEntity={onCreateEntity}
+              onCreateVariable={onCreateVariable}
+              onCreateFormula={onCreateFormula}
+            />
+            {selectedEvents.length > 0 ? (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 600, margin: '10px 0 6px' }}>事件</div>
+                {locked ? (
+                  <div style={{ fontSize: 10, opacity: 0.55, marginBottom: 6 }}>
+                    这里配置的事件动作会被所有使用该基础界面的挂载继承。
+                  </div>
+                ) : null}
+                <fieldset
+                  data-testid="overlay-event-editor"
+                  style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+                >
+                  <ComponentEventsEditor
+                    mode="catalog"
+                    events={selectedEvents}
+                    catalogReactions={overlay.reactions}
+                    spawnOptions={spawnOptions}
+                    overlays={overlays}
+                    pickers={{ entities, variables, formulas, itemIds }}
+                    onCreateEntityAttribute={onCreateEntityAttribute}
+                    onCreateEntity={onCreateEntity}
+                    onCreateVariable={onCreateVariable}
+                    onCreateFormula={onCreateFormula}
+                    onCatalogChange={onReactionsChange}
+                  />
+                </fieldset>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      {/* ── 右列：组件库（锁定态不显，改提示） ── */}
+      {locked ? (
+        <div style={{ minWidth: 150, width: 168, fontSize: 11, opacity: 0.5, lineHeight: 1.5 }}>
+          基础界面固定为单组件，预览中居中显示且不可拖动。
+        </div>
+      ) : (
+        <ComponentLibrary />
+      )}
     </div>
   )
 }
