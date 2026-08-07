@@ -11,7 +11,7 @@ import {
   type CanvasBox,
   type CanvasInteractionItem,
 } from '../OverlayCanvasInteraction'
-import { overlayFitTargets } from '../overlay-fit-targets'
+import { overlayContentAndHitTargets, overlayFitTargets } from '../overlay-fit-targets'
 
 afterEach(cleanup)
 
@@ -236,6 +236,21 @@ describe('overlayFitTargets', () => {
     `
 
     expect(overlayFitTargets(root).map((element) => element.textContent)).toEqual(['+50'])
+  })
+
+  it('includes interaction hot areas with explicit visual targets for library previews', () => {
+    const root = document.createElement('div')
+    root.innerHTML = `
+      <div data-overlay-fit-target>控件内容</div>
+      <div data-overlay-hit-target>
+        <button type="button"><span>交互热区</span></button>
+      </div>
+    `
+
+    const targets = overlayContentAndHitTargets(root)
+    expect(targets.some((element) => element.hasAttribute('data-overlay-fit-target'))).toBe(true)
+    expect(targets.some((element) => element.hasAttribute('data-overlay-hit-target'))).toBe(true)
+    expect(targets.some((element) => element.tagName === 'BUTTON')).toBe(true)
   })
 
   it('falls back to leaf content and outer interactive hit areas', () => {

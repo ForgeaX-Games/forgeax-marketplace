@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createKinoVideoClient,
   KinoClientError,
+  requestKinoEnvelope,
   type KinoResourceDTO,
 } from '../kino-api'
 
@@ -27,7 +28,7 @@ describe('createKinoVideoClient', () => {
       upload_mimes: ['video/mp4', 'image/png', 'audio/mpeg'] as const,
     }
     const fetchImpl = makeFetch((input, init) => {
-      expect(String(input)).toBe('/api/v1/kino/capabilities')
+      expect(String(input)).toBe('/media/capabilities')
       expect(init?.credentials).toBe('include')
       return new Response(JSON.stringify(envelope(capabilities)), {
         status: 200,
@@ -58,7 +59,7 @@ describe('createKinoVideoClient', () => {
   it('list encodes query params including optional type', async () => {
     const fetchImpl = makeFetch((input) => {
       expect(String(input)).toBe(
-        '/api/v1/kino/resources?game_id=game%2Fslug&media_type=video&page=2&page_size=10&type=UPLOAD',
+        '/media/resources?game_id=game%2Fslug&media_type=video&page=2&page_size=10&type=UPLOAD',
       )
       return new Response(JSON.stringify(envelope({ items: [], total: 0, page: 2, page_size: 10 })), {
         status: 200,
@@ -93,7 +94,7 @@ describe('createKinoVideoClient', () => {
 
   it('prepareUpload posts game_id, file_name, mime_type, bytes, optional extension', async () => {
     const fetchImpl = makeFetch((input, init) => {
-      expect(String(input)).toBe('/api/v1/kino/image-assets/upload')
+      expect(String(input)).toBe('/media/image-assets/upload')
       expect(init?.method).toBe('POST')
       expect(JSON.parse(String(init?.body))).toEqual({
         game_id: 'demo',
@@ -139,7 +140,7 @@ describe('createKinoVideoClient', () => {
           upload_token: 'token',
         })), { status: 200, headers: { 'content-type': 'application/json' } })
       }
-      expect(String(input)).toBe('/api/v1/kino/resources?game_id=demo&media_type=audio&page=1&page_size=20')
+      expect(String(input)).toBe('/media/resources?game_id=demo&media_type=audio&page=1&page_size=20')
       return new Response(JSON.stringify(envelope({ items: [], total: 0, page: 1, page_size: 20 })), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -221,11 +222,11 @@ describe('createKinoVideoClient', () => {
     })
     await client.delete('res/1', 'demo slug')
     expect(client.playbackUrl('res/1', 'demo slug')).toBe(
-      '/api/v1/kino/resources/res%2F1/content?game_id=demo%20slug',
+      '/media/resources/res%2F1/content?game_id=demo%20slug',
     )
-    expect(calls[0]).toBe('/api/v1/kino/resources/res%2F1?game_id=demo%20slug')
-    expect(calls[1]).toBe('/api/v1/kino/resources/res%2F1?game_id=demo%20slug')
-    expect(calls[2]).toBe('/api/v1/kino/resources/res%2F1?game_id=demo%20slug')
+    expect(calls[0]).toBe('/media/resources/res%2F1?game_id=demo%20slug')
+    expect(calls[1]).toBe('/media/resources/res%2F1?game_id=demo%20slug')
+    expect(calls[2]).toBe('/media/resources/res%2F1?game_id=demo%20slug')
   })
 
   it('create and batch post JSON bodies', async () => {
@@ -347,6 +348,42 @@ describe('createKinoVideoClient', () => {
     await expect(network.list({ game_id: 'demo' })).rejects.toMatchObject({
       status: 502,
       errorCode: 'network_error',
+    })
+  })
+
+  it('shares envelope transport for private same-origin routes', async () => {
+    const fetchImpl = makeFetch((input, init) => {
+      expect(String(input)).toBe('/api/private/v1/kino/generations?gameSlug=demo%20game')
+      expect(init).toMatchObject({
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      expect(JSON.parse(String(init?.body))).toEqual({ prompt: 'rain' })
+      return new Response(JSON.stringify(envelope({ generation_id: 'gen-1' })), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    })
+
+    await expect(requestKinoEnvelope<{ generation_id: string }>(
+      '/api/private/v1/kino/generations',
+      {
+        method: 'POST',
+        query: { gameSlug: 'demo game' },
+        json: { prompt: 'rain' },
+        fetch: fetchImpl,
+      },
+    )).resolves.toEqual({ generation_id: 'gen-1' })
+  })
+
+  it('preserves a non-JSON 404 so callers can distinguish an unavailable route', async () => {
+    await expect(requestKinoEnvelope('/api/private/v1/kino/generations', {
+      fetch: makeFetch(() => new Response('Not Found', { status: 404 })),
+    })).rejects.toMatchObject({
+      name: 'KinoClientError',
+      status: 404,
+      errorCode: 'not_found',
     })
   })
 })

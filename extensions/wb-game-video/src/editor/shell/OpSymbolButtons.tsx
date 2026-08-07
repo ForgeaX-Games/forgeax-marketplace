@@ -62,10 +62,61 @@ const EFFECT_OP_SYMBOLS: { key: string; symbol: string; title: string }[] = [
 export function EffectOpButtons({
   op,
   onChange,
+  variant = 'symbol',
 }: {
   op: EffectDisplayOp
   onChange: (next: EffectDisplayOp) => void
+  variant?: 'symbol' | 'pill'
 }): JSX.Element {
+  if (variant === 'pill') {
+    return (
+      <div
+        className="gc-effect-op-segmented"
+        style={{
+          display: 'flex',
+          width: '100%',
+          minWidth: 0,
+          overflow: 'hidden',
+          border: '1px solid rgba(255,255,255,.16)',
+          borderRadius: 8,
+          background: '#191919',
+        }}
+        role="radiogroup"
+        aria-label="运算"
+      >
+        {EFFECT_OP_SYMBOLS.map((option) => {
+          const active = option.key === op
+          const pillSymbol = option.key === 'sub' ? '-' : option.symbol
+          return (
+            <button
+              key={option.key}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              title={option.title}
+              className={active ? 'gc-effect-op-pill is-on' : 'gc-effect-op-pill'}
+              style={{
+                flex: '1 1 0',
+                minHeight: 28,
+                minWidth: 0,
+                padding: '3px 4px',
+                border: 0,
+                borderRight: option === EFFECT_OP_SYMBOLS.at(-1) ? 0 : '1px solid rgba(255,255,255,.16)',
+                borderRadius: 0,
+                background: active ? '#ff9c2a' : 'transparent',
+                color: active ? '#171717' : 'rgba(255,255,255,.72)',
+                fontSize: 14,
+                cursor: 'pointer',
+              }}
+              onClick={() => onChange(option.key as EffectDisplayOp)}
+            >
+              {pillSymbol}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
   return (
     <OpSymbolButtons
       ariaLabel="运算"

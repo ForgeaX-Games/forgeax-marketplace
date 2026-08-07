@@ -20,6 +20,7 @@ const bpDoc = (id: string, refId?: string): BlueprintDoc => ({ id, title: id, en
 beforeEach(() => {
   vi.mocked(saveProject).mockClear()
   useGraphScenario.setState({
+    game: 'test-game',
     blueprints: { a: bpDoc('a', 'b'), b: bpDoc('b', 'a') },
     mainBlueprintId: 'a',
     activeBlueprintId: 'a',
@@ -50,5 +51,13 @@ describe('save() blocks on cross-blueprint reference cycle', () => {
     } as any)
     useGraphScenario.getState().save()
     expect(saveProject).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks save before the Host handshake binds a game identity', () => {
+    useGraphScenario.setState({ game: '' })
+
+    expect(useGraphScenario.getState().save()).toBe(-1)
+    expect(saveProject).not.toHaveBeenCalled()
+    expect(useGraphScenario.getState().savedTip).toContain('Host handshake')
   })
 })
