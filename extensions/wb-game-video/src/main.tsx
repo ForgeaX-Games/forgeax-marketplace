@@ -4,9 +4,7 @@ import './bootMigrateLegacyKeys'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { GraphApp } from './GraphApp'
-import { GraphPlayer } from './editor/shell/GraphPlayer'
-import { GraphStudio } from './editor/shell/GraphStudio'
-import { NODIA_DEMO } from './editor/demo/demo'
+import { PlayerBootstrap } from './editor/bootstrap/PlayerBootstrap'
 import { initLocaleSync } from './i18n'
 import './styles/global.css'
 
@@ -197,21 +195,16 @@ class TopErrorBoundary extends Component<
   }
 }
 
-// 表面路由（新引擎 graph-only）：
-//   默认                         → GraphApp（蓝图/视频/界面/规则/试玩 五 tab，新引擎唯一外壳）
-//   ?surface=graphstudio        → GraphStudio（单独看蓝图编辑 + 试玩）
-//   ?surface=graphplay          → GraphPlayer（纯试玩）
-// graph* 表面不套 StrictMode，避免 start() 被双调用重复推进。
+// 表面路由：
+//   默认             → GraphApp（正式编辑器）
+//   ?surface=player  → 先握手并读取宿主绑定 package，再运行真实游戏文档
+// player 不套 StrictMode，避免 start() 被双调用重复推进。
 const _surface = new URLSearchParams(location.search).get('surface')
-if (_surface === 'graphstudio' || _surface === 'graphplay') {
+if (_surface === 'player') {
   createRoot(root).render(
     <TopErrorBoundary>
       <div style={{ position: 'fixed', inset: 0 }}>
-        {_surface === 'graphplay' ? (
-          <GraphPlayer scenario={NODIA_DEMO} />
-        ) : (
-          <GraphStudio scenario={NODIA_DEMO} />
-        )}
+        <PlayerBootstrap />
       </div>
     </TopErrorBoundary>,
   )

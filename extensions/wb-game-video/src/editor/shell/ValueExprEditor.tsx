@@ -5,7 +5,7 @@
  * 再回这里选它、填空。
  */
 import { useState, type CSSProperties } from 'react'
-import type { Entity, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
+import { isNumericScalar, type Entity, type NumOrExpr, type Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { CascadingPicker, type CascadingPickerOption } from './CascadingPicker'
 import {
@@ -75,6 +75,8 @@ export interface ValueExprVariableCreateConfig {
 export interface ValueExprFormulaCreateConfig {
   onCreate: (request: FormulaCreateRequest) => void
 }
+
+export type ValueExprSourceKind = 'entity' | 'var' | 'formula' | 'const'
 
 function choiceKey(kind: 'entity' | 'var' | 'formula', ...parts: string[]): string {
   return `${kind}:${parts.map(encodeURIComponent).join(':')}`
@@ -148,6 +150,11 @@ export function ValueExprEditor({
   fieldLabels,
   fieldLabelWidth,
   stackControls = false,
+  assignmentLayout = false,
+  propertyLayout = false,
+  allowedSources = ['entity', 'var', 'formula', 'const'],
+  pickerAriaLabel = '数值内容',
+  numericOnly = false,
 }: {
   value: ValueExprInput | undefined
   storedPick?: unknown
@@ -182,6 +189,21 @@ export function ValueExprEditor({
   fieldLabelWidth?: CSSProperties['width']
   /** 窄栏紧凑表单中让内容选择器与值输入上下排列。 */
   stackControls?: boolean
+  /**
+   * 右栏「赋值」布局：运算符与来源级联同一行；
+   * 常量/公式才显示第二行，实体属性与变量不显示第二行。
+   */
+  assignmentLayout?: boolean
+  /**
+   * 右栏参数区级联布局：与效果区「效果主体」一致（label | 级联）；
+   * 公式预览/参数行沿用 property 样式。
+   */
+  propertyLayout?: boolean
+  /** 限制级联菜单的数据来源；创建入口随对应来源保留。 */
+  allowedSources?: readonly ValueExprSourceKind[]
+  pickerAriaLabel?: string
+  /** 排除已知字符串属性和变量；无初值的旧数据仍作为未知数值保留。 */
+  numericOnly?: boolean
 }): JSX.Element {
   const [createDrafts, setCreateDrafts] = useState<Record<string, CreateDraft>>({})
   const [variableCreateDrafts, setVariableCreateDrafts] = useState<Record<string, VariableCreateDraft>>({})
@@ -228,6 +250,13 @@ export function ValueExprEditor({
     const entityName = entityDisplayName(source, entity.id)
     const choices: ContentChoice[] = listAttrOptions(source)
       .filter((attr) => !allowAttribute || allowAttribute(source, attr.id))
+      .filter((attr) => {
+        if (!numericOnly) return true
+        const current = source?.attrs?.[attr.id]
+        return current === undefined
+          ? source?.attrMeta?.[attr.id] !== undefined
+          : isNumericScalar(current)
+      })
       .sort((a, b) => {
         const rankA = attrRank.get(a.id) ?? Number.MAX_SAFE_INTEGER
         const rankB = attrRank.get(b.id) ?? Number.MAX_SAFE_INTEGER
@@ -257,7 +286,10 @@ export function ValueExprEditor({
     request: FormulaCreateRequest
     selectedValue: NumOrExpr
   }>()
-  const variableChoices: ContentChoice[] = listVarOptions(variables).map((variable) => ({
+  const variableChoices: ContentChoice[] = listVarOptions(
+    variables,
+    numericOnly ? { numbersOnly: true } : undefined,
+  ).map((variable) => ({
     key: choiceKey('var', variable.id),
     kind: 'var',
     label: variableDisplayName(variables?.[variable.id], variable.id),
@@ -353,33 +385,12 @@ export function ValueExprEditor({
         label: `配置「${draft.entityName.trim() || createEntityTemplate.name}」实体`,
         children: [
           {
-            key: `detail:${actionKey}:entity-id`,
-            label: '实体 ID',
-            editor: {
-              value: draft.entityId,
-              ariaLabel: '新实体 ID',
-              invalid: !entityId || catalogIdOccupied(entities, entityId),
-              onChange: (value: string) => patchDraft(draftKey, defaults, { entityId: value }),
-            },
-          },
-          {
             key: `detail:${actionKey}:entity-name`,
             label: '实体显示名',
             editor: {
               value: draft.entityName,
               ariaLabel: '新实体显示名',
               onChange: (value: string) => patchDraft(draftKey, defaults, { entityName: value }),
-            },
-          },
-          {
-            key: `detail:${actionKey}:id`,
-            label: '属性 ID',
-            editor: {
-              value: draft.attrId,
-              ariaLabel: '新属性 ID',
-              pattern: '[A-Za-z_][A-Za-z0-9_-]*',
-              invalid: !ATTR_ID_PATTERN.test(attrId),
-              onChange: (value: string) => patchDraft(draftKey, defaults, { attrId: value }),
             },
           },
           {
@@ -477,17 +488,6 @@ export function ValueExprEditor({
               label: `配置「${draft.attrLabel.trim() || request.attrId}」属性`,
               children: [
                 {
-                  key: `detail:${actionKey}:id`,
-                  label: '属性 ID',
-                  editor: {
-                    value: draft.attrId,
-                    ariaLabel: `${entry.entityName}的新属性 ID`,
-                    pattern: '[A-Za-z_][A-Za-z0-9_-]*',
-                    invalid: !ATTR_ID_PATTERN.test(attrId) || attributeIdOccupied(entry.source, attrId),
-                    onChange: (value: string) => patchDraft(draftKey, defaults, { attrId: value }),
-                  },
-                },
-                {
                   key: `detail:${actionKey}:label`,
                   label: '显示名',
                   editor: {
@@ -522,7 +522,7 @@ export function ValueExprEditor({
       ],
     }))
   const pickerOptions: CascadingPickerOption[] = [
-    ...(entityBranches.length > 0 || createEntityAction ? [{
+    ...(allowedSources.includes('entity') && (entityBranches.length > 0 || createEntityAction) ? [{
       key: 'entity-values',
       label: '实体属性',
       children: [
@@ -530,7 +530,7 @@ export function ValueExprEditor({
         ...(createEntityAction ? [createEntityAction] : []),
       ],
     }] : []),
-    ...(variableChoices.length > 0 || createVariable ? [{
+    ...(allowedSources.includes('var') && (variableChoices.length > 0 || createVariable) ? [{
       key: 'variable-values',
       label: '变量',
       children: [
@@ -575,16 +575,6 @@ export function ValueExprEditor({
             label: `配置「${draft.name.trim() || variableId || defaultId}」变量`,
             children: [
               {
-                key: `detail:${actionKey}:id`,
-                label: '变量 ID',
-                editor: {
-                  value: draft.variableId,
-                  ariaLabel: '新变量 ID',
-                  invalid: !variableId || catalogIdOccupied(variables, variableId),
-                  onChange: (value: string) => patch({ variableId: value }),
-                },
-              },
-              {
                 key: `detail:${actionKey}:name`,
                 label: '显示名',
                 editor: {
@@ -618,7 +608,7 @@ export function ValueExprEditor({
         })() : []),
       ],
     }] : []),
-    ...(formulaChoices.length > 0 || createFormula ? [{
+    ...(allowedSources.includes('formula') && (formulaChoices.length > 0 || createFormula) ? [{
       key: 'formula-values',
       label: '公式',
       children: [
@@ -670,21 +660,11 @@ export function ValueExprEditor({
             label: `配置「${draft.name.trim() || formulaId || defaultId}」公式`,
             children: [
               {
-                key: `detail:${actionKey}:id`,
-                label: '公式 ID',
-                editor: {
-                  value: draft.formulaId,
-                  ariaLabel: '新公式 ID',
-                  invalid: !formulaId || catalogIdOccupied(formulas, formulaId),
-                  onChange: (value: string) => patch({ formulaId: value }),
-                },
-              },
-              {
                 key: `detail:${actionKey}:name`,
-                label: '显示名',
+                label: '公式名',
                 editor: {
                   value: draft.name,
-                  ariaLabel: '新公式显示名',
+                  ariaLabel: '新公式名',
                   onChange: (value: string) => patch({ name: value }),
                 },
               },
@@ -694,12 +674,18 @@ export function ValueExprEditor({
                 editor: {
                   value: draft.content,
                   ariaLabel: '新公式内容',
-                  placeholder: '如：max(?攻击力 * ?倍率 - ?防御力, 0)',
+                  placeholder: '公式详情，或发送给agent的公式描述\n如：max(?攻击力 * ?倍率 - ?防御力, 0)',
                   multiline: true,
                   invalid: !formulaAst,
                   error: formulaError,
                   onChange: (value: string) => patch({ content: value }),
                 },
+              },
+              {
+                key: `${actionKey}:agent`,
+                label: '发送agent',
+                presentation: 'agent' as const,
+                disabled: true,
               },
               {
                 key: actionKey,
@@ -715,7 +701,7 @@ export function ValueExprEditor({
         })() : []),
       ],
     }] : []),
-    { key: 'const', label: '常量', value: 'const' },
+    ...(allowedSources.includes('const') ? [{ key: 'const', label: '常量', value: 'const' }] : []),
     ...(onClear ? [{ key: 'empty', label: emptyLabel, value: 'empty' }] : []),
   ]
   const selectedLabel = selectedKey === 'empty'
@@ -792,34 +778,51 @@ export function ValueExprEditor({
   const resolvedFieldLabel = fieldLabelWidth === undefined
     ? fieldLabel
     : { ...fieldLabel, width: fieldLabelWidth }
-  const sourceControl = (
+  const picker = (
+    <CascadingPicker
+      ariaLabel={fieldLabels?.source ?? pickerAriaLabel}
+      value={selectedKey}
+      displayValue={selectedLabel}
+      placeholder="常量：10 · 状态：entity.hero.attr.hp / var.qi · 公式：伤害公式"
+      options={pickerOptions}
+      onSelect={selectContent}
+      narrowSafe={stackControls || assignmentLayout || propertyLayout}
+    />
+  )
+  const sourceControl = assignmentLayout && effectOp ? (
+    <div
+      data-value-expression-source
+      className="editor-property-assign-row"
+      style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', minWidth: 0 }}
+    >
+      <EffectOpButtons op={effectOp.op} onChange={effectOp.onOpChange} variant="symbol" />
+      <div style={{ flex: 1, minWidth: 0 }}>{picker}</div>
+    </div>
+  ) : (
     <>
       {fieldLabels ? <span style={resolvedFieldLabel}>{fieldLabels.source}</span> : null}
       {effectOp && <EffectOpButtons op={effectOp.op} onChange={effectOp.onOpChange} />}
-      <CascadingPicker
-        ariaLabel={fieldLabels?.source ?? '数值内容'}
-        value={selectedKey}
-        displayValue={selectedLabel}
-        placeholder="常量：10 · 状态：entity.hero.attr.hp / var.qi · 公式：伤害公式"
-        options={pickerOptions}
-        onSelect={selectContent}
-        narrowSafe={stackControls}
-      />
+      {picker}
     </>
   )
 
   return (
     <div
-      style={formulaMode || fieldLabels || stackControls
+      data-value-expression
+      data-assignment-layout={assignmentLayout ? 'true' : undefined}
+      data-property-layout={propertyLayout ? 'true' : undefined}
+      style={formulaMode || fieldLabels || stackControls || assignmentLayout || propertyLayout
         ? { ...row, flexDirection: 'column', alignItems: 'stretch' }
         : row}
       title={hintText}
     >
-      {fieldLabels ? <div style={row}>{sourceControl}</div> : sourceControl}
+      {fieldLabels && !assignmentLayout
+        ? <div data-value-expression-source style={row}>{sourceControl}</div>
+        : sourceControl}
 
       {!empty && pick.mode === 'const' && (
-        fieldLabels ? (
-          <div style={row}>
+        fieldLabels && !assignmentLayout ? (
+          <div data-value-expression-value style={row}>
             <span style={resolvedFieldLabel}>{fieldLabels.value}</span>
             <LooseNumberInput
               value={pick.const}
@@ -835,20 +838,22 @@ export function ValueExprEditor({
             onChange={(n) => onChange(n)}
             aria-label="常量数值"
             placeholder="输入常量"
-            style={stackControls
+            style={stackControls || assignmentLayout || propertyLayout
               ? { flex: 'none', width: '100%', minWidth: 0 }
               : { flex: '0 1 32%', minWidth: 96 }}
           />
         )
       )}
 
-      {!empty && pick.mode === 'pick' && !directBinding && (
+      {!empty && pick.mode === 'pick' && !directBinding && !assignmentLayout && (
         <input
           aria-label="历史表达式"
           value={legacyPickLabel}
           readOnly
           title="历史复杂表达式保持原值；从上方选择其它内容后才会替换。"
-          style={{ flex: '0 1 40%', minWidth: 120, boxSizing: 'border-box' }}
+          style={stackControls || propertyLayout
+            ? { flex: 'none', width: '100%', minWidth: 0, boxSizing: 'border-box' }
+            : { flex: '0 1 40%', minWidth: 120, boxSizing: 'border-box' }}
         />
       )}
 
@@ -861,6 +866,7 @@ export function ValueExprEditor({
           variables={variables}
           onChange={onChange}
           showFormulaPicker={false}
+          propertyLayout={assignmentLayout || propertyLayout}
           createAttribute={createAttribute}
           createEntity={createEntity}
           createVariable={createVariable}

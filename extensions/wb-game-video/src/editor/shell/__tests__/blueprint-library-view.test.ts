@@ -1,11 +1,8 @@
 /**
- * BlueprintLibraryView 的纯派生逻辑测试。不 mount 组件本体（它内嵌 GraphStudio →
- * @xyflow 画布/视频，happy-dom 下无法干净渲染）——只测 `blueprintListItems` 这个
- * 导出的纯函数（左列表排序/入口标签），加一个「模块可正常 import、导出是函数」的
- * 轻量冒烟。真正的交互覆盖交给 Task 7 的 store action 测试。
+ * 蓝图列表纯派生逻辑测试。不 mount 侧栏/画布——只测 `blueprintListItems`。
  */
 import { describe, it, expect } from 'vitest'
-import { blueprintListItems, BlueprintLibraryView } from '../BlueprintLibraryView'
+import { blueprintListItems } from '../blueprintNav'
 import type { BlueprintDoc } from '../../../runtime/schema/graph-schema'
 
 function doc(id: string, title: string): BlueprintDoc {
@@ -20,7 +17,7 @@ describe('blueprintListItems', () => {
       'bp-a': doc('bp-a', 'A 蓝图'),
     }
     const items = blueprintListItems(blueprints, 'bp-main')
-    expect(items[0]).toEqual({ id: 'bp-main', label: '主蓝图 · 入口' })
+    expect(items[0]).toEqual({ id: 'bp-main', label: '主蓝图', isEntry: true })
   })
 
   it('sorts sub-blueprints by title after the main one', () => {
@@ -32,7 +29,6 @@ describe('blueprintListItems', () => {
     }
     const items = blueprintListItems(blueprints, 'bp-main')
     expect(items.map((i) => i.id)).toEqual(['bp-main', 'bp-a', 'bp-m', 'bp-z'])
-    // 子蓝图不带「入口」后缀。
     expect(items.slice(1).every((i) => !i.label.includes('入口'))).toBe(true)
   })
 
@@ -47,11 +43,5 @@ describe('blueprintListItems', () => {
 
   it('handles an empty blueprint map', () => {
     expect(blueprintListItems({}, 'bp-main')).toEqual([])
-  })
-})
-
-describe('BlueprintLibraryView module smoke', () => {
-  it('exports a function component (no render — pulls in GraphStudio/@xyflow)', () => {
-    expect(typeof BlueprintLibraryView).toBe('function')
   })
 })

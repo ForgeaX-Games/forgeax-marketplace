@@ -1,4 +1,4 @@
-const REFRESHABLE_MEDIA_PATH = /\/(?:__gva__\/media\/[^/]+|api\/v1\/kino\/resources\/[^/]+\/content)$/
+const REFRESHABLE_MEDIA_PATH = /\/(?:__gva__\/media\/[^/]+|games\/[^/]+\/media\/[^/]+|extension\/runtime\/media\/resources\/[^/]+\/content|api\/v1\/kino\/resources\/[^/]+\/content)$/
 
 /** Re-enter a stable media gateway without mutating direct provider-signed URLs. */
 export function refreshPlaybackUrl(src: string, revision: number): string | null {

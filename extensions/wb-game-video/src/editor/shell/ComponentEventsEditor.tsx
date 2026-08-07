@@ -50,6 +50,8 @@ export function ComponentEventsEditor({
   pickers,
   labelWidth,
   allowSpawn = true,
+  showEventTitle = true,
+  propertyLayout = false,
   onCreateEntityAttribute,
   onCreateEntity,
   onCreateVariable,
@@ -68,6 +70,8 @@ export function ComponentEventsEditor({
   pickers?: EditorPickerCtx
   labelWidth?: CSSProperties['width']
   allowSpawn?: boolean
+  showEventTitle?: boolean
+  propertyLayout?: boolean
   onCreateEntityAttribute?: EntityAttributeCreateHandler
   onCreateEntity?: EntityCreateHandler
   onCreateVariable?: VariableCreateHandler
@@ -99,11 +103,7 @@ export function ComponentEventsEditor({
         const edited = mode === 'catalog' ? inherited : appended
         return (
           <section key={key} data-event-key={key} style={{ border: '1px solid #2c2c2c', borderRadius: 6, padding: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 600 }}>{labelOf(event)}</div>
-            <div style={{ fontSize: 10, opacity: 0.55, margin: '2px 0 6px', fontFamily: 'ui-monospace, monospace' }}>{key}</div>
-            {mode === 'catalog' ? (
-              <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>目录动作（所有挂载继承）</div>
-            ) : null}
+            {showEventTitle ? <div style={{ fontSize: 12, fontWeight: 600 }}>{labelOf(event)}</div> : null}
             <NodeActionsEditor
               actions={edited as NodeAction[]}
               edgeOptions={edgeOptions}
@@ -113,6 +113,7 @@ export function ComponentEventsEditor({
               labelWidth={labelWidth}
               allowAdvance={mode === 'mount'}
               allowSpawn={allowSpawn}
+              propertyLayout={propertyLayout}
               onCreateEntityAttribute={onCreateEntityAttribute}
               onCreateEntity={onCreateEntity}
               onCreateVariable={onCreateVariable}

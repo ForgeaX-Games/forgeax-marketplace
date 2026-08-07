@@ -4,8 +4,8 @@ vi.mock('../persist-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../persist-client')>()
   return {
     ...actual,
-    loadStore: vi.fn(async () => ({ project: null, draft: null, versions: [] })),
-    saveProject: vi.fn(async () => ({ ok: true })),
+    loadStore: vi.fn(async () => ({ project: null, revision: null, versions: [] })),
+    saveProject: vi.fn(async () => ({ ok: true, revision: 'rev' })),
     currentVersion: vi.fn(async () => ({ tag: null, commitHash: null, dirty: false })),
     listVersions: vi.fn(async () => []),
   }
@@ -20,7 +20,7 @@ vi.mock('../../../runtime/component-host', async (importOriginal) => {
 })
 
 import { useGraphScenario } from '../graphScenarioStore'
-import { saveProject } from '../persist-client'
+import { loadStore, saveProject } from '../persist-client'
 import type { GraphLibraryDocument } from '../../../runtime/schema/graph-schema'
 
 const demoNode = {
@@ -72,27 +72,23 @@ beforeEach(() => {
   } as never)
 })
 
-describe('store boot without persisted content', () => {
-  it('starts an empty library instead of seeding the demo', async () => {
-    useGraphScenario.getState().ensureBoot('brand-new-game', demo)
+describe('store boot failures', () => {
+  it('rejects a package load without saving an empty library, then permits a retry', async () => {
+    const loadError = new Error('temporary package read failure')
+    vi.mocked(loadStore)
+      .mockRejectedValueOnce(loadError)
+      .mockResolvedValueOnce({ project: demo, revision: 'rev-demo', versions: [] })
 
-    await vi.waitFor(() => {
-      expect(useGraphScenario.getState().loadEpoch).toBe(1)
-    })
+    await expect(useGraphScenario.getState().ensureBoot('brand-new-game', demo)).rejects.toThrow(loadError)
+
+    expect(saveProject).not.toHaveBeenCalled()
+    expect(useGraphScenario.getState().booted).toBe(false)
+
+    await expect(useGraphScenario.getState().ensureBoot('brand-new-game', demo)).resolves.toBeUndefined()
 
     const state = useGraphScenario.getState()
-    expect(state.graph.nodes).toEqual([])
-    expect(state.blueprints[state.mainBlueprintId]?.graph.nodes).toEqual([])
-    expect(state.meta.entities).toEqual({})
-    expect(state.meta.variables).toEqual({})
-    expect(state.mainBlueprintId).not.toBe('demo-main')
-    expect(saveProject).toHaveBeenCalledWith(
-      expect.objectContaining({
-        graph: { nodes: [], edges: [] },
-        entities: {},
-        variables: {},
-      }),
-      'brand-new-game',
-    )
+    expect(state.booted).toBe(true)
+    expect(state.graph.nodes.map((node) => node.id)).toEqual(['demo-node'])
+    expect(saveProject).not.toHaveBeenCalled()
   })
 })

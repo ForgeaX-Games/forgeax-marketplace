@@ -7,6 +7,7 @@ import {
   type EntityAttributeCreateHandler,
   type EntityCreateHandler,
   type FormulaCreateHandler,
+  type KeyBindingConflictContext,
   type VariableCreateHandler,
 } from './component-form-fields'
 
@@ -17,11 +18,13 @@ export function ComponentInputsDisclosure({
   pickers,
   labelWidth,
   controlWidth,
+  density = 'compact',
   onChange,
   onCreateEntityAttribute,
   onCreateEntity,
   onCreateVariable,
   onCreateFormula,
+  keyConflicts,
 }: {
   childId: string
   componentId: string
@@ -29,14 +32,43 @@ export function ComponentInputsDisclosure({
   pickers?: EditorPickerCtx
   labelWidth?: CSSProperties['width']
   controlWidth?: CSSProperties['width']
+  density?: 'compact' | 'property'
   onChange: (next: Record<string, unknown>) => void
   onCreateEntityAttribute?: EntityAttributeCreateHandler
   onCreateEntity?: EntityCreateHandler
   onCreateVariable?: VariableCreateHandler
   onCreateFormula?: FormulaCreateHandler
+  keyConflicts?: KeyBindingConflictContext
 }): JSX.Element {
   const componentName = getComponentManifest(componentId)?.label ?? componentId
   const summary = summarizeComponentInputs(componentId, values)
+  const fields = (
+    <ComponentFormFields
+      componentId={componentId}
+      values={values}
+      onChange={onChange}
+      pickers={pickers}
+      excludeKeys={['x', 'y']}
+      density={density}
+      labelWidth={labelWidth}
+      compactControlWidth={controlWidth}
+      onCreateEntityAttribute={onCreateEntityAttribute}
+      onCreateEntity={onCreateEntity}
+      onCreateVariable={onCreateVariable}
+      onCreateFormula={onCreateFormula}
+      keyConflicts={keyConflicts}
+    />
+  )
+
+  if (density === 'property') {
+    return (
+      <div className="editor-property-spawn-props" data-component-inputs-disclosure={`${childId}:${componentId}`}>
+        <div className="editor-property-spawn-props-title">组件属性</div>
+        {fields}
+      </div>
+    )
+  }
+
   return (
     <details
       data-component-inputs-disclosure={`${childId}:${componentId}`}
@@ -70,20 +102,7 @@ export function ComponentInputsDisclosure({
         <span style={{ opacity: 0.4, marginLeft: 'auto' }}>▾</span>
       </summary>
       <div style={{ padding: '4px 0 6px' }}>
-        <ComponentFormFields
-          componentId={componentId}
-          values={values}
-          onChange={onChange}
-          pickers={pickers}
-          excludeKeys={['x', 'y']}
-          density="compact"
-          labelWidth={labelWidth}
-          compactControlWidth={controlWidth}
-          onCreateEntityAttribute={onCreateEntityAttribute}
-          onCreateEntity={onCreateEntity}
-          onCreateVariable={onCreateVariable}
-          onCreateFormula={onCreateFormula}
-        />
+        {fields}
       </div>
     </details>
   )
