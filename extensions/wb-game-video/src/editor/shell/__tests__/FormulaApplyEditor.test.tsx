@@ -17,41 +17,6 @@ function chooseCascade(trigger: HTMLElement, ...labels: string[]): void {
 }
 
 describe('FormulaApplyEditor variable guidance', () => {
-  it('renders incomplete parameter binding as a dark warning bar with AI entry', () => {
-    const formula: Formula = {
-      id: 'formula-param',
-      name: '参数公式',
-      ast: { t: 'hole', id: 'param', holeId: 'param', kind: 'number', label: '参数' },
-    }
-    const { container } = render(
-      <FormulaApplyEditor
-        formulaId={formula.id}
-        holeBindings={{}}
-        formulas={{ [formula.id]: formula }}
-        entities={{}}
-        variables={{}}
-        propertyLayout
-        onChange={vi.fn()}
-      />,
-    )
-
-    const alert = container.querySelector<HTMLElement>('[data-formula-binding-alert]')!
-    expect(alert).toHaveStyle({
-      background: '#222',
-      color: '#ff6b6b',
-      borderRadius: '8px',
-      padding: '0px 8px 0px 10px',
-    })
-    expect(alert.style.gap).toBe('')
-    expect(alert.style.minHeight).toBe('')
-    expect(alert).toHaveTextContent('参数绑定未完成：参数（尚未选择数值来源），补全后才会用于结算')
-    const aiButton = screen.getByRole('button', { name: 'AI 补全参数' })
-    expect(aiButton).toBeDisabled()
-    expect(aiButton).toHaveStyle({ width: '18px', height: '18px', cursor: 'not-allowed' })
-    expect(aiButton.querySelector('img')).toHaveAttribute('width', '18')
-    expect(aiButton.querySelector('img')).toHaveAttribute('height', '18')
-  })
-
   it('prompts the author to create a variable referenced by the selected formula', () => {
     const formula: Formula = {
       id: 'formula-rage',
@@ -125,7 +90,9 @@ describe('FormulaApplyEditor variable guidance', () => {
       '变量',
       '新增变量',
     )
-    expect(screen.queryByRole('textbox', { name: '加成变量的新变量 ID' })).toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: '加成变量的新变量 ID' }), {
+      target: { value: 'bonus-rate' },
+    })
     fireEvent.change(screen.getByRole('textbox', { name: '加成变量的新变量显示名' }), {
       target: { value: '加成率' },
     })
@@ -134,18 +101,18 @@ describe('FormulaApplyEditor variable guidance', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
-    expect(latestVariables.var0).toEqual({
-      id: 'var0',
+    expect(latestVariables['bonus-rate']).toEqual({
+      id: 'bonus-rate',
       name: '加成率',
       initial: 2,
     })
     expect(onChange).toHaveBeenCalledWith({
-      expr: 'var.var0',
+      expr: 'var.bonus-rate',
       pick: {
         mode: 'formula',
         formulaId: 'formula-slot',
         holeBindings: {
-          bonus: { kind: 'var', varId: 'var0' },
+          bonus: { kind: 'var', varId: 'bonus-rate' },
         },
       },
     })
@@ -373,10 +340,13 @@ describe('FormulaApplyEditor reusable entity parameters', () => {
       '我方',
       '新增属性',
     )
-    expect(screen.queryByRole('textbox', { name: '我方的新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '我方的新属性 ID' })).toHaveValue('hpMax')
     expect(screen.getByRole('textbox', { name: '我方的新属性显示名' })).toHaveValue('生命上限')
     expect(screen.getByRole('textbox', { name: '我方的新属性初始值' })).toHaveValue('100')
 
+    fireEvent.change(screen.getByRole('textbox', { name: '我方的新属性 ID' }), {
+      target: { value: 'vitalityMax' },
+    })
     fireEvent.change(screen.getByRole('textbox', { name: '我方的新属性显示名' }), {
       target: { value: '最大生命' },
     })
@@ -385,14 +355,14 @@ describe('FormulaApplyEditor reusable entity parameters', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
-    expect(screen.getByTestId('entities-state')).toHaveTextContent('"hpMax":150')
+    expect(screen.getByTestId('entities-state')).toHaveTextContent('"vitalityMax":150')
     expect(screen.getByTestId('entities-state')).toHaveTextContent(
-      '"hpMax":{"label":"最大生命","initial":150,"min":0}',
+      '"vitalityMax":{"label":"最大生命","initial":150,"min":0}',
     )
     expect(latestBindings.maxHp).toEqual({
       kind: 'entityAttr',
       entityId: 'ent-0',
-      attr: 'hpMax',
+      attr: 'vitalityMax',
     })
     expect(screen.queryByText(/参数绑定未完成/)).toBeNull()
   })
@@ -461,24 +431,30 @@ describe('FormulaApplyEditor reusable entity parameters', () => {
       '实体属性',
       '新增实体',
     )
-    expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('entity')
     expect(screen.getByRole('textbox', { name: '新实体显示名' })).toHaveValue('实体')
-    expect(screen.queryByRole('textbox', { name: '新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新属性 ID' })).toHaveValue('hp')
     expect(screen.getByRole('textbox', { name: '新属性显示名' })).toHaveValue('当前血量')
     expect(screen.getByRole('textbox', { name: '新属性初始值' })).toHaveValue('100')
 
+    fireEvent.change(screen.getByRole('textbox', { name: '新实体 ID' }), {
+      target: { value: 'boss' },
+    })
     fireEvent.change(screen.getByRole('textbox', { name: '新实体显示名' }), {
       target: { value: '敌方' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新属性 ID' }), {
+      target: { value: 'vitality' },
     })
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     expect(screen.getByTestId('empty-entities-state')).toHaveTextContent(
-      '"entity":{"id":"entity","name":"敌方","attrs":{"hp":100}',
+      '"boss":{"id":"boss","name":"敌方","attrs":{"vitality":100}',
     )
     expect(latestBindings.currentHp).toEqual({
       kind: 'entityAttr',
-      entityId: 'entity',
-      attr: 'hp',
+      entityId: 'boss',
+      attr: 'vitality',
     })
   })
 
@@ -533,7 +509,7 @@ describe('FormulaApplyEditor reusable entity parameters', () => {
     expect(screen.getByRole('menuitem', { name: '主角' })).toBeTruthy()
     expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: '新增实体' }))
-    expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('enemy')
     let menuLabels = screen.getAllByRole('menuitem')
       .map((item) => item.getAttribute('aria-label'))
     expect(menuLabels.indexOf('主角')).toBeLessThan(menuLabels.indexOf('新增实体'))
@@ -542,7 +518,7 @@ describe('FormulaApplyEditor reusable entity parameters', () => {
     expect(screen.getByRole('menuitem', { name: '生命值' })).toBeTruthy()
     expect(screen.queryByRole('textbox', { name: '主角的新属性 ID' })).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: '新增属性' }))
-    expect(screen.queryByRole('textbox', { name: '主角的新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('hp2')
     menuLabels = screen.getAllByRole('menuitem')
       .map((item) => item.getAttribute('aria-label'))
     expect(menuLabels.indexOf('生命值')).toBeLessThan(menuLabels.indexOf('新增属性'))

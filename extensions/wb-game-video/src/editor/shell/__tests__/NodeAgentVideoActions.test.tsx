@@ -16,28 +16,6 @@ const media = vi.hoisted(() => ({
 
 vi.mock('../media', () => media)
 
-const hostClient = vi.hoisted(() => ({
-  context: {
-    gameId: 'game-nodia-fighting',
-    endpoints: { gamePackage: 'https://host.test/__workbench__/v1/games/game-nodia-fighting/package' },
-  },
-  extension: {
-    fetch: vi.fn(),
-    url: vi.fn((path: string) => `https://host.test/extension/runtime/${path.replace(/^\//, '')}`),
-  },
-  tool: { call: vi.fn() },
-}))
-
-vi.mock('../../../lib/workbench-host', () => ({
-  getWorkbenchHost: () => hostClient,
-  ExtensionResponseError: class ExtensionResponseError extends Error {
-    constructor(readonly status: number, message: string) {
-      super(message)
-    }
-  },
-  readExtensionJson: vi.fn(),
-}))
-
 const NODE: GameNode = {
   id: 'fight',
   type: 'perf',

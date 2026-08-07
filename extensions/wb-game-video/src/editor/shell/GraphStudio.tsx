@@ -13,7 +13,6 @@ import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session
 import { createSessionSeed } from '../../runtime/play/sessionSeed'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
 import { NodeInspector, type VideoOption } from './NodeInspector'
-import { NodePanelTabBar, type NodePanelTab } from './NodePanelTabBar'
 import { createKinoAssetLibraryClient } from '../assets/assetLibraryClient'
 import { useProjectAssets } from '../assets/projectAssetCacheStore'
 import { audioAssetOptions } from './bgm-authoring'
@@ -25,6 +24,7 @@ import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/player
 import { bootEditorSkins } from '../init'
 import { BgmPlayer, GameStage, PlaybackClockProvider, useControlledPlaybackTimeout, VideoAudioToggle } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
+import { getGameSlug } from '../persist/gameScope'
 import { dropOverlayIfUnreferenced } from '../../graph/edit/overlay-edit'
 import { removeMountGraph } from '../video/graphMaterialOps'
 import { resolveMediaSrc } from './media'
@@ -72,105 +72,25 @@ function ensureToolbarStyle(): void {
     .gv-graph-toolbar{position:relative;z-index:2;flex-shrink:0;background:#1b1713;border-bottom:1px solid #2e2924;color:#f6f1e9}
     .gv-graph-toolbar button,.gv-graph-toolbar select{background:#252019;border:1px solid #403830;color:#f6f1e9;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
     .gv-graph-toolbar button:hover,.gv-graph-toolbar select:hover{background:#2f2923;border-color:#f08840}
-    .gv-node-panel{
-      /* 配置列宽与预览开合无关；预览内容始终保持 target 宽度，只有裁切轨道 0 ↔ target 在动。 */
-      --gv-form-w:clamp(${FORM_W_MIN}px,28vw,500px);
-      --gv-preview-target-w:calc(var(--gv-form-w) * 711 / 500);
-      --gv-preview-w:0px;
-      /* 与画布的分隔线是两列之外的额外一像素，不算进设计宽度，否则右列会跟着差 1px。 */
-      border-left:1px solid #2e2924;
-      width:calc(var(--gv-form-w) + var(--gv-preview-w) + 1px);
-      will-change:width;
-      transition:width var(--motion-duration-panel,220ms) var(--motion-ease-out,cubic-bezier(0,0,.2,1));
-    }
-    .gv-node-panel[data-preview-open="true"]{--gv-preview-w:var(--gv-preview-target-w)}
-    .gv-node-panel-columns{
-      transition:grid-template-columns var(--motion-duration-panel,220ms) var(--motion-ease-out,cubic-bezier(0,0,.2,1));
-    }
-    .gv-node-preview-column{position:relative;overflow:hidden}
-    @media (prefers-reduced-motion:reduce){
-      .gv-node-panel,.gv-node-panel-columns{transition-duration:1ms!important}
-    }
+    .gv-splitter{flex:none;width:5px;margin:0 -1px;cursor:col-resize;background:transparent;transition:background .12s;z-index:3}
+    .gv-splitter:hover,.gv-splitter.is-drag{background:rgba(240,136,64,.4)}
   `
 }
 
-/** 节点面板分栏：Figma 设计宽度为预览 711px + 表单 500px，窄屏保持同比缩放。 */
+/** 节点面板分栏：默认预览占 60%，拖拽后记住像素宽度；表单保持可操作的最小宽度。 */
+const PREVIEW_W_KEY = 'wb-game-video.nodePanel.previewW'
+const PREVIEW_W_MIN = 340
 const FORM_W_MIN = 280
+const SPLITTER_W = 5
 const PREVIEW_OPEN_KEY = 'wb-game-video.nodePanel.previewOpen'
-const PREVIEW_DRAWER_MOTION_MS = 220
 
-/**
- * 预览区开关拉片（Figma 14597:20050）：#2C2C2C 左尖拉片 + 向左渐亮的白描边 + 视频库图标，
- * 骑在节点面板左缘（向左探出 34px）、顶边与页签栏底（58px）对齐——收起态贴着配置列左缘，
- * 展开态随面板左扩贴着预览区左缘（Figma 14597:20310）。矢量数据取自 Figma 导出 SVG。
- * 预览弹出时图标与描边高亮：白 40% → 全白（Figma 14597:20069）。
- */
-function PreviewTogglePill({ open, onToggle }: { open: boolean, onToggle: () => void }): JSX.Element {
-  const highlight = open ? 1 : 0.4
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={open}
-      aria-label={open ? '收起预览区' : '展开预览区'}
-      title={open ? '收起左侧预览区' : '展开左侧预览区'}
-      style={{
-        position: 'absolute',
-        left: -34,
-        top: 58,
-        width: 34,
-        height: 103,
-        padding: 0,
-        border: 'none',
-        borderRadius: 0,
-        background: 'none',
-        cursor: 'pointer',
-        zIndex: 7,
-      }}
-    >
-      <svg width="34" height="103" viewBox="0 0 33.8388 102.818" fill="none" aria-hidden style={{ position: 'absolute', inset: 0 }}>
-        <path
-          d="M33.3173 102.098L7.32024 93.5449C3.26272 92.2097 0.520404 88.421 0.520437 84.1494L0.521413 18.668C0.521651 14.3965 3.26366 10.6074 7.32122 9.27246L33.3173 0.71875V102.098Z"
-          fill="#2C2C2C"
-          stroke="url(#gvPreviewToggleStroke)"
-          strokeWidth="1.04119"
-        />
-        <defs>
-          <linearGradient id="gvPreviewToggleStroke" x1="33.8388" y1="51.409" x2="0" y2="51.409" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#FFFFFF" stopOpacity="0" />
-            <stop offset="1" stopColor="#FFFFFF" stopOpacity={highlight} />
-          </linearGradient>
-        </defs>
-      </svg>
-      <svg
-        width="21.16"
-        height="20.82"
-        viewBox="0 0 21.1595 20.8239"
-        fill="none"
-        aria-hidden
-        style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
-      >
-        <path
-          d="M3.29141 4.16478H17.8681M5.3738 1.04119H15.7857M1.20902 7.28836H19.9505L18.0764 19.7827H3.08317L1.20902 7.28836Z"
-          stroke="#FFFFFF"
-          strokeOpacity={highlight}
-          strokeWidth="2.08239"
-          strokeLinecap="square"
-        />
-        <path
-          d="M12.1416 13.5355L10.0592 15.0973V11.9737L12.1416 13.5355Z"
-          stroke="#FFFFFF"
-          strokeOpacity={highlight}
-          strokeWidth="2.08239"
-        />
-      </svg>
-    </button>
-  )
-}
+const kinoAssetLibraryClient = createKinoAssetLibraryClient()
 
 export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Element {
   bootEditorSkins()
   ensureToolbarStyle()
+  // 宿主 iframe 传 `?slug=`（见 gameScope.ts）；勿只读 `?game=`，否则会落到默认 demo 命名空间。
+  const game = useMemo(() => getGameSlug() ?? 'game-nodia-fighting', [])
   const playRootRef = useRef<HTMLDivElement | null>(null)
   const [playRootEl, setPlayRootEl] = useState<HTMLElement | null>(null)
   const bindPlayRoot = (el: HTMLDivElement | null) => {
@@ -182,7 +102,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
 
   // 共享场景 store（蓝图/实体/变量/规则/场景/试玩 并行视图共用同一份 graph+meta+持久化）。
   const graph = useGraphScenario((s) => s.graph)
-  const game = useGraphScenario((s) => s.game)
   const isDraft = useGraphScenario((s) => s.isDraft)
   const fitSignal = useGraphScenario((s) => s.fitSignal)
   const loadEpoch = useGraphScenario((s) => s.loadEpoch)
@@ -238,6 +157,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const variables = useGraphScenario((s) => s.meta.variables)
   // meta.formulas 在 schema 里存为 `Record<string, unknown>`（runtime ↛ editor）；编辑器侧窄化回 Formula。
   const formulas = useGraphScenario((s) => s.meta.formulas) as Record<string, Formula> | undefined
+  const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   // 保存 = 打版本：一次性存 blueprint + 组件（服务端钩子）+ git tag vN。
   const doCommit = useGraphScenario((s) => s.commit)
   const reset = useGraphScenario((s) => s.reset)
@@ -246,8 +166,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   // 选中节点走共享 store（视频/界面等其它视图据此编辑同一节点）。
   const selected = useGraphScenario((s) => s.selectedNodeId)
   const setSelected = useGraphScenario((s) => s.setSelectedNode)
-  // 一级页签：Agent（预留空态）｜{节点名}调试面板。纯 UI 展示态，不进蓝图协议与持久化。
-  const [nodePanelTab, setNodePanelTab] = useState<NodePanelTab>('config')
   // 节点配置面板：预览台选中的挂载覆盖物 id（联动右侧表单聚焦该卡片）；换节点自动清空。
   const [focusedMountId, setFocusedMountId] = useState<string | null>(null)
   // 节点配置面板：时间轴上选中的生命周期效果（子集序号，见 isLifecycleReaction 注释）。
@@ -292,6 +210,12 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     setFocusedMountId(null)
     setFocusedLifecycleIndex(null)
   }, [focusedLifecycleIndex, focusedMountId])
+  // 节点配置面板：左侧预览区宽度（px，可拖调，localStorage 记忆）。
+  const [previewW, setPreviewW] = useState<number | null>(() => {
+    if (typeof window === 'undefined') return null
+    const v = Number(window.localStorage.getItem(PREVIEW_W_KEY))
+    return Number.isFinite(v) && v >= PREVIEW_W_MIN ? v : null
+  })
   // 已有节点间切换沿用上次状态并跨会话记忆；只有新建节点时强制收起（见 addPerfNode）。
   const [previewOpen, setPreviewOpen] = useState(
     () => typeof window !== 'undefined' && window.localStorage.getItem(PREVIEW_OPEN_KEY) === '1',
@@ -337,12 +261,12 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const [bgmRunKey, setBgmRunKey] = useState(0)
   const [videoOptions, setVideoOptions] = useState<VideoOption[]>([])
   const [videoOptionsError, setVideoOptionsError] = useState<string | null>(null)
-  const kinoAssetLibraryClient = useMemo(() => createKinoAssetLibraryClient(), [])
   const kinoResources = useKinoVideoResources(game)
   // 节点面板「音乐」下拉候选（与「视频」同款）：Kino media_type=audio，展示形状在壳层拼。
   const audio = useProjectAssets(game, 'audio', kinoAssetLibraryClient)
   const audioOptions = useMemo(() => audioAssetOptions(audio.items), [audio.items])
 
+  useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
   useEffect(() => {
     const seen = new Set<string>()
     const kino: VideoOption[] = []
@@ -424,21 +348,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     && !getSubFlowPack(selectedNode.data)
   // 试玩浮层与节点预览互斥显示，但不改 previewOpen：关闭试玩后恢复用户原有预览状态。
   const effectivePreviewOpen = previewOpen && !playOpen && selectedCanConfigurePerformance
-  // 关闭时让预览内容保留到抽屉动画结束再卸载；只控制视觉生命周期，不改变预览业务状态。
-  const [previewDrawerMounted, setPreviewDrawerMounted] = useState(effectivePreviewOpen)
-  useEffect(() => {
-    if (effectivePreviewOpen) {
-      setPreviewDrawerMounted(true)
-      return
-    }
-    const reducedMotion = typeof window !== 'undefined'
-      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    const timer = window.setTimeout(
-      () => setPreviewDrawerMounted(false),
-      reducedMotion ? 0 : PREVIEW_DRAWER_MOTION_MS,
-    )
-    return () => window.clearTimeout(timer)
-  }, [effectivePreviewOpen])
   useEffect(() => {
     if (!effectivePreviewOpen) setSettlementInsertTimeMs(null)
   }, [effectivePreviewOpen])
@@ -468,6 +377,35 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       st.setMeta(metaFromDocument(next))
     },
     [canvasGraph, selected, setCanvasGraph],
+  )
+  /** 预览/表单分栏拖拽：pointer capture 跟踪横向位移，松手写回 localStorage。 */
+  const startPreviewDrag = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      const el = e.currentTarget
+      const startX = e.clientX
+      const previewColumn = el.previousElementSibling as HTMLElement | null
+      const startW = previewColumn?.getBoundingClientRect().width ?? previewW ?? PREVIEW_W_MIN
+      const maxW = Math.max(PREVIEW_W_MIN, (panelRef.current?.clientWidth ?? 960) - FORM_W_MIN - SPLITTER_W)
+      el.classList.add('is-drag')
+      el.setPointerCapture(e.pointerId)
+      const onMove = (ev: PointerEvent): void => {
+        const next = Math.round(Math.max(PREVIEW_W_MIN, Math.min(maxW, startW + (ev.clientX - startX))))
+        setPreviewW(next)
+      }
+      const onUp = (): void => {
+        el.classList.remove('is-drag')
+        el.removeEventListener('pointermove', onMove)
+        el.removeEventListener('pointerup', onUp)
+        setPreviewW((w) => {
+          if (typeof window !== 'undefined' && w != null) window.localStorage.setItem(PREVIEW_W_KEY, String(w))
+          return w
+        })
+      }
+      el.addEventListener('pointermove', onMove)
+      el.addEventListener('pointerup', onUp)
+    },
+    [previewW],
   )
   // 面板实际宽度跟随测量（clamp 宽度 + 窗口缩放都会变），用于夹住预览区上限。
   useEffect(() => {
@@ -830,62 +768,58 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       {selected && (
         <div
           ref={panelRef}
-          className="gv-node-panel"
-          data-preview-open={effectivePreviewOpen}
           style={{
-            // 宽度 = 配置列 + 预览列，两者由 .gv-node-panel 的 CSS 变量给出：
-            // 满宽时是 Figma 14597:20310 的 711 + 500 = 1211，窄屏两列同比缩小。
-            maxWidth: '90%',
+            // 展开预览时让节点面板最多占主区 90%，给 3:2 分栏足够空间；收起时仍给画布留至少 20%。
+            // 预览收起时只留表单宽度——否则表单会被拉到 960px，面板照旧占地方，收起就白收了。
+            width: effectivePreviewOpen ? 'clamp(960px, 66vw, 1380px)' : `clamp(${FORM_W_MIN}px, 28vw, 500px)`,
+            maxWidth: effectivePreviewOpen ? '90%' : '80%',
             flexShrink: 0,
             display: 'flex',
             flexDirection: 'column',
-            // 给预览区拉片定位：它骑在面板左缘（向左探出 34px 压在画布上），面板自身不裁剪。
-            position: 'relative',
+            borderLeft: '1px solid #2e2924',
           }}
         >
-          {/* 预览区开关拉片：始终贴面板左缘——收起态即配置列左缘，展开态面板左扩后
-              自然落在预览区左缘（Figma 14597:20310）；展开时图标与描边高亮（14597:20069）。 */}
-          {selectedCanConfigurePerformance ? (
-            <PreviewTogglePill open={effectivePreviewOpen} onToggle={togglePreviewSurface} />
+          {/* header（含 ✕ 关闭）独立在内容滚动区之外：面板多窄、内部怎么横滚都始终呈现。 */}
+          <div style={{ display: 'flex', gap: 4, padding: 6, borderBottom: '1px solid #2e2924', alignItems: 'center', flexShrink: 0 }}>
+            <b style={{ fontSize: 12 }}>节点配置{selectedNode ? ` · ${selectedNode.data.name || selectedNode.id}` : ''}</b>
+            <button onClick={() => setSelected(null)} title="关闭" style={{ marginLeft: 'auto', color: '#9aa2b1', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+          </div>
+          {selectedNode ? (
+            <NodeAgentVideoActions
+              game={game}
+              blueprintId={activeBlueprintId}
+              blueprintTitle={blueprints[activeBlueprintId]?.title}
+              graphPath={drillLabels}
+              graph={canvasGraph}
+              scenario={previewScenario}
+              node={selectedNode}
+              videoGenerationEnabled={selectedCanConfigurePerformance}
+              onEditScenario={editPreviewScenario}
+            />
           ) : null}
-          {/* 展开态固定 711:500（Figma 14597:20310 预览区:配置列），窄屏同比缩放。 */}
+          {/* 展开态默认 3:2；拖拽后首列改用用户设定宽度。窄面板仍保证预览略宽于表单。 */}
           <div
             data-testid="node-panel-columns"
-            data-preview-open={effectivePreviewOpen}
-            className="gv-node-panel-columns"
             style={{
               flex: 1,
               minHeight: 0,
-              display: selectedCanConfigurePerformance ? 'grid' : 'flex',
-              gridTemplateColumns: selectedCanConfigurePerformance
-                ? 'minmax(0, var(--gv-preview-w)) minmax(0, var(--gv-form-w))'
+              display: effectivePreviewOpen ? 'grid' : 'flex',
+              gridTemplateColumns: effectivePreviewOpen
+                ? `${previewW == null ? `minmax(${PREVIEW_W_MIN}px, 3fr)` : `${previewW}px`} ${SPLITTER_W}px minmax(${FORM_W_MIN}px, 2fr)`
                 : undefined,
-              overflowX: 'hidden',
+              overflowX: 'auto',
             }}
           >
-            {selectedNode && selectedCanConfigurePerformance && previewDrawerMounted ? (
-              <div
-                data-testid="node-preview-column"
-                className="gv-node-preview-column"
-                style={{
-                  // 本层只负责从右向左扩大裁切窗口；内部内容从第一帧起就是最终宽度。
-                  gridColumn: 1,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                }}
-              >
+            {selectedNode && effectivePreviewOpen ? (
+              <>
                 <div
-                  data-testid="node-preview-content"
+                  data-testid="node-preview-column"
                   style={{
-                    position: 'absolute',
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                    width: 'var(--gv-preview-target-w)',
+                    // 列宽由外层 grid 管：默认 3:2，拖拽后首列固定为 previewW。
+                    minWidth: PREVIEW_W_MIN,
                     display: 'flex',
                     flexDirection: 'column',
-                    // Figma 14597:20633：左侧预览是独立区域，底色与右列页签栏同色。
-                    background: '#2C2C2C',
+                    overflow: 'hidden',
                   }}
                 >
                   <NodePreviewStage
@@ -902,86 +836,60 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                     onFocusLifecycle={focusLifecycleFromPreview}
                   />
                 </div>
-              </div>
+                <div
+                  className="gv-splitter"
+                  onPointerDown={startPreviewDrag}
+                  title="拖动调整预览区宽度"
+                />
+              </>
             ) : null}
-            {/* 右列：一级页签栏是本列头部（预览展开时不再横跨整板），下方配置内容独立滚动。
-                固定占第 2 栏——预览列在收起动画结束后会卸载，不锁死列号它会掉进宽度为 0 的第 1 栏。
+            {/* 收起态由面板的 28vw 给出舒适宽度；展开态表单下限 280px，把空间优先留给预览。
                 长下拉文案会把表单撑到 ~880px，中等宽度也出现不必要的横向滚动。 */}
-            <div
-              data-testid="node-inspector-column"
-              style={{ gridColumn: 2, flex: `1 0 ${FORM_W_MIN}px`, minWidth: FORM_W_MIN, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-            >
-              {/* 一级页签栏（Figma 14597:21458）：Agent（预留空态）｜{节点名}调试面板，✕ 关闭右置。 */}
-              <NodePanelTabBar
-                activeTab={nodePanelTab}
-                configLabel={selectedNode ? `${selectedNode.data.name || selectedNode.id}调试面板` : '节点调试面板'}
-                onTabChange={setNodePanelTab}
-                onClose={() => setSelected(null)}
+            <div data-testid="node-inspector-column" style={{ flex: `1 0 ${FORM_W_MIN}px`, minWidth: FORM_W_MIN, overflow: 'auto' }}>
+              <NodeInspector
+                graph={canvasGraph}
+                nodeId={selected}
+                videoOptions={videoOptions}
+                audioOptions={audioOptions}
+                packs={packs}
+                isRefAllowed={isRefAllowed}
+                overlays={overlays}
+                entities={entities}
+                variables={variables}
+                formulas={formulas}
+                focusedMountId={focusedMountId}
+                focusedLifecycleIndex={focusedLifecycleIndex}
+                settlementInsertMs={effectivePreviewOpen ? settlementInsertTimeMs ?? undefined : undefined}
+                focusAnchorRevision={focusAnchorRevision}
+                onFocusMount={selectMount}
+                onFocusLifecycle={selectLifecycle}
+                previewOpen={effectivePreviewOpen}
+                onTogglePreview={selectedCanConfigurePerformance ? togglePreviewSurface : undefined}
+                onChange={setCanvasGraph}
+                onPacksChange={setPacks}
+                onEnsureOverlay={(overlay) => {
+                  setMeta((m) => {
+                    const cur = m.ui?.overlays ?? {}
+                    if (cur[overlay.id]) return m
+                    return { ...m, ui: { ...m.ui, overlays: { ...cur, [overlay.id]: overlay } } }
+                  })
+                }}
+                onDropOverlayIfOrphan={(oid) => {
+                  // 卸载已同步写入 store；用完整库文档（根 graph + manifest.packs）判孤儿后只改共享 meta。
+                  const st = useGraphScenario.getState()
+                  const scn = st.authoringScenario()
+                  const cleaned = dropOverlayIfUnreferenced(scn, oid)
+                  if (cleaned !== scn) st.setMeta(metaFromDocument(cleaned))
+                }}
+                onRemoveMount={(mountId) => {
+                  editPreviewScenario((s, n) => removeMountGraph(s, n, mountId))
+                }}
+                onCreateEntityAttribute={createEntityAttribute}
+                onCreateEntity={createEntity}
+                onCreateVariable={createVariable}
+                onCreateFormula={createFormula}
+                onJump={jump}
               />
-              {/* Agent 页签内容区：暂留空，仅占位撑满本列。 */}
-              {nodePanelTab === 'agent' ? (
-                <div data-testid="node-panel-agent" style={{ flex: 1, minHeight: 0 }} />
-              ) : null}
-              {/* 配置页签内容：切到 Agent 时仅 display:none 隐藏、保持挂载，组件本地状态不丢。 */}
-              <div data-testid="node-config-tab-content" style={{ display: nodePanelTab === 'config' ? 'contents' : 'none' }}>
-                {selectedNode ? (
-                  <NodeAgentVideoActions
-                    game={game}
-                    blueprintId={activeBlueprintId}
-                    blueprintTitle={blueprints[activeBlueprintId]?.title}
-                    graphPath={drillLabels}
-                    graph={canvasGraph}
-                    scenario={previewScenario}
-                    node={selectedNode}
-                    videoGenerationEnabled={selectedCanConfigurePerformance}
-                    onEditScenario={editPreviewScenario}
-                  />
-                ) : null}
-                <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-                  <NodeInspector
-                    graph={canvasGraph}
-                    nodeId={selected}
-                    videoOptions={videoOptions}
-                    audioOptions={audioOptions}
-                    packs={packs}
-                    isRefAllowed={isRefAllowed}
-                    overlays={overlays}
-                    entities={entities}
-                    variables={variables}
-                    formulas={formulas}
-                    focusedMountId={focusedMountId}
-                    focusedLifecycleIndex={focusedLifecycleIndex}
-                    settlementInsertMs={effectivePreviewOpen ? settlementInsertTimeMs ?? undefined : undefined}
-                    focusAnchorRevision={focusAnchorRevision}
-                    onFocusMount={selectMount}
-                    onFocusLifecycle={selectLifecycle}
-                    onChange={setCanvasGraph}
-                    onPacksChange={setPacks}
-                    onEnsureOverlay={(overlay) => {
-                      setMeta((m) => {
-                        const cur = m.ui?.overlays ?? {}
-                        if (cur[overlay.id]) return m
-                        return { ...m, ui: { ...m.ui, overlays: { ...cur, [overlay.id]: overlay } } }
-                      })
-                    }}
-                    onDropOverlayIfOrphan={(oid) => {
-                      // 卸载已同步写入 store；用完整库文档（根 graph + manifest.packs）判孤儿后只改共享 meta。
-                      const st = useGraphScenario.getState()
-                      const scn = st.authoringScenario()
-                      const cleaned = dropOverlayIfUnreferenced(scn, oid)
-                      if (cleaned !== scn) st.setMeta(metaFromDocument(cleaned))
-                    }}
-                    onRemoveMount={(mountId) => {
-                      editPreviewScenario((s, n) => removeMountGraph(s, n, mountId))
-                    }}
-                    onCreateEntityAttribute={createEntityAttribute}
-                    onCreateEntity={createEntity}
-                    onCreateVariable={createVariable}
-                    onCreateFormula={createFormula}
-                    onJump={jump}
-                  />
-                </div>
-              </div>
             </div>
           </div>
         </div>

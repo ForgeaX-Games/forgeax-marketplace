@@ -51,8 +51,6 @@ export interface CanvasInteractionItem {
   minWidth?: number
   minHeight?: number
   warn?: boolean
-  /** 按键重复：与 warn 一同点亮红框，并由上层渲染专用警告图标。 */
-  keyConflict?: boolean
 }
 
 export interface CanvasItemState {

@@ -17,7 +17,6 @@ import * as React from 'react'
 import { registerComponent, type ComponentDef } from '../registry/component-registry'
 import { registerOverlayRenderer } from './rendererRegistry'
 import { registerCoreSkins, INTERACTION_SKINS, HP_BAR_COMPONENTS, type SkinPositioning } from './components'
-import { getWorkbenchHost } from '../../lib/workbench-host'
 
 /** 交互皮肤登记项（编辑器下拉/定位查询用）。commons 内建 + 游戏仓贡献合并。 */
 export interface InteractionSkinEntry {
@@ -106,21 +105,23 @@ function pickRegister(mod: GameComponentModule): ((host: ComponentHostApi) => vo
 }
 
 /**
- * 加载并注册某游戏仓的专属组件。模块来源由 Workbench Host 决定；
- * 开发期可转译源码，生产环境提供构建产物。
+ * 加载并注册某游戏仓的专属组件。**免构建优先**：
+ *   1. dev —— 直接吃游戏仓 `components/index.tsx` **源码**，经扩展 vite 现场编译
+ *      （`/@game-components/<slug>/index.js`，见 vite.config `gameComponentsDevPlugin`）；
+ *   2. 构建产物（可选）—— `GET /api/game-host/games/:slug/components/index.js`（`dist/components`）；
  * 都拿不到 / 无 `register` → 静默 false，运行时继续用内建集（fail-soft）。
+ * `base` 用于非同源场景显式指定源（dev 一般同源，留空即可）。
  */
-export async function loadGameComponents(slug: string | undefined): Promise<boolean> {
+export async function loadGameComponents(slug: string | undefined, base = ''): Promise<boolean> {
   if (!slug || loadedGames.has(slug)) return false
   loadedGames.add(slug)
-  const url = (() => {
-    try {
-      return getWorkbenchHost().gameComponents.moduleUrl('index.js')
-    } catch {
-      return null
-    }
-  })()
-  if (url) {
+  const s = encodeURIComponent(slug)
+  const isDev = Boolean((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV)
+  const candidates = [
+    ...(isDev ? [`${base}/@game-components/${s}/index.js`] : []),
+    `${base}/api/game-host/games/${s}/components/index.js`,
+  ]
+  for (const url of candidates) {
     try {
       const mod = (await import(/* @vite-ignore */ url)) as GameComponentModule
       const reg = pickRegister(mod)
@@ -129,7 +130,7 @@ export async function loadGameComponents(slug: string | undefined): Promise<bool
         return true
       }
     } catch {
-      /* 模块不可用 → 回落内建集 */
+      /* 未构建 / 无源码 / 加载失败 → 试下一个 */
     }
   }
   loadedGames.delete(slug)

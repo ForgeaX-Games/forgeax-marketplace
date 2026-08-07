@@ -1,7 +1,6 @@
 /**
- * Dirty checks: isDraft only when editor content ≠ last clean tip baseline.
- * After tip flush / save, unchanged content must not stay dirty.
- * Debounced autosave flushes tip via saveProject (not localStorage draft).
+ * 草稿脏检查：只有「当前内容 ≠ 最近成功保存/干净载入的版本」才标 isDraft。
+ * 回归：保存版本后无改动不得再提示「未保存草稿」。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
@@ -9,9 +8,10 @@ vi.mock('../persist-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../persist-client')>()
   return {
     ...actual,
-    saveProject: vi.fn(async () => ({ ok: true, revision: 'rev-1' })),
-    checkpointTip: vi.fn(async () => ({ ok: true, commitHash: 'c1' })),
-    restoreVersionToTip: vi.fn(),
+    saveProject: vi.fn(async () => ({ ok: true })),
+    saveDraft: vi.fn(),
+    clearDraft: vi.fn(),
+    loadVersionProject: vi.fn(),
     commitVersion: vi.fn(async () => ({ tag: 'v9', commitHash: 'abc', dirty: false })),
     listVersions: vi.fn(async () => []),
   }
@@ -23,7 +23,9 @@ import {
 } from '../graphScenarioStore'
 import {
   saveProject,
-  restoreVersionToTip,
+  saveDraft,
+  clearDraft,
+  loadVersionProject,
   commitVersion,
 } from '../persist-client'
 import type { BlueprintDoc } from '../../../runtime/schema/graph-schema'
@@ -59,8 +61,10 @@ function seedCleanStore(): void {
 
 beforeEach(() => {
   vi.useFakeTimers()
-  vi.mocked(saveProject).mockClear().mockResolvedValue({ ok: true, revision: 'rev-1' })
-  vi.mocked(restoreVersionToTip).mockClear()
+  vi.mocked(saveProject).mockClear().mockResolvedValue({ ok: true })
+  vi.mocked(saveDraft).mockClear()
+  vi.mocked(clearDraft).mockClear()
+  vi.mocked(loadVersionProject).mockClear()
   vi.mocked(commitVersion).mockClear().mockResolvedValue({ tag: 'v9', commitHash: 'abc', dirty: false })
   resetCleanFingerprintForTests()
   seedCleanStore()
@@ -75,69 +79,66 @@ describe('content-based isDraft', () => {
     useGraphScenario.setState({ isDraft: true } as any)
     const errs = useGraphScenario.getState().save()
     expect(errs).toBe(0)
-    await vi.waitFor(() => {
-      expect(useGraphScenario.getState().isDraft).toBe(false)
-    })
-    expect(saveProject).toHaveBeenCalled()
-    useGraphScenario.getState().touchDraft()
+    await vi.mocked(saveProject).mock.results[0]!.value
+    expect(useGraphScenario.getState().isDraft).toBe(false)
+
+    // 无实质改动的 setMeta（返回同一引用）不得重新标脏
+    useGraphScenario.getState().setMeta((m) => m)
+    expect(useGraphScenario.getState().isDraft).toBe(false)
+    expect(clearDraft).toHaveBeenCalled()
+  })
+
+  it('successful commit leaves isDraft false when nothing else changed', async () => {
+    useGraphScenario.setState({ isDraft: true } as any)
+    const tag = await useGraphScenario.getState().commit('msg')
+    expect(tag).toBe('v9')
+    expect(useGraphScenario.getState().isDraft).toBe(false)
+    expect(useGraphScenario.getState().currentTag).toBe('v9')
+  })
+
+  it('real edit after save marks draft; reverting content clears it', async () => {
+    useGraphScenario.getState().save()
+    await vi.mocked(saveProject).mock.results[0]!.value
+    expect(useGraphScenario.getState().isDraft).toBe(false)
+
+    useGraphScenario.getState().renameBlueprint('a', 'renamed')
+    expect(useGraphScenario.getState().isDraft).toBe(true)
+
+    useGraphScenario.getState().renameBlueprint('a', 'a')
     expect(useGraphScenario.getState().isDraft).toBe(false)
   })
 
-  it('editing marks dirty and debounced flush calls saveProject (tip)', async () => {
-    // Establish clean baseline first
+  it('loadVersion equal to clean baseline does not mark draft', async () => {
     useGraphScenario.getState().save()
-    await vi.waitFor(() => expect(useGraphScenario.getState().isDraft).toBe(false))
-    vi.mocked(saveProject).mockClear()
+    await vi.mocked(saveProject).mock.results[0]!.value
+    const clean = useGraphScenario.getState().authoringProject()
+    vi.mocked(loadVersionProject).mockResolvedValue(structuredClone(clean))
 
-    useGraphScenario.getState().setGraph((g) => ({
-      ...g,
-      nodes: [...g.nodes, bpNode('extra')],
-    }))
-    expect(useGraphScenario.getState().isDraft).toBe(true)
-    await vi.advanceTimersByTimeAsync(800)
-    expect(saveProject).toHaveBeenCalled()
+    await useGraphScenario.getState().loadVersion('v9')
+    expect(useGraphScenario.getState().isDraft).toBe(false)
+    expect(useGraphScenario.getState().currentTag).toBe('v9')
+    expect(useGraphScenario.getState().savedTip).toMatch(/已载入版本 v9$/)
   })
 
-  it('serializes tip writes so later snapshots cannot finish before earlier writes', async () => {
-    const pending: Array<(value: { ok: boolean; revision: string }) => void> = []
-    vi.mocked(saveProject).mockImplementation(
-      () => new Promise((resolve) => pending.push(resolve)),
-    )
-
+  it('loadVersion different from clean baseline marks draft', async () => {
     useGraphScenario.getState().save()
-    useGraphScenario.getState().setGraph((graph) => ({
-      ...graph,
-      nodes: [...graph.nodes, bpNode('b')],
-    }))
+    await vi.mocked(saveProject).mock.results[0]!.value
+    const other = useGraphScenario.getState().authoringProject()
+    other.manifest.packs.a = { ...other.manifest.packs.a!, title: 'old' }
+    vi.mocked(loadVersionProject).mockResolvedValue(other)
+
+    await useGraphScenario.getState().loadVersion('v1')
+    expect(useGraphScenario.getState().isDraft).toBe(true)
+    expect(useGraphScenario.getState().currentTag).toBe('v1')
+    expect(useGraphScenario.getState().savedTip).toMatch(/未保存/)
+  })
+
+  it('noop setGraph after save does not stick isDraft true', async () => {
     useGraphScenario.getState().save()
-    useGraphScenario.getState().setGraph((graph) => ({
-      ...graph,
-      nodes: [...graph.nodes, bpNode('c')],
-    }))
-    useGraphScenario.getState().save()
+    await vi.mocked(saveProject).mock.results[0]!.value
 
-    expect(saveProject).toHaveBeenCalledTimes(1)
-    expect(
-      vi.mocked(saveProject).mock.calls[0]?.[0].manifest.packs.a?.graph.nodes.map((node) => node.id),
-    ).toEqual(['e'])
-
-    pending[0]?.({ ok: true, revision: 'rev-a' })
-    await vi.waitFor(() => expect(saveProject).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(saveProject).mock.calls[1]?.[2]).toBe('rev-a')
-    expect(
-      vi.mocked(saveProject).mock.calls[1]?.[0].manifest.packs.a?.graph.nodes.map((node) => node.id),
-    ).toEqual(['e', 'b'])
-
-    pending[1]?.({ ok: true, revision: 'rev-b' })
-    await vi.waitFor(() => expect(saveProject).toHaveBeenCalledTimes(3))
-    expect(vi.mocked(saveProject).mock.calls[2]?.[2]).toBe('rev-b')
-    expect(
-      vi.mocked(saveProject).mock.calls[2]?.[0].manifest.packs.a?.graph.nodes.map((node) => node.id),
-    ).toEqual(['e', 'b', 'c'])
-
-    pending[2]?.({ ok: true, revision: 'rev-c' })
-    await vi.waitFor(() => expect(useGraphScenario.getState().isDraft).toBe(false))
-    await vi.advanceTimersByTimeAsync(800)
-    expect(saveProject).toHaveBeenCalledTimes(3)
+    const g = useGraphScenario.getState().graph
+    useGraphScenario.getState().setGraph({ ...g, nodes: [...g.nodes], edges: [...g.edges] })
+    expect(useGraphScenario.getState().isDraft).toBe(false)
   })
 })
