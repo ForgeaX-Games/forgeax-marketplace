@@ -6,8 +6,11 @@ describe('refreshPlaybackUrl', () => {
     expect(refreshPlaybackUrl('/__gva__/media/clip?game=demo', 2)).toBe(
       '/__gva__/media/clip?game=demo&__gva_refresh=2',
     )
-    expect(refreshPlaybackUrl('/api/v1/kino/resources/clip/content?game_id=demo', 3)).toBe(
-      '/api/v1/kino/resources/clip/content?game_id=demo&__gva_refresh=3',
+    expect(refreshPlaybackUrl('/__workbench__/v1/games/demo/media/clip?view=play', 3)).toBe(
+      '/__workbench__/v1/games/demo/media/clip?view=play&__gva_refresh=3',
+    )
+    expect(refreshPlaybackUrl('/api/v1/kino/resources/clip/content?game_id=demo', 4)).toBe(
+      '/api/v1/kino/resources/clip/content?game_id=demo&__gva_refresh=4',
     )
   })
 

@@ -677,9 +677,10 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
         })}
       </div>
       {/* Figma 12414_5350 演出摘要行：左 "演出" 标签 12px 白 40%，右 "视频名称" 12px 白 80%，左右边距 8px。
-          加底部圆角以对齐卡片，防止 #232323 背景在角落漏出。 */}
+          背景必须透明：选中描边是父级 inset box-shadow，不透明底会盖住底部描边。
+          底色由 .gv-bp-node 的 #232323 透出；底部圆角对齐卡片裁切。 */}
       {(details.performance || details.interfaces.length > 0 || details.settlements.length > 0) && (
-        <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '40px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '4px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', background: '#232323', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
+        <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '40px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '4px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'transparent', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
           {details.performance && (
             <>
               <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>演出</span>
