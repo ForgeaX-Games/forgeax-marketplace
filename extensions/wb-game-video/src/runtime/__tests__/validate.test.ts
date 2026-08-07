@@ -87,7 +87,7 @@ describe('validateGraph', () => {
     const overlays: Record<string, Overlay> = {
       hud: {
         id: 'hud',
-        children: [{ id: 'rage', component: 'test.float', trigger: { when: 'enter' }, inputs: {} }],
+        children: [{ id: 'rage', component: 'DamageFloatText', trigger: { when: 'enter' }, inputs: {} }],
       },
     }
 
@@ -102,7 +102,7 @@ describe('validateGraph', () => {
     const overlays: Record<string, Overlay> = {
       hud: {
         id: 'hud',
-        children: [{ id: 'rage', component: 'test.float', trigger: { when: 'enter' }, inputs: {} }],
+        children: [{ id: 'rage', component: 'DamageFloatText', trigger: { when: 'enter' }, inputs: {} }],
       },
     }
     const codesFor = (reactions: NonNullable<GameNode['data']['reactions']>): string[] => {
@@ -174,7 +174,7 @@ describe('validateGraph', () => {
     const overlays: Record<string, Overlay> = {
       hud: {
         id: 'hud',
-        children: [{ id: 'rage', component: 'test.float', trigger: { when: 'enter' }, inputs: {} }],
+        children: [{ id: 'rage', component: 'DamageFloatText', trigger: { when: 'enter' }, inputs: {} }],
       },
     }
 

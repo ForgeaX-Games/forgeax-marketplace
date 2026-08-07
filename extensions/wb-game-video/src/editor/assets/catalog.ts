@@ -1,8 +1,9 @@
 /**
  * graph 引擎自带资产层 —— 把 `assets/zhandou/*.mp4` 构建期静态导入成 `文件名(basename) → 直链`。
  *
- * 唯一约定：**初始媒体引用按 basename**（如 `media.ref: "idle01"` / `"narr-door"`）；
- * 解析时按 basename 取本地直链。不再有 id 映射表 / 远程回落 / 标签等额外配置。
+ * 唯一约定：**所有初始数据统一在 `demo/nodia.graph.json` 里按 basename 引用**（如
+ * `media.ref: "idle01"` / `"narr-door"`）；解析时按 basename 取本地直链。不再有 id 映射表 /
+ * 远程回落 / 标签等额外配置——需要的都写进 demo。
  */
 const zhandouModules = import.meta.glob<string>('./zhandou/*.mp4', {
   eager: true,

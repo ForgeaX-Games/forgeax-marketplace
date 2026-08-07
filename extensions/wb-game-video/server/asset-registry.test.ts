@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { deleteAsset, isDocumentRecord, listAssets, setStyleAxes, upsertAsset } from './asset-registry'
+import { deleteAsset, listAssets, setStyleAxes, upsertAsset } from './asset-registry'
 
 let dir: string
 
@@ -63,11 +63,10 @@ describe('shared asset manifest coexistence', () => {
     expect(raw.styleAxes).toEqual({ artMedia: 'ink' })
     expect(raw.assets).toContainEqual(providerVideo)
     expect(raw.assets).toContainEqual(providerImage)
-    expect(listAssets(dir).map((asset) => asset.id)).toEqual(['provider-video', 'provider-image', 'generated-image'])
+    expect(listAssets(dir).map((asset) => asset.id)).toEqual(['provider-image', 'generated-image'])
     expect(listAssets(dir)[0]).toMatchObject({
-      label: 'provider-video.mp4',
-      mime: 'video/mp4',
-      productionType: 'video_clip',
+      label: 'hero.png',
+      mime: 'image/png',
       meta: { upload: true },
     })
   })
@@ -105,43 +104,5 @@ describe('shared asset manifest coexistence', () => {
     expect(readFileSync(join(dir, 'manifest.json'), 'utf-8')).toBe(
       '{"version":2,"assets":{}}',
     )
-  })
-})
-
-describe('project document records', () => {
-  test('accepts a local Markdown document record outside the media domain', () => {
-    expect(isDocumentRecord({
-      id: 'doc-outline',
-      kind: 'document',
-      name: '游戏大纲',
-      status: 'ready',
-      mimeType: 'text/markdown',
-      provider: { kind: 'local', ref: 'documents/outline.md' },
-      createdAt: 1,
-      updatedAt: 1,
-      meta: { documentType: 'outline' },
-    })).toBe(true)
-  })
-
-  test('rejects non-Markdown and unbounded document paths', () => {
-    const base = {
-      id: 'doc-outline',
-      kind: 'document',
-      name: '游戏大纲',
-      status: 'ready',
-      mimeType: 'text/markdown',
-      createdAt: 1,
-      updatedAt: 1,
-      meta: { documentType: 'outline' },
-    }
-    expect(isDocumentRecord({
-      ...base,
-      provider: { kind: 'local', ref: '../blueprint.json' },
-    })).toBe(false)
-    expect(isDocumentRecord({
-      ...base,
-      mimeType: 'text/plain',
-      provider: { kind: 'local', ref: 'documents/outline.md' },
-    })).toBe(false)
   })
 })

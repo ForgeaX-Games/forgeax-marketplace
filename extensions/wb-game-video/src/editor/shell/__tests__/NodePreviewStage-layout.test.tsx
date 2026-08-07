@@ -2,39 +2,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { registerTestComponents } from '../../../runtime/__tests__/test-components'
+import { registerCoreSkins } from '../../../runtime/component-host/components'
 import type { GameNode, GameScenario } from '../../../runtime/schema/graph-schema'
 import { node, scnOf } from '../../../runtime/__tests__/test-fixtures'
 import { NodePreviewStage } from '../NodePreviewStage'
 
-const hostClient = vi.hoisted(() => ({
-  extension: {
-    fetch: vi.fn(),
-    url: vi.fn((path: string) => `https://host.test/extension/runtime/${path.replace(/^\//, '')}`),
-  },
-  tool: { call: vi.fn() },
-}))
-
-vi.mock('../../../lib/workbench-host', () => ({
-  getWorkbenchHost: () => hostClient,
-  ExtensionResponseError: class ExtensionResponseError extends Error {
-    constructor(readonly status: number, message: string) {
-      super(message)
-    }
-  },
-  readExtensionJson: vi.fn(),
-}))
-
-vi.mock('../../../runtime/component-host', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../runtime/component-host')>()
-  const fixtures = await import('../../../runtime/__tests__/test-components')
-  return {
-    ...actual,
-    ['createCore' + 'SkinRegistry']: fixtures.createTestSkinRegistry,
-  }
-})
-
-beforeAll(registerTestComponents)
+beforeAll(registerCoreSkins)
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -64,7 +37,7 @@ describe('NodePreviewStage overlay layout', () => {
     expect(container.querySelector('.mtl-root')).not.toBeNull()
     const collapse = screen.getByRole('button', { name: '收起时间轴' })
     expect(collapse).toHaveAttribute('aria-expanded', 'true')
-    expect(collapse.closest('.nps-video-controls')).not.toBeNull()
+    expect(collapse.closest('.nps-controls')).not.toBeNull()
     expect(screen.getByTestId('custom-timeline-icon')).toHaveTextContent('collapse')
 
     fireEvent.click(collapse)
@@ -92,8 +65,7 @@ describe('NodePreviewStage overlay layout', () => {
       />,
     )
 
-    // 折叠钮（收起/展开时间轴）默认隐藏；时间轴自身的缩放控件（缩小/放大）常驻，不在此断言范围。
-    expect(screen.queryByRole('button', { name: /^(收起|展开)时间轴$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /时间轴/ })).toBeNull()
     expect(container.querySelector('.mtl-root')).not.toBeNull()
   })
 
@@ -251,7 +223,7 @@ describe('NodePreviewStage overlay layout', () => {
               title: '怒气值界面',
               children: [{
                 id: 'value',
-                component: 'test.float',
+                component: 'DamageFloatText',
                 inputs: { parameter: 42 },
               }],
             },
@@ -290,7 +262,7 @@ describe('NodePreviewStage overlay layout', () => {
       expect(container.querySelector('[data-canvas-item="settlement-spawn:0:1"]')).toHaveClass('is-highlighted')
       expect(container.querySelector('[data-canvas-item="settlement-spawn:0:1"]')).not.toHaveClass('is-selected')
     })
-    expect(container.querySelectorAll('[data-overlay-fit-target]')).toHaveLength(2)
+    expect(screen.getAllByText('+42')).toHaveLength(2)
 
     const canvas = screen.getByRole('application', { name: '节点视频覆盖物画布' })
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 9, clientX: 30, clientY: 30 })
@@ -339,7 +311,7 @@ describe('NodePreviewStage overlay layout', () => {
               id: 'float',
               children: [{
                 id: 'rage',
-                component: 'test.float',
+                component: 'DamageFloatText',
                 inputs: { parameter: 0 },
               }],
             },
@@ -361,7 +333,7 @@ describe('NodePreviewStage overlay layout', () => {
 
     await waitFor(() => {
       expect(container.querySelector('[data-preview-spawn-id="spawn:1"]')).not.toBeNull()
-      expect(container.querySelector('[data-preview-spawn-id="spawn:1"] [data-overlay-fit-target]')).not.toBeNull()
+      expect(screen.getByText('+80')).toBeTruthy()
     })
   })
 
@@ -379,7 +351,7 @@ describe('NodePreviewStage overlay layout', () => {
       { nodes: [current], edges: [] },
       {
         entities: { bull: { id: 'bull', attrs: { rage: 10 } } },
-        ui: { overlays: { rage: { id: 'rage', children: [{ id: 'value', component: 'test.float', trigger: { when: 'enter' } }] } } },
+        ui: { overlays: { rage: { id: 'rage', children: [{ id: 'value', component: 'DamageFloatText', trigger: { when: 'enter' } }] } } },
       },
     )
     const { container } = render(
@@ -420,7 +392,7 @@ describe('NodePreviewStage overlay layout', () => {
               id: 'float',
               children: [{
                 id: 'damage',
-                component: 'test.float',
+                component: 'DamageFloatText',
                 trigger: { when: 'enter' },
                 inputs: { parameter: '+10' },
               }],
@@ -533,7 +505,7 @@ describe('NodePreviewStage overlay layout', () => {
               title: 'HUD',
               children: [{
                 id: 'damage',
-                component: 'test.float',
+                component: 'DamageFloatText',
                 trigger: { when: 'enter' },
                 inputs: {},
               }],
@@ -605,7 +577,7 @@ describe('NodePreviewStage overlay layout', () => {
       height: 100,
       toJSON: () => ({}),
     })
-    const overlayId = 'base:TEST_FLOAT'
+    const overlayId = 'base:DamageFloatText'
     const secondMountId = `${overlayId}__2`
     const current = node('n1', {
       overlayNodes: [
@@ -623,7 +595,7 @@ describe('NodePreviewStage overlay layout', () => {
               title: '伤害飘字',
               children: [{
                 id: 'damage',
-                component: 'test.float',
+                component: 'DamageFloatText',
                 trigger: { when: 'enter' },
                 inputs: { parameter: '-25' },
               }],
@@ -704,7 +676,7 @@ describe('NodePreviewStage overlay layout', () => {
               id: 'dialogues',
               children: [{
                 id: 'line',
-                component: 'test.dialogue',
+                component: 'Dialogue',
                 layout: { left: 0.15, top: -0.02, width: 1, height: 1 },
                 trigger: { when: 'enter' },
                 inputs: { text: '这是一句字幕示例。' },
@@ -785,7 +757,7 @@ describe('NodePreviewStage overlay layout', () => {
               id: 'float',
               children: [{
                 id: 'damage',
-                component: 'test.float',
+                component: 'DamageFloatText',
                 layout: { left: 0.2, top: 0.3 },
                 trigger: { when: 'enter' },
                 inputs: { parameter: '-10' },
@@ -815,10 +787,14 @@ describe('NodePreviewStage overlay layout', () => {
     const { container } = render(<Harness />)
     const canvas = await waitFor(() =>
       screen.getByRole('application', { name: '节点视频覆盖物画布' }))
-    await waitFor(() => {
+    const fitTarget = await waitFor(() => {
       const element = container.querySelector('[data-overlay-fit-target]')
       expect(element).not.toBeNull()
+      return element as HTMLElement
     })
+    const mountWrapper = fitTarget.parentElement?.parentElement?.parentElement as HTMLElement
+    expect(mountWrapper.style.width).toBe('fit-content')
+    expect(mountWrapper.style.height).toBe('fit-content')
 
     fireEvent.pointerDown(canvas, { button: 0, pointerId: 2, clientX: 60, clientY: 40 })
     fireEvent.pointerMove(canvas, { pointerId: 2, clientX: 80, clientY: 50 })
@@ -829,6 +805,8 @@ describe('NodePreviewStage overlay layout', () => {
         left: 0.1,
         top: 0.1,
       })
+      expect(mountWrapper.style.width).toBe('fit-content')
+      expect(mountWrapper.style.height).toBe('fit-content')
     })
   })
 
@@ -846,7 +824,7 @@ describe('NodePreviewStage overlay layout', () => {
               id: 'float',
               children: [{
                 id: 'damage',
-                component: 'test.float',
+                component: 'DamageFloatText',
                 window: { startMs: 1_000 },
                 inputs: { parameter: '-10', durationMs: 7 },
               }],
@@ -868,11 +846,8 @@ describe('NodePreviewStage overlay layout', () => {
       />,
     )
 
-    const stub = await waitFor(() => {
-      const element = container.querySelector('[data-overlay-fit-target]')
-      expect(element).not.toBeNull()
-      return element as HTMLElement
-    })
-    expect(stub).toHaveStyle({ '--preview-t': '800ms' })
+    const text = await screen.findByText('-10')
+    expect(text.parentElement).toHaveStyle({ '--preview-t': '2.8ms' })
+    expect(container.querySelector('[data-overlay-fit-target]')).toBe(text)
   })
 })

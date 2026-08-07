@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
-import { registerTestComponents } from '../../../runtime/__tests__/test-components'
+import { registerCoreSkins } from '../../../runtime/component-host/components'
 import type { Entity } from '../../../runtime/schema/graph-schema'
 import { ComponentFormFields } from '../component-form-fields'
 import { ScenarioInspector, type ScenarioMeta } from '../ScenarioInspector'
 
-registerTestComponents()
+registerCoreSkins()
 
 function EntityHarness({ initial }: { initial: Record<string, Entity> }): JSX.Element {
   const [value, setValue] = useState<ScenarioMeta>({ entities: initial })
@@ -93,6 +93,39 @@ describe('ScenarioInspector entity attributes', () => {
     expect(hpInput).toHaveValue('0')
     expect(screen.getByTestId('entities-state')).toHaveTextContent('"attrs":{"hp":0,"hpMax":100}')
     expect(screen.getByTestId('entities-state')).toHaveTextContent('"hp":{"initial":0,"max":100}')
+  })
+
+  it('keeps unrelated newly created attributes out of hp value pickers', () => {
+    function Harness(): JSX.Element {
+      const [value, setValue] = useState<ScenarioMeta>({
+        entities: { hero: { id: 'hero', name: '主角', attrs: {} } },
+      })
+      return (
+        <>
+          <ScenarioInspector value={value} section="entities" onChange={setValue} />
+          <ComponentFormFields
+            componentId="BattlePlayerHpBar"
+            values={{ label: '我方', current: 0, max: 0 }}
+            pickers={{ entities: value.entities }}
+            onChange={() => undefined}
+          />
+        </>
+      )
+    }
+    render(<Harness />)
+
+    const hpSelect = within(screen.getByText('血量').parentElement!)
+      .getByRole('combobox', { name: '数值内容' })
+    fireEvent.click(hpSelect)
+    expect(screen.queryByRole('menuitem', { name: '实体属性' })).toBeNull()
+    fireEvent.click(hpSelect)
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 属性' }))
+
+    expect(screen.getByLabelText('属性「attr0」的数值')).toHaveValue('0')
+    fireEvent.click(hpSelect)
+    expect(screen.queryByRole('menuitem', { name: '实体属性' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'attr0' })).toBeNull()
   })
 
   it('clamps authored current values when a paired maximum is reduced', () => {

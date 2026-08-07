@@ -11,15 +11,7 @@ import {
   resolveOverlayReaction,
 } from '../../runtime/schema/overlay-events'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
-import { injectStyleOnce } from '../../styles/injectStyle'
-import {
-  appendNodeAction,
-  EventResponseRow,
-  NodeActionAddMenu,
-  NodeActionsEditor,
-  nodeActionAddOptions,
-  type ActionOption,
-} from './NodeActionsEditor'
+import { NodeActionsEditor, type ActionOption } from './NodeActionsEditor'
 import type { EditorPickerCtx } from './editors'
 import type {
   EntityAttributeCreateHandler,
@@ -27,45 +19,13 @@ import type {
   FormulaCreateHandler,
   VariableCreateHandler,
 } from './component-form-fields'
-import { NI_ROOT_CLASS } from './ni-ui'
 
-/** 稿子里的事件标题是「事件N·出口名」（Figma 15635:81611）。 */
-function eventTitle(event: OverlayEventRef, ordinal: number): string {
-  return `事件${ordinal}·${event.label?.trim() || event.localEventId}`
-}
-
-/** 标题只留下序号与出口名，组件与 id 这些定位信息挪进悬停提示，免得撑破窄栏。 */
-function eventTip(event: OverlayEventRef): string {
+function labelOf(event: OverlayEventRef): string {
   const component = getComponentManifest(event.componentId)?.label?.trim()
-  return [component, event.childId, event.localEventId].filter(Boolean).join(' · ')
+  const local = event.label?.trim()
+  const title = [component, local].filter(Boolean).join(' · ')
+  return title ? `${title} (${event.localEventId})` : event.localEventId
 }
-
-const MOUNT_EVENT_HINT = '目录动作先执行，挂载动作按顺序追加；选目标节点会同步写出边。'
-
-/**
- * 挂载事件块的新壳（Figma 15635:81612）：事件标题 + 「事件响应」输入壳行 + 缩进动作行。
- * 只在 `.ni-root`（节点配置面板）内生效 —— 目录模式还挂在旧色板的
- * ComponentPropertyPanel 上，那里继续用原来的方框。
- */
-const NI_OV_EVENTS_CSS = `
-.${NI_ROOT_CLASS} .ni-ov-events { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.${NI_ROOT_CLASS} .ni-ov-event { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.${NI_ROOT_CLASS} .ni-ov-event-title {
-  font-size: var(--ni-fs-meta);
-  color: var(--ni-w-60);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.${NI_ROOT_CLASS} .ni-control.ni-ov-event-row { gap: 8px; padding-right: 4px; }
-.${NI_ROOT_CLASS} .ni-ov-event-row-label {
-  flex: none;
-  color: var(--ni-w-60);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-`
 
 function mountEventActions(reactions: Reaction[] | undefined, event: OverlayEventRef): NodeAction[] {
   const keys = new Set([
@@ -90,8 +50,6 @@ export function ComponentEventsEditor({
   pickers,
   labelWidth,
   allowSpawn = true,
-  showEventTitle = true,
-  propertyLayout = false,
   onCreateEntityAttribute,
   onCreateEntity,
   onCreateVariable,
@@ -110,8 +68,6 @@ export function ComponentEventsEditor({
   pickers?: EditorPickerCtx
   labelWidth?: CSSProperties['width']
   allowSpawn?: boolean
-  showEventTitle?: boolean
-  propertyLayout?: boolean
   onCreateEntityAttribute?: EntityAttributeCreateHandler
   onCreateEntity?: EntityCreateHandler
   onCreateVariable?: VariableCreateHandler
@@ -123,9 +79,6 @@ export function ComponentEventsEditor({
   if (!events.length) {
     return <div style={{ fontSize: 11, opacity: 0.6 }}>无导出事件（组件需有 inputs.events / manifest.events）</div>
   }
-  // 挂载模式只出现在节点配置面板里，所以新壳按它开关；目录模式仍在旧色板面板中。
-  const niLayout = mode === 'mount'
-  if (niLayout) injectStyleOnce('ni-overlay-events', NI_OV_EVENTS_CSS)
   const writeCatalog = (event: OverlayEventRef, actions: NodeAction[]) => {
     const key = overlayReactionKey(event.childId, event.localEventId)
     const rest = (catalogReactions ?? []).filter((reaction) => reaction.when.id !== key)
@@ -138,68 +91,37 @@ export function ComponentEventsEditor({
     onCatalogChange?.(rest.length ? rest : undefined)
   }
   return (
-    <div className={niLayout ? 'ni-ov-events' : undefined} style={niLayout ? undefined : { display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {events.map((event, index) => {
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {events.map((event) => {
         const key = overlayReactionKey(event.childId, event.localEventId)
         const inherited = resolveOverlayReaction(catalogReactions, event.childId, event.localEventId)?.do ?? []
         const appended = mountEventActions(mountReactions, event)
-        const edited = (mode === 'catalog' ? inherited : appended) as NodeAction[]
-        const title = eventTitle(event, index + 1)
-        const write = (next: NodeAction[]) => mode === 'catalog'
-          ? writeCatalog(event, next)
-          : onMountActionsChange?.(event, next)
-        const addOptions = nodeActionAddOptions({
-          actions: edited,
-          allowAdvance: mode === 'mount',
-          allowSpawn,
-          spawnOptions,
-        })
-        const addAction = (value: string, path: string[]) => write(
-          appendNodeAction({ actions: edited, value, path, overlays, pickers }),
-        )
-        const actions = (
-          <NodeActionsEditor
-            actions={edited}
-            edgeOptions={edgeOptions}
-            spawnOptions={spawnOptions}
-            overlays={overlays}
-            pickers={pickers}
-            labelWidth={labelWidth}
-            allowAdvance={mode === 'mount'}
-            allowSpawn={allowSpawn}
-            propertyLayout={propertyLayout}
-            onCreateEntityAttribute={onCreateEntityAttribute}
-            onCreateEntity={onCreateEntity}
-            onCreateVariable={onCreateVariable}
-            onCreateFormula={onCreateFormula}
-            renderAdvance={renderRoute ? () => renderRoute(event) : undefined}
-            onChange={write}
-          />
-        )
-        if (!niLayout) {
-          return (
-            <section key={key} data-event-key={key} style={{ border: '1px solid #2c2c2c', borderRadius: 6, padding: 8 }}>
-              {showEventTitle ? <div style={{ fontSize: 12, fontWeight: 600 }} title={eventTip(event)}>{title}</div> : null}
-              {actions}
-              {/* 属性面板自带一排「新增」按钮；旧色板的目录面板没有事件响应行，仍用整行下拉。 */}
-              {propertyLayout ? null : <NodeActionAddMenu options={addOptions} onSelect={addAction} />}
-            </section>
-          )
-        }
+        const edited = mode === 'catalog' ? inherited : appended
         return (
-          <section key={key} data-event-key={key} className="ni-ov-event">
-            {showEventTitle ? (
-              <span className="ni-ov-event-title" title={eventTip(event)}>{title}</span>
+          <section key={key} data-event-key={key} style={{ border: '1px solid #2c2c2c', borderRadius: 6, padding: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>{labelOf(event)}</div>
+            <div style={{ fontSize: 10, opacity: 0.55, margin: '2px 0 6px', fontFamily: 'ui-monospace, monospace' }}>{key}</div>
+            {mode === 'catalog' ? (
+              <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>目录动作（所有挂载继承）</div>
             ) : null}
-            <EventResponseRow
-              className="ni-control ni-ov-event-row"
-              labelClassName="ni-ov-event-row-label"
-              title={MOUNT_EVENT_HINT}
-              actions={edited}
-              options={addOptions}
-              onSelect={addAction}
+            <NodeActionsEditor
+              actions={edited as NodeAction[]}
+              edgeOptions={edgeOptions}
+              spawnOptions={spawnOptions}
+              overlays={overlays}
+              pickers={pickers}
+              labelWidth={labelWidth}
+              allowAdvance={mode === 'mount'}
+              allowSpawn={allowSpawn}
+              onCreateEntityAttribute={onCreateEntityAttribute}
+              onCreateEntity={onCreateEntity}
+              onCreateVariable={onCreateVariable}
+              onCreateFormula={onCreateFormula}
+              renderAdvance={renderRoute ? () => renderRoute(event) : undefined}
+              onChange={(actions) => mode === 'catalog'
+                ? writeCatalog(event, actions)
+                : onMountActionsChange?.(event, actions)}
             />
-            {actions}
           </section>
         )
       })}

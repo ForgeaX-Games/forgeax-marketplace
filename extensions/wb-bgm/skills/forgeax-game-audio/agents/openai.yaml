@@ -1,4 +1,0 @@
-interface:
-  display_name: "ForgeaX 游戏音频接入"
-  short_description: "让 Agent 设计、玩家修改并确认游戏音频事件绑定"
-  default_prompt: "Use $forgeax-game-audio to draft editable audio event bindings for the active ForgeaX game, wait for player confirmation, apply them, instrument real events, and verify the playback chain."

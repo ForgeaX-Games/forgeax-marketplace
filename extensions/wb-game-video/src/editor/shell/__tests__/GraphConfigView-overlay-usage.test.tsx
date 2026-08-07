@@ -1,36 +1,12 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { BlueprintDoc, GameGraph, GameScenario } from '../../../runtime/schema/graph-schema'
-import { registerTestComponents } from '../../../runtime/__tests__/test-components'
+import { registerCoreSkins } from '../../../runtime/component-host/components'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
-import { CUSTOM_UI_FOLDER_ID } from '../../persist/ui-tree'
-import { executeUiNavCommand } from '../../persist/uiNavSync'
-import { useUiSelection } from '../../persist/uiSelectionStore'
 import { GraphConfigView } from '../GraphConfigView'
-import { NewSidebar } from '../NewSidebar'
-import { useGraphView } from '../../persist/graphViewStore'
-import { useRuleSelection } from '../../persist/ruleSelectionStore'
-
-vi.mock('../../assets/useVideoAssets', () => ({
-  useVideoAssets: () => ({ items: [] }),
-}))
-
-vi.mock('../../assets/use-asset-browser', () => ({
-  useAssetBrowser: () => ({
-    entries: [],
-    directory: {
-      assetLibrary: { version: 1, folders: [], placements: {} },
-      loading: false,
-      saving: false,
-      error: null,
-      refresh: vi.fn(),
-      save: vi.fn(),
-    },
-  }),
-}))
 
 const initialState = useGraphScenario.getState()
-beforeAll(registerTestComponents)
+beforeAll(registerCoreSkins)
 
 function graphWithOverlay(nodeId: string, overlay: string): GameGraph {
   return {
@@ -60,40 +36,9 @@ function chooseCascade(trigger: HTMLElement, ...labels: string[]): void {
 afterEach(() => {
   cleanup()
   useGraphScenario.setState(initialState, true)
-  useUiSelection.getState().clearUiSelection()
-  useGraphView.setState({ view: 'graph' })
-  useRuleSelection.setState({ section: 'entities', itemId: null })
 })
 
 describe('GraphConfigView overlay usage', () => {
-  it('renders the rule section selected by the navigation store', () => {
-    const graph: GameGraph = { nodes: [], edges: [] }
-    const scenario: GameScenario = { version: 'test', graph }
-    useGraphScenario.setState({
-      graph,
-      blueprints: { main: blueprint('main', graph) },
-      mainBlueprintId: 'main',
-      activeBlueprintId: 'main',
-      meta: {},
-    })
-    useGraphView.setState({ view: 'rule' })
-    useRuleSelection.setState({ section: 'formulas', itemId: null })
-
-    render(
-      <GraphConfigView
-        tabs={[
-          { section: 'entities', label: '实体' },
-          { section: 'variables', label: '变量' },
-          { section: 'formulas', label: '公式' },
-        ]}
-        scenario={scenario}
-      />,
-    )
-
-    expect(screen.getByRole('button', { name: '＋ 新建公式' })).toBeTruthy()
-    expect(screen.getByRole('textbox', { name: '搜索公式' })).toBeTruthy()
-  })
-
   it('counts references from the main blueprint and unopened sub-blueprints', () => {
     const overlayId = 'scheme-shared'
     const mainGraph = graphWithOverlay('main-node', overlayId)
@@ -114,18 +59,10 @@ describe('GraphConfigView overlay usage', () => {
     })
 
     const scenario: GameScenario = { version: 'test', graph: mainGraph, ui: { overlays } }
-    useGraphView.setState({ view: 'ui' })
-    render(
-      <>
-        <NewSidebar />
-        <GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />
-      </>,
-    )
+    render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '展开 界面' }))
-    fireEvent.click(screen.getByRole('button', { name: '展开自定义界面' }))
-    expect(screen.getByText('⇢2')).toBeTruthy()
-    expect(screen.queryByText('被 2 个节点引用')).toBeNull()
+    expect(screen.getByText('⇢2')).toHaveAttribute('title', '被 2 个节点的 overlayNodes 引用')
+    expect(screen.getByText('被 2 个节点引用')).toBeTruthy()
   })
 
   it('creates unique scheme titles and blocks duplicate renames', () => {
@@ -143,19 +80,17 @@ describe('GraphConfigView overlay usage', () => {
       graph,
       meta: { ui: { overlays } },
     })
-    expect(executeUiNavCommand({ type: 'add-scheme', parentId: CUSTOM_UI_FOLDER_ID })).toBe(true)
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
     const scenario: GameScenario = { version: 'test', graph, ui: { overlays } }
     render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
 
+    fireEvent.click(screen.getByTitle('新建界面方案'))
     expect(Object.values(useGraphScenario.getState().meta.ui?.overlays ?? {})
       .some((overlay) => overlay.title === '新方案 2')).toBe(true)
 
-    const selectedTreeNodeId = useUiSelection.getState().selectedTreeNodeId!
-    expect(executeUiNavCommand({
-      type: 'rename',
-      nodeId: selectedTreeNodeId,
-      name: '战斗 HUD',
-    })).toBe(false)
+    const title = screen.getByDisplayValue('新方案 2')
+    fireEvent.change(title, { target: { value: '战斗 HUD' } })
+    expect(alert).toHaveBeenCalledWith('界面方案名称「战斗 HUD」已存在')
     expect((useGraphScenario.getState().meta.ui?.overlays?.['scheme-2'])?.title).toBe('新方案 2')
   })
 
@@ -167,7 +102,7 @@ describe('GraphConfigView overlay usage', () => {
         title: '战斗界面',
         children: [{
           id: 'hp',
-          component: 'test.hud',
+          component: 'BattlePlayerHpBar',
           inputs: { label: '我方', current: 0, max: 100 },
         }],
       },
@@ -185,7 +120,8 @@ describe('GraphConfigView overlay usage', () => {
     const scenario: GameScenario = { version: 'test', graph, entities, ui: { overlays } }
     render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
 
-    const hpSelect = screen.getAllByRole('combobox', { name: '数值内容' })[0]!
+    const hpSelect = within(screen.getByText('血量').parentElement!)
+      .getByRole('combobox', { name: '数值内容' })
     fireEvent.click(hpSelect)
     fireEvent.click(screen.getByRole('menuitem', { name: '实体属性' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
@@ -206,4 +142,107 @@ describe('GraphConfigView overlay usage', () => {
     })
   })
 
+  it('keeps a confirmed interface entity and attribute in the shared rule catalog', () => {
+    const graph: GameGraph = { nodes: [], edges: [] }
+    const overlays = {
+      hud: {
+        id: 'hud',
+        title: '战斗界面',
+        children: [{
+          id: 'hp',
+          component: 'BattleEnemyHpBar',
+          inputs: { label: '敌方', current: 0, max: 100 },
+        }],
+      },
+    }
+    const entities = {}
+    useGraphScenario.setState({
+      game: 'game-nodia-fighting',
+      booted: true,
+      blueprints: { main: blueprint('main', graph) },
+      mainBlueprintId: 'main',
+      activeBlueprintId: 'main',
+      graph,
+      meta: { entities, ui: { overlays } },
+    })
+    const scenario: GameScenario = { version: 'test', graph, entities, ui: { overlays } }
+    render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
+
+    const hpPicker = within(screen.getByText('血量').parentElement!)
+      .getByRole('combobox', { name: '数值内容' })
+    chooseCascade(hpPicker, '实体属性', '新增实体')
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
+
+    expect(useGraphScenario.getState().meta.entities?.['ent-boss']).toMatchObject({
+      id: 'ent-boss',
+      name: '敌方',
+    })
+    expect(useGraphScenario.getState().meta.entities?.['ent-boss']?.attrs?.hp).toBe(100)
+    expect(useGraphScenario.getState().meta.entities?.['ent-boss']?.attrMeta?.hp).toMatchObject({
+      label: '当前血量',
+      initial: 100,
+    })
+
+    chooseCascade(
+      within(screen.getByText('血量').parentElement!)
+        .getByRole('combobox', { name: '数值内容' }),
+      '变量',
+      '新增变量',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量显示名' }), {
+      target: { value: '战斗计数' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量初始值' }), {
+      target: { value: '0' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
+
+    expect(useGraphScenario.getState().meta.variables?.var0).toEqual({
+      id: 'var0',
+      name: '战斗计数',
+      initial: 0,
+    })
+    expect(useGraphScenario.getState().meta.ui?.overlays?.hud?.children[0]?.inputs?.current).toMatchObject({
+      expr: 'var.var0',
+    })
+
+    chooseCascade(
+      within(screen.getByText('血量').parentElement!)
+        .getByRole('combobox', { name: '数值内容' }),
+      '公式',
+      '新增公式',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式显示名' }), {
+      target: { value: '界面计算' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
+      target: { value: 'var.var0 + 1' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
+
+    expect(useGraphScenario.getState().meta.formulas?.['formula-0']).toMatchObject({
+      id: 'formula-0',
+      name: '界面计算',
+      ast: { t: 'bin', id: 'n0', op: '+' },
+    })
+    expect(useGraphScenario.getState().meta.ui?.overlays?.hud?.children[0]?.inputs?.current).toMatchObject({
+      expr: 'var.var0 + 1',
+      pick: { mode: 'formula', formulaId: 'formula-0', holeBindings: {} },
+    })
+
+    cleanup()
+    render(
+      <GraphConfigView
+        tabs={[
+          { section: 'entities', label: '实体' },
+          { section: 'variables', label: '变量' },
+          { section: 'formulas', label: '公式' },
+        ]}
+        scenario={scenario}
+      />,
+    )
+
+    expect(screen.getByRole('textbox', { name: '实体 ID' })).toHaveValue('ent-boss')
+    expect(screen.getByLabelText('属性「hp」的数值')).toHaveValue('100')
+  })
 })

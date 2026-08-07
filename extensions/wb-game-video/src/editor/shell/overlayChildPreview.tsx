@@ -8,6 +8,7 @@ import type { Layout, OverlayChild } from '../../runtime/schema/graph-schema'
 import { defaultsForComponent } from './editors'
 import type { SkinCtx, SkinRegistry } from '../../runtime/component-host/rendererRegistry'
 import { STAGE_FILL_LAYOUT } from '../../runtime/schema/layout'
+import { applyStyleLockedEventParams } from '../video/graphMaterialOps'
 import { localMsForChild } from './previewClock'
 
 /**
@@ -21,7 +22,10 @@ export function renderOverlayChildPreview(
   mountLayout: Layout | undefined = STAGE_FILL_LAYOUT,
   playing = false,
 ): ReactNode {
-  const inputs = { ...defaultsForComponent(child.component), ...(child.inputs ?? {}) }
+  const inputs = applyStyleLockedEventParams(
+    { ...defaultsForComponent(child.component), ...(child.inputs ?? {}) },
+    child.component,
+  )
   const preview = { timeMs: localMsForChild(child, timeMs), playing }
 
   return reg.renderOverlayMount(

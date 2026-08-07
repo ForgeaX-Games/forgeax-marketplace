@@ -19,9 +19,7 @@ const audioSelect = () => screen.getByTitle(/与资产库音频一致/) as HTMLS
 const checkbox = (name: RegExp) => screen.getByRole('checkbox', { name })
 const queryCheckbox = (name: RegExp) => screen.queryByRole('checkbox', { name })
 const volumeSlider = () => screen.getByRole('slider', { name: /音量/ }) as HTMLInputElement
-const queryVolumeSlider = () => screen.queryByRole('slider', { name: /音量/ }) as HTMLInputElement | null
-/** 静音开关：勾上 = `volume: 0`，滑杆整条收起。 */
-const muteToggle = () => screen.getByRole('checkbox', { name: '静音' }) as HTMLInputElement
+const volumeToggle = () => screen.getByRole('checkbox', { name: '设置 BGM 音量' }) as HTMLInputElement
 
 const LIB: AudioOption[] = [
   { id: 'a-aud-battle', label: '战斗床 (a-aud-battle)' },
@@ -111,46 +109,39 @@ describe('NodeInspector · 作用域 BGM', () => {
     expect(data().bgm).toEqual({ ref: 'a-aud-battle', loop: false })
   })
 
-  // 没写 volume = 跟随上层音量，面板按有声呈现（滑杆 100%）：作者要调音量直接拖，
-  // 不必先勾一个「启用音量」的开关。
-  it('未设音量时按有声呈现，拖动即按 0..1 写回', () => {
+  it('音量默认未设置；开启后按 0..1 写回', () => {
     const data = renderControlled(graphWith({ name: 'A', bgm: { ref: 'a-aud-battle' } }))
     expect(volumeSlider().value).toBe('1')
-    expect(volumeSlider().disabled).toBe(false)
-    expect(muteToggle().checked).toBe(false)
+    expect(volumeSlider().disabled).toBe(true)
+    expect(screen.getByText('未设置')).toBeTruthy()
 
+    fireEvent.click(volumeToggle())
+    expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 1 })
+    expect(volumeSlider().disabled).toBe(false)
     fireEvent.change(volumeSlider(), { target: { value: '0.35' } })
     expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 0.35 })
-    expect(screen.getByText('35%')).toBeTruthy()
+    fireEvent.change(volumeSlider(), { target: { value: '0' } })
+    expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 0 })
     expect(volumeSlider().classList.contains('ni-bgm-volume')).toBe(true)
     expect(volumeSlider().style.padding).toBe('0px')
+    expect(volumeSlider().style.background).toContain('0%')
     fireEvent.change(volumeSlider(), { target: { value: '1' } })
     expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 1 })
     expect(volumeSlider().style.background).toContain('100%')
   })
 
-  it('静音勾选落 volume 0 并收起滑杆，取消静音回到有声', () => {
-    const data = renderControlled(graphWith({ name: 'A', bgm: { ref: 'a-aud-battle', volume: 0.35 } }))
-    expect(muteToggle().checked).toBe(false)
-
-    fireEvent.click(muteToggle())
-    expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 0 })
-    expect(muteToggle().checked).toBe(true)
-    expect(queryVolumeSlider()).toBeNull()
-
-    fireEvent.click(muteToggle())
-    expect(data().bgm).toEqual({ ref: 'a-aud-battle', volume: 1 })
-    expect(volumeSlider().value).toBe('1')
-  })
-
-  it('未选曲目也能单独调音量（volume-only 配置）', () => {
+  it('未选曲目也可单独设置音量；关闭后回到未设置状态', () => {
     const data = renderControlled(graphWith({ name: 'A' }))
-    expect(volumeSlider().disabled).toBe(false)
-    fireEvent.change(volumeSlider(), { target: { value: '0.35' } })
-    expect(data().bgm).toEqual({ volume: 0.35 })
+    expect(volumeSlider().disabled).toBe(true)
+    fireEvent.click(volumeToggle())
+    expect(data().bgm).toEqual({ volume: 1 })
 
-    fireEvent.click(muteToggle())
-    expect(data().bgm).toEqual({ volume: 0 })
+    cleanup()
+    const data2 = renderControlled(graphWith({ name: 'A', bgm: { volume: 0.35 } }))
+    expect(volumeSlider().disabled).toBe(false)
+    expect(screen.getByText('35%')).toBeTruthy()
+    fireEvent.click(volumeToggle())
+    expect('bgm' in data2()).toBe(false)
   })
 
   it('结束当前音乐时不显示音量配置', () => {

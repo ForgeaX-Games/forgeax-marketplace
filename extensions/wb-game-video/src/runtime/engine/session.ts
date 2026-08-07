@@ -9,12 +9,12 @@ import type { GameGraph, GameNode, GameScenario, GraphLibraryDocument, SubFlowPa
 import type { Layout } from '../schema/node-config-schema'
 import { GraphRuntime, type GraphRuntimeCheckpoint } from './engine'
 import type { ComponentRegistry } from '../registry/component-registry'
-import { createCoreSkinRegistry, createDefaultComponentRegistry } from '../component-host'
+import { createCoreSkinRegistry, createDefaultComponentRegistry } from '../component-host/components'
 import type { SkinRegistry } from '../component-host/rendererRegistry'
 import type { RuntimeDirective } from './directives'
 import type { BgmPlaybackCommand } from './bgm-stack'
 
-/** GraphSession 构造选项：可注入自定义注册表；缺省共用 bootComponents 的默认表。 */
+/** GraphSession 构造选项：可注入隔离注册表；缺省每局新建核心组件/Skin 表。 */
 export interface GraphSessionOptions {
   components?: ComponentRegistry
   skins?: SkinRegistry
@@ -163,7 +163,7 @@ export interface GraphSessionCheckpoint {
 
 export class GraphSession {
   readonly runtime: GraphRuntime
-  /** 皮肤表（Player 渲染用；缺省与 bootComponents 共享默认表）。 */
+  /** 本局皮肤表（Player 渲染用；与其它 Session 隔离）。 */
   readonly skins: SkinRegistry
   snapshot: SessionSnapshot
   private readonly nodesById: Map<string, GameNode>
@@ -176,7 +176,7 @@ export class GraphSession {
   private bgmSeq = 0
 
   constructor(scenario: GameScenario, opts: GraphSessionOptions = {}) {
-    // 缺省共用进程内默认表（内建 + 已 boot 的游戏组件）；调用方自带则假定已装全。
+    // 默认 = 核心契约 + 皮肤包契约（同文件 ComponentDef）；调用方自带 components 则假定已装全。
     const components = opts.components ?? createDefaultComponentRegistry()
     this.skins = opts.skins ?? createCoreSkinRegistry()
     const rootId =

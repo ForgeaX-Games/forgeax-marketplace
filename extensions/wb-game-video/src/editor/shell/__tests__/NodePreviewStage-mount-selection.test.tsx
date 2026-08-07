@@ -3,12 +3,12 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import type { JSX } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { registerTestComponents } from '../../../runtime/__tests__/test-components'
+import { registerCoreSkins } from '../../../runtime/component-host/components'
 import type { GameScenario } from '../../../runtime/schema/graph-schema'
 import { node, scnOf } from '../../../runtime/__tests__/test-fixtures'
 import { NodePreviewStage } from '../NodePreviewStage'
 
-beforeAll(registerTestComponents)
+beforeAll(registerCoreSkins)
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -25,7 +25,7 @@ function seedScenario(): GameScenario {
           title: '我方血条',
           children: [{
             id: 'bar',
-            component: 'test.hud',
+            component: 'BattlePlayerHpBar',
             trigger: { when: 'at', ms: 2_000 },
             window: { startMs: 2_000, endMs: 3_000 },
             inputs: {},

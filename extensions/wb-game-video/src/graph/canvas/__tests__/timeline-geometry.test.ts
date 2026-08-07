@@ -4,7 +4,7 @@ import { clampSettlementSpawnTtlMs, spawnTemplateTtlMs } from '../timeline-geome
 
 const child = (over: Partial<OverlayChild> = {}): OverlayChild => ({
   id: 'value',
-  component: 'test.float',
+  component: 'DamageFloatText',
   trigger: { when: 'enter' },
   inputs: {},
   ...over,

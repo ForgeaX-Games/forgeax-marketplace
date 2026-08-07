@@ -27,14 +27,6 @@ interface KinoVideoCacheStore {
   remove: (gameId: string, resourceId: string) => void
 }
 
-type KinoVideoCacheMessage =
-  | { type: 'upsert', gameId: string, item: KinoResourceDTO }
-  | { type: 'remove', gameId: string, resourceId: string }
-
-const CHANNEL = 'wb-game-video:kino-video-cache-sync'
-let channel: BroadcastChannel | null = null
-let applyingRemote = false
-
 const EMPTY: KinoVideoCacheEntry = {
   items: [],
   total: 0,
@@ -70,7 +62,6 @@ export const useKinoVideoCache = create<KinoVideoCacheStore>((set, get) => ({
       const kino = clientOf(client)
       const items: KinoResourceDTO[] = []
       let total = 0
-      let received = 0
       for (let page = 1; page <= 100; page += 1) {
         const result = await kino.list({
           game_id: gameId,
@@ -78,13 +69,9 @@ export const useKinoVideoCache = create<KinoVideoCacheStore>((set, get) => ({
           page,
           page_size: MAX_KINO_RESOURCE_PAGE_SIZE,
         })
-        // The video workspace must never trust an upstream page to be
-        // type-pure: an image record in a cached or misrouted response must
-        // not surface as a playable video card.
-        items.push(...result.items.filter((item) => item.media_type === 'video'))
-        received += result.items.length
+        items.push(...result.items)
         total = result.total
-        if (result.items.length === 0 || received >= total) break
+        if (result.items.length === 0 || items.length >= total) break
       }
       if ((get().byGame[gameId]?.generation ?? 0) !== generation) return
       set((state) => ({
@@ -123,7 +110,6 @@ export const useKinoVideoCache = create<KinoVideoCacheStore>((set, get) => ({
         },
       }
     })
-    if (!applyingRemote) channel?.postMessage({ type: 'upsert', gameId, item } satisfies KinoVideoCacheMessage)
   },
 
   remove(gameId, resourceId) {
@@ -137,46 +123,8 @@ export const useKinoVideoCache = create<KinoVideoCacheStore>((set, get) => ({
         },
       }
     })
-    if (!applyingRemote) channel?.postMessage({ type: 'remove', gameId, resourceId } satisfies KinoVideoCacheMessage)
   },
 }))
-
-function validMessage(value: unknown): value is KinoVideoCacheMessage {
-  if (!value || typeof value !== 'object') return false
-  const candidate = value as Partial<KinoVideoCacheMessage> & { item?: Partial<KinoResourceDTO> }
-  if (typeof candidate.gameId !== 'string' || candidate.gameId.length === 0) return false
-  if (candidate.type === 'remove') {
-    return typeof candidate.resourceId === 'string' && candidate.resourceId.length > 0
-  }
-  return candidate.type === 'upsert'
-    && candidate.item?.game_id === candidate.gameId
-    && candidate.item.media_type === 'video'
-    && typeof candidate.item.resource_id === 'string'
-    && candidate.item.resource_id.length > 0
-}
-
-/** Keeps the left and center Workbench panes on the same canonical video list. */
-export function installKinoVideoCacheSync(): () => void {
-  if (typeof BroadcastChannel === 'undefined') return () => {}
-  channel = new BroadcastChannel(CHANNEL)
-  channel.onmessage = (event: MessageEvent) => {
-    if (!validMessage(event.data)) return
-    applyingRemote = true
-    try {
-      if (event.data.type === 'upsert') {
-        useKinoVideoCache.getState().upsert(event.data.gameId, event.data.item)
-      } else {
-        useKinoVideoCache.getState().remove(event.data.gameId, event.data.resourceId)
-      }
-    } finally {
-      applyingRemote = false
-    }
-  }
-  return () => {
-    channel?.close()
-    channel = null
-  }
-}
 
 /**
  * Project-scoped Kino resource consumer. It owns initial cache hydration so

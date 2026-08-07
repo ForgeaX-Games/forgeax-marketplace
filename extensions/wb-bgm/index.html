@@ -3,778 +3,215 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>音乐音效</title>
-  <script>
-    (() => {
-      const pane = new URLSearchParams(location.search).get('pane');
-      document.documentElement.dataset.pane = pane === 'left' || pane === 'center' ? pane : 'standalone';
-    })();
-  </script>
+  <title>BGM / 音效资产</title>
 </head>
 
 <body>
-  <div class="audio-app" id="audioApp">
-    <aside class="audio-search-pane" id="audioSearchPane">
-      <header class="workbench-pane-header">
-        <span class="workbench-pane-icon" aria-hidden="true">🔊</span>
-        <span class="workbench-pane-title">音乐音效</span>
-        <span class="workbench-pane-pill" id="assetCountPill">加载中</span>
-      </header>
+  <!-- ===== 顶部 Header ===== -->
+  <header class="header">
+    <div class="header-logo">
+      <span class="logo-icon">🔊</span>
+      <span class="logo-text">BGM / 音效资产</span>
+    </div>
 
-      <div class="audio-search-scroll">
-        <div class="audio-mode-switch" role="tablist" aria-label="音频工作模式">
-          <button type="button" class="audio-mode-btn is-selected" data-mode="sfx" role="tab">
-            <span aria-hidden="true">🔊</span>音效库
-          </button>
-          <button type="button" class="audio-mode-btn" data-mode="bgm" role="tab">
-            <span aria-hidden="true">♫</span>BGM 库
-          </button>
-          <button type="button" class="audio-mode-btn" data-mode="voice" role="tab">
-            <span aria-hidden="true">◉</span>语音生成
-          </button>
-          <button type="button" class="audio-mode-btn" data-mode="generate" role="tab">
-            <span aria-hidden="true">✦</span>AI 音频
-          </button>
-          <button type="button" class="audio-mode-btn audio-mode-btn-wide" data-mode="custom" role="tab">
-            <span aria-hidden="true">＋</span>自定义资产
-          </button>
-          <button type="button" class="audio-mode-btn audio-mode-btn-wide" data-mode="bindings" role="tab">
-            <span aria-hidden="true">⌁</span>事件绑定
-          </button>
-        </div>
+    <div class="header-spacer"></div>
 
-        <div id="searchControls">
-          <div id="querySearchBlock">
-            <label class="audio-query">
-              <input id="queryInput" type="search" placeholder="例如：黑暗奇幻 Boss 战，最后进入高潮" autocomplete="off" />
-              <span aria-hidden="true">⌕</span>
-            </label>
-            <p class="audio-query-hint" id="queryHint">描述使用场景或输入已有资产名称、标签。</p>
-          </div>
+    <!-- 搜索框 -->
+    <div class="search-box" id="searchBox">
+      <select id="searchType" class="search-mode-select" title="资产类型">
+        <option value="3">BGM</option>
+        <option value="7">音效</option>
+      </select>
+      <input type="text" id="searchInput" placeholder="按标签搜索..." />
+      <button id="searchBtn">搜索</button>
+    </div>
 
-          <section class="audio-interpreted hidden" id="interpretedSection">
-            <div class="audio-section-head">
-              <h2>系统理解</h2>
-              <span>点 × 可以修改</span>
-            </div>
-            <div class="audio-interpreted-chips" id="interpretedChips"></div>
-          </section>
+    <!-- 刷新按钮 -->
+    <button class="icon-btn" id="refreshBtn" title="检查并更新缓存">
+      <span id="refreshIcon">↻</span>
+    </button>
+  </header>
 
-          <div id="sfxSearchForm">
-            <div class="audio-directory-intro">
-              <strong>按音效目录查找</strong>
-              <p>先选一级分类，再选二级标签。结果严格来自对应目录，不进行自动推断。</p>
-            </div>
-            <section class="audio-filter-section">
-              <div class="audio-section-head">
-                <h2>一级分类</h2>
-              </div>
-              <div class="audio-chip-grid" id="categoryChips"></div>
-            </section>
+  <!-- ===== 类型 Tab 栏 ===== -->
+  <nav class="tabs-bar" id="tabsBar">
+    <button class="tab-btn active" data-type="">
+      <span>📂 全部（文件管理器）</span>
+    </button>
+    <button class="tab-btn" data-type="3"><span>🎵 BGM</span></button>
+    <button class="tab-btn" data-type="7"><span>🔊 音效</span></button>
+  </nav>
 
-            <section class="audio-filter-section hidden" id="subcategorySection">
-              <h2>二级标签</h2>
-              <div class="audio-chip-grid" id="subcategoryChips"></div>
-            </section>
-          </div>
+  <!-- ===== 主内容区 ===== -->
+  <div class="main-content">
 
-          <div id="bgmSearchForm" class="hidden">
-            <div class="audio-directory-intro">
-              <strong>组合标签查找 BGM</strong>
-              <p>场景优先，情绪最多选择两项。文件名与目录作为硬标签，CLAP只补充情绪和能量。</p>
-            </div>
-            <section class="audio-filter-section">
-              <h2>使用场景 <small>单选</small></h2>
-              <div class="audio-chip-grid" id="bgmSceneChips"></div>
-            </section>
-            <section class="audio-filter-section">
-              <h2>情绪 <small>最多2项</small></h2>
-              <div class="audio-chip-grid" id="bgmMoodChips"></div>
-            </section>
-            <section class="audio-filter-section">
-              <h2>能量 <small>单选</small></h2>
-              <div class="audio-chip-grid" id="bgmEnergyChips"></div>
-            </section>
-            <section class="audio-filter-section">
-              <h2>世界观 <small>单选；无证据不强行匹配</small></h2>
-              <div class="audio-chip-grid" id="bgmWorldChips"></div>
-            </section>
-          </div>
-        </div>
-
-        <form id="voiceCreationForm" class="creative-form hidden">
-          <div class="creative-intro">
-            <span class="creative-intro-icon" aria-hidden="true">◉</span>
-            <div>
-              <strong>生成角色语音</strong>
-              <p>先把台词和演法告诉我们，生成后还可以继续调整。</p>
-            </div>
-          </div>
-
-          <label class="creative-field">
-            <span>要说什么 <b>必填</b></span>
-            <textarea id="voiceScript" rows="5" placeholder="例如：你不该来到这里，旅人。"></textarea>
-          </label>
-
-          <label class="creative-field">
-            <span>谁在说</span>
-            <select id="voiceRole">
-              <option value="guard">守卫 / 战士</option>
-              <option value="hero">年轻英雄</option>
-              <option value="merchant">商人 / 普通角色</option>
-              <option value="villain">反派 / Boss</option>
-              <option value="narrator">旁白 / 系统播报</option>
-              <option value="creature">怪物 / 非人角色</option>
-            </select>
-          </label>
-
-          <fieldset class="creative-field">
-            <legend>怎么说</legend>
-            <div class="creative-choice-grid" id="voiceEmotionChoices">
-              <button type="button" class="creative-choice is-selected" data-value="平静">平静</button>
-              <button type="button" class="creative-choice" data-value="愤怒">愤怒</button>
-              <button type="button" class="creative-choice" data-value="害怕">害怕</button>
-              <button type="button" class="creative-choice" data-value="威严">威严</button>
-              <button type="button" class="creative-choice" data-value="疲惫">疲惫</button>
-              <button type="button" class="creative-choice" data-value="兴奋">兴奋</button>
-            </div>
-          </fieldset>
-
-          <label class="creative-field">
-            <span>补充要求 <small>可选</small></span>
-            <textarea id="voiceDirection" rows="3" placeholder="例如：低声警告，语速慢一点，有压迫感"></textarea>
-          </label>
-
-          <details class="creative-advanced">
-            <summary>高级设置 <span>语言、语速、生成数量</span></summary>
-            <div class="creative-advanced-grid">
-              <label>
-                <span>语言</span>
-                <select id="voiceLanguage">
-                  <option value="zh-CN">中文</option>
-                  <option value="en-US">英文</option>
-                  <option value="ja-JP">日文</option>
-                </select>
-              </label>
-              <label>
-                <span>语速</span>
-                <select id="voiceSpeed">
-                  <option value="slow">慢一些</option>
-                  <option value="normal" selected>正常</option>
-                  <option value="fast">快一些</option>
-                </select>
-              </label>
-              <label>
-                <span>生成数量</span>
-                <select id="voiceVariationCount">
-                  <option value="2">2 个版本</option>
-                  <option value="3" selected>3 个版本</option>
-                  <option value="4">4 个版本</option>
-                </select>
-              </label>
-            </div>
-          </details>
-        </form>
-
-        <form id="audioGenerationForm" class="creative-form hidden">
-          <div class="creative-segmented" role="tablist" aria-label="生成类型">
-            <button type="button" class="is-selected" data-generation-kind="bgm">生成 BGM</button>
-            <button type="button" data-generation-kind="sfx">生成音效</button>
-          </div>
-
-          <div class="creative-segmented creative-segmented-subtle" role="tablist" aria-label="生成方式">
-            <button type="button" class="is-selected" data-source-mode="new">从零生成</button>
-            <button type="button" data-source-mode="customize">修改已有声音</button>
-          </div>
-
-          <div class="creative-reference hidden" id="creativeReferenceCard">
-            <div>
-              <span>参考素材</span>
-              <strong id="creativeReferenceName">尚未选择</strong>
-            </div>
-            <button type="button" class="audio-text-btn" id="clearCreativeReference">移除</button>
-          </div>
-
-          <div class="creative-reference-empty hidden" id="creativeReferenceEmpty">
-            <strong>还没有参考声音</strong>
-            <p>先在音效库或 BGM 库选择素材，然后点击“个性化生成”。</p>
-          </div>
-
-          <label class="creative-field">
-            <span id="generationPromptLabel">想生成什么 <b>必填</b></span>
-            <textarea id="generationPrompt" rows="5" placeholder="例如：黑暗奇幻 Boss 战音乐，持续推进，最后进入高潮"></textarea>
-          </label>
-
-          <fieldset class="creative-field">
-            <legend>常用修改</legend>
-            <div class="creative-choice-grid" id="generationQuickChoices"></div>
-          </fieldset>
-
-          <div class="creative-inline-fields">
-            <label class="creative-field">
-              <span>大概多长</span>
-              <select id="generationDuration">
-                <option value="5">5 秒</option>
-                <option value="15">15 秒</option>
-                <option value="30" selected>30 秒</option>
-                <option value="60">1 分钟</option>
-                <option value="120">2 分钟</option>
-              </select>
-            </label>
-            <label class="creative-switch-row">
-              <input id="generationLoop" type="checkbox" />
-              <span>做成循环</span>
-            </label>
-          </div>
-
-          <label class="creative-strength hidden" id="creativeStrengthField">
-            <span><b>改动大小</b><output id="creativeStrengthValue">适度调整</output></span>
-            <input id="creativeStrength" type="range" min="1" max="3" step="1" value="2" />
-            <small><span>轻微调整</span><span>完全重做</span></small>
-          </label>
-
-          <details class="creative-advanced">
-            <summary>高级设置 <span>生成数量、纯音乐</span></summary>
-            <div class="creative-advanced-grid">
-              <label>
-                <span>生成数量</span>
-                <select id="generationVariationCount">
-                  <option value="2" selected>2 个版本</option>
-                  <option value="3">3 个版本</option>
-                  <option value="4">4 个版本</option>
-                </select>
-              </label>
-              <label class="creative-switch-row" id="instrumentalField">
-                <input id="generationInstrumental" type="checkbox" checked />
-                <span>纯音乐，不要人声</span>
-              </label>
-            </div>
-          </details>
-        </form>
-
-        <section id="audioBindingsIntro" class="creative-form hidden">
-          <div class="creative-intro">
-            <span class="creative-intro-icon" aria-hidden="true">⌁</span>
-            <div>
-              <strong>事件绑定</strong>
-              <p>选择游戏并扫描事件，然后在右侧检查或调整声音。</p>
-            </div>
-          </div>
-          <div class="binding-left-project">
-            <span class="binding-left-project-label">当前游戏</span>
-            <strong id="bindingLeftGameName">尚未选择游戏</strong>
-            <span id="bindingLeftRevision">先选择目标游戏</span>
-            <div class="binding-left-count">
-              <span>已绑定事件</span>
-              <strong id="bindingLeftCount">0</strong>
-            </div>
-          </div>
-          <div class="binding-left-actions">
-            <button type="button" class="audio-primary-btn" id="bindingLeftChooseGameBtn">选择游戏</button>
-            <button type="button" class="audio-secondary-btn" id="bindingLeftScanBtn" disabled>扫描游戏事件</button>
-          </div>
-          <div class="binding-left-note">
-            <span aria-hidden="true">✓</span>
-            <p>你与 Agent 共用同一份草稿。只有点击“确认并应用”后才会写入游戏。</p>
-          </div>
-        </section>
-
-        <section id="customAudioIntro" class="creative-form hidden">
-          <div class="creative-intro">
-            <span class="creative-intro-icon" aria-hidden="true">＋</span>
-            <div>
-              <strong>自定义音频资产</strong>
-              <p>由你明确选择 BGM 或音效。导入后立即可供 Agent 和事件绑定使用。</p>
-            </div>
-          </div>
-          <div class="custom-audio-import-grid">
-            <button type="button" class="audio-primary-btn" id="importCustomBgmBtn">导入 BGM</button>
-            <button type="button" class="audio-primary-btn" id="importCustomSfxBtn">导入音效</button>
-            <button type="button" class="audio-secondary-btn" id="importCustomBgmFolderBtn">导入 BGM 文件夹</button>
-            <button type="button" class="audio-secondary-btn" id="importCustomSfxFolderBtn">导入音效文件夹</button>
-          </div>
-          <input id="customAudioFileInput" class="hidden" type="file" accept="audio/ogg,audio/mpeg,audio/wav,.ogg,.mp3,.wav" multiple />
-          <input id="customAudioFolderInput" class="hidden" type="file" accept="audio/ogg,audio/mpeg,audio/wav,.ogg,.mp3,.wav" multiple webkitdirectory directory />
-          <div class="custom-audio-import-status" id="customAudioImportStatus">支持 OGG、MP3、WAV；每个文件独立处理。</div>
-        </section>
+    <!-- 左侧面板：文件树 / 资产列表 -->
+    <aside class="left-panel" id="leftPanel">
+      <div class="panel-header" id="panelHeader">
+        <span id="panelTitle">文件管理器</span>
+        <span class="panel-count" id="panelCount"></span>
       </div>
 
-      <footer class="audio-search-actions" id="searchActions">
-        <div class="audio-summary" id="conditionSummary">请先选择一级分类</div>
-        <div class="audio-action-row">
-          <span class="audio-search-status" id="searchStatus"></span>
-          <button type="button" class="audio-secondary-btn" id="clearSearchBtn">清空</button>
-          <button type="button" class="audio-primary-btn" id="runSearchBtn">搜索音效</button>
+      <!-- 文件管理器树 -->
+      <div id="fileTreeView">
+        <div class="tree-loading" id="treeLoading">
+          <div class="spinner"></div>
+          <span id="treeLoadingText">正在从服务端加载资产数据...</span>
         </div>
-      </footer>
-
-      <footer class="audio-search-actions hidden" id="creativeActions">
-        <div class="creative-api-note" id="creativeApiNote">
-          <span aria-hidden="true">◇</span>
-          <span>正在检查音频生成服务配置…</span>
+        <div id="treeContainer" class="hidden"></div>
+        <div id="treeEmpty" class="empty-hint hidden">
+          <p>暂无数据</p>
+          <p class="hint-sub">请确认在内网环境下运行</p>
         </div>
-        <div class="audio-action-row">
-          <span class="audio-search-status" id="creativeStatus">填写需求后生成</span>
-          <button type="button" class="audio-primary-btn" id="runCreativeBtn">生成 3 个版本</button>
-        </div>
-      </footer>
+      </div>
     </aside>
 
-    <main class="audio-center-pane" id="audioCenterPane">
-      <div class="audio-search-workspace" id="searchWorkspace">
-        <section class="audio-results-pane">
-        <header class="audio-panel-head">
-          <div>
-            <strong>搜索结果</strong>
-            <span id="resultCount">等待搜索</span>
-          </div>
-          <div class="audio-result-controls">
-            <select id="resultSort" aria-label="结果排序">
-              <option value="relevant">最相关</option>
-              <option value="unused">项目未使用</option>
-              <option value="explore">探索更多</option>
-            </select>
-            <select id="resultFilter" aria-label="结果范围">
-              <option value="all">全部结果</option>
-              <option value="exact">完全符合</option>
-              <option value="relaxed">条件已放宽</option>
-              <option value="partial">需要确认</option>
-            </select>
-          </div>
-        </header>
+    <!-- 右侧面板：查看器 -->
+    <main class="right-panel" id="rightPanel">
 
-        <div class="audio-results-body" id="resultsBody">
-          <div class="audio-empty-state" id="resultsEmpty">
-            <span aria-hidden="true">⌕</span>
-            <strong>从左侧选择条件开始搜索</strong>
-            <p>结果会按音效族展示，同一动作的多个变体不会占满列表。</p>
+      <!-- 主视图版本切换 -->
+      <div class="asset-version-tabs hidden" id="assetVersionTabs"></div>
+
+      <!-- 占位提示 -->
+      <div class="viewer-placeholder" id="viewerPlaceholder">
+        <div class="placeholder-icon">🔊</div>
+        <p>点击左侧资产试听 BGM / 音效</p>
+        <p class="hint-sub">试听后可点「配入游戏」写入当前游戏的 audio/manifest.json</p>
+      </div>
+
+      <!-- 筛选视图 -->
+      <div class="filter-view hidden" id="filterView">
+        <div class="filter-view-content">
+          <div id="assetGrid" class="asset-grid-large"></div>
+          <div id="filterLoading" class="filter-loading hidden">
+            <div class="spinner"></div><span>加载中...</span>
           </div>
-          <div class="audio-loading-state hidden" id="resultsLoading">
-            <span class="audio-spinner"></span>
-            <strong>正在检索音频资产</strong>
+          <div id="filterEmpty" class="empty-hint hidden"><p>该类型暂无资产</p></div>
+          <div id="filterError" class="error-hint hidden">
+            <p id="filterErrorMsg"></p>
+            <button id="filterRetry">重试</button>
           </div>
-          <div class="audio-warning-list hidden" id="resultWarnings"></div>
-          <div class="audio-result-list" id="resultList"></div>
         </div>
-        </section>
+        <div id="pagination" class="pagination hidden"></div>
+      </div>
 
-        <section class="audio-preview-pane">
-        <header class="audio-panel-head audio-preview-head">
-          <div>
-            <strong id="previewFilename">音频预览</strong>
-            <span id="previewVariantCount">尚未选择</span>
-          </div>
-          <div class="audio-preview-head-actions">
-            <button type="button" class="audio-secondary-btn" id="previewSimilarBtn" disabled>找相似</button>
-            <button type="button" class="audio-secondary-btn" id="previewInfoBtn" disabled>更多信息</button>
-          </div>
-        </header>
-
-        <div class="audio-preview-empty" id="previewEmpty">
-          <span aria-hidden="true">🔊</span>
-          <strong>选择一个结果开始试听</strong>
-          <p>试听后可将真实资产配入当前游戏。</p>
+      <!-- 搜索结果视图 -->
+      <div class="search-results hidden" id="searchResults">
+        <div class="viewer-toolbar">
+          <span class="viewer-name" id="searchResultTitle">搜索结果</span>
+          <button class="close-btn" id="closeSearchBtn" title="关闭搜索">✕</button>
         </div>
-
-        <div class="audio-preview-content hidden" id="previewContent">
-          <div class="audio-player-stage">
-            <div class="audio-waveform" id="audioWaveform" aria-hidden="true"></div>
-            <audio id="audioPlayer" controls preload="metadata"></audio>
+        <div class="search-results-content" id="searchResultsContent">
+          <div class="search-loading hidden" id="searchLoading">
+            <div class="spinner"></div>
+            <span>搜索中...</span>
           </div>
-
-          <div class="audio-preview-meta">
-            <div class="audio-preview-title-row">
-              <div>
-                <h1 id="previewTitle"></h1>
-                <p id="previewPath"></p>
-              </div>
-              <span class="audio-match-badge" id="previewMatchBadge"></span>
-            </div>
-
-            <div class="audio-variant-block">
-              <h2>变体</h2>
-              <div class="audio-variant-list" id="variantList"></div>
-            </div>
-
-            <div class="audio-selected-tags" id="previewTags"></div>
-
-            <section class="audio-shaping-panel" aria-labelledby="audioShapingTitle">
-              <div class="audio-shaping-head">
-                <div>
-                  <h2 id="audioShapingTitle">声音塑形</h2>
-                  <p>实时试听，不会修改原始音频</p>
-                </div>
-                <div class="audio-shaping-head-actions">
-                  <button type="button" class="audio-secondary-btn" id="shapingCompareBtn" disabled>对比原声</button>
-                  <button type="button" class="audio-text-btn" id="shapingResetBtn" disabled>重置</button>
-                </div>
-              </div>
-
-              <div class="audio-shaping-presets">
-                <span>快速预设</span>
-                <div class="audio-preset-list" id="shapingPresetList"></div>
-              </div>
-
-              <div class="audio-shaping-groups">
-                <section class="audio-shaping-group">
-                  <h3>基础</h3>
-                  <label class="audio-shaping-control">
-                    <span><b>音量 Gain</b><output id="shapingGainValue">0 dB</output></span>
-                    <input id="shapingGain" type="range" min="-24" max="12" step="0.5" value="0" />
-                  </label>
-                  <label class="audio-shaping-control">
-                    <span><b>音调 Pitch</b><output id="shapingPitchValue">0 半音</output></span>
-                    <input id="shapingPitch" type="range" min="-12" max="12" step="0.5" value="0" />
-                  </label>
-                  <label class="audio-shaping-control">
-                    <span><b>低频切除</b><output id="shapingHighpassValue">20 Hz</output></span>
-                    <input id="shapingHighpass" type="range" min="20" max="2000" step="10" value="20" />
-                  </label>
-                  <label class="audio-shaping-control">
-                    <span><b>高频切除</b><output id="shapingLowpassValue">20 kHz</output></span>
-                    <input id="shapingLowpass" type="range" min="1000" max="20000" step="100" value="20000" />
-                  </label>
-                </section>
-
-                <section class="audio-shaping-group">
-                  <h3>三段均衡器 EQ</h3>
-                  <label class="audio-shaping-control">
-                    <span><b>低频厚度</b><output id="shapingEqLowValue">0 dB</output></span>
-                    <input id="shapingEqLow" type="range" min="-12" max="12" step="0.5" value="0" />
-                  </label>
-                  <label class="audio-shaping-control">
-                    <span><b>中频存在感</b><output id="shapingEqMidValue">0 dB</output></span>
-                    <input id="shapingEqMid" type="range" min="-12" max="12" step="0.5" value="0" />
-                  </label>
-                  <label class="audio-shaping-control">
-                    <span><b>高频明亮度</b><output id="shapingEqHighValue">0 dB</output></span>
-                    <input id="shapingEqHigh" type="range" min="-12" max="12" step="0.5" value="0" />
-                  </label>
-                </section>
-              </div>
-
-              <footer class="audio-shaping-footer">
-                <span id="shapingStatus">原始声音</span>
-                <button type="button" class="audio-secondary-btn" id="shapingSaveBtn" disabled>保存参数</button>
-              </footer>
-            </section>
+          <div class="search-results-grid" id="searchResultsGrid"></div>
+          <div class="search-empty hidden" id="searchEmpty">
+            <p>未找到匹配的资产</p>
           </div>
-
-          <footer class="audio-preview-actions">
-            <span id="attachHint">请选择要配入的真实变体</span>
-            <button type="button" class="audio-secondary-btn" id="customizeAudioBtn" disabled>个性化生成</button>
-            <button type="button" class="audio-primary-btn" id="attachAudioBtn">配入游戏</button>
-          </footer>
+          <div class="pagination" id="searchPagination"></div>
         </div>
-        </section>
       </div>
 
-      <div class="audio-generation-workspace hidden" id="generationWorkspace">
-        <section class="audio-results-pane">
-          <header class="audio-panel-head">
-            <div>
-              <strong id="creativeResultsTitle">生成版本</strong>
-              <span id="creativeResultCount">尚未生成</span>
-            </div>
-            <span class="creative-demo-badge" id="creativeApiBadge">API 生成</span>
-          </header>
-
-          <div class="audio-results-body">
-            <div class="audio-empty-state" id="creativeResultsEmpty">
-              <span aria-hidden="true">✦</span>
-              <strong>从左侧描述你想要的声音</strong>
-              <p>这里会展示多个生成版本，方便逐个试听和继续修改。</p>
-            </div>
-            <div class="audio-loading-state hidden" id="creativeResultsLoading">
-              <span class="audio-spinner"></span>
-              <strong id="creativeLoadingText">正在调用音频生成 API</strong>
-            </div>
-            <div class="creative-result-list" id="creativeResultList"></div>
-          </div>
-        </section>
-
-        <section class="audio-preview-pane">
-          <header class="audio-panel-head audio-preview-head">
-            <div>
-              <strong id="creativePreviewTitle">生成预览</strong>
-              <span id="creativePreviewSubtitle">尚未选择版本</span>
-            </div>
-            <span class="creative-draft-state" id="creativeDraftState">草稿</span>
-          </header>
-
-          <div class="audio-preview-empty" id="creativePreviewEmpty">
-            <span aria-hidden="true">✦</span>
-            <strong>生成后在这里继续调整</strong>
-            <p>生成结果可直接试听、下载，或配入目标游戏。</p>
-          </div>
-
-          <div class="creative-preview-content hidden" id="creativePreviewContent">
-            <div class="creative-wave-stage">
-              <div class="creative-mock-wave" id="creativeMockWave" aria-hidden="true"></div>
-              <audio id="creativeAudioPlayer" preload="metadata"></audio>
-              <div class="creative-transport">
-                <button type="button" id="creativeMockPlay" aria-label="播放生成音频">▶</button>
-                <span id="creativeCurrentTime">00:00</span>
-                <div id="creativeProgress"><i></i></div>
-                <span id="creativeMockDuration">00:30</span>
-              </div>
-            </div>
-
-            <div class="creative-preview-scroll">
-              <section class="creative-summary-card">
-                <span id="creativeKindBadge">BGM</span>
-                <h1 id="creativeVersionName">版本 A</h1>
-                <p id="creativeVersionSummary"></p>
-                <details class="creative-prompt-details">
-                  <summary id="creativePromptSummary">查看专业提示词</summary>
-                  <p id="creativeCompiledPrompt"></p>
-                </details>
-                <div id="creativeVersionTags"></div>
-              </section>
-
-              <section class="creative-adjust-panel">
-                <div class="audio-shaping-head">
-                  <div>
-                    <h2>继续修改</h2>
-                    <p>选一个方向，继续调用 API 生成派生版本</p>
-                  </div>
-                </div>
-                <div class="creative-adjust-grid" id="creativeAdjustChoices"></div>
-                <label class="creative-field">
-                  <span>或者直接说明</span>
-                  <textarea id="creativeRevisionText" rows="3" placeholder="例如：保留整体氛围，但减少鼓点，让高潮更晚出现"></textarea>
-                </label>
-                <button type="button" class="audio-secondary-btn" id="creativeReviseBtn">生成修改版本</button>
-              </section>
-
-              <section class="audio-shaping-panel creative-shaping-preview">
-                <div class="audio-shaping-head">
-                  <div>
-                    <h2>声音塑形</h2>
-                    <p>真实音频生成后将复用 Pitch、Gain 和 EQ 调整器</p>
-                  </div>
-                </div>
-                <div class="creative-disabled-controls">
-                  <span>Gain <i></i></span>
-                  <span>Pitch <i></i></span>
-                  <span>EQ <i></i></span>
-                </div>
-              </section>
-            </div>
-
-            <footer class="audio-preview-actions">
-              <span id="creativeSaveHint">已生成内容仅在你主动操作后下载或配入游戏</span>
-              <button type="button" class="audio-secondary-btn" id="saveCreativeDraftBtn">下载音频</button>
-              <button type="button" class="audio-primary-btn" id="publishCreativeBtn">配入游戏</button>
-            </footer>
-          </div>
-        </section>
+      <!-- 音频播放器 -->
+      <div class="viewer-media hidden" id="viewerAudio">
+        <div class="viewer-toolbar">
+          <span class="viewer-name" id="audioName"></span>
+          <button class="toolbar-btn" id="attachAudioBtn" title="把该音频配入游戏" style="margin-left:auto">🎮 配入游戏</button>
+        </div>
+        <div class="media-wrap">
+          <div class="media-icon">🎵</div>
+          <audio id="audioPlayer" controls preload="metadata"></audio>
+        </div>
       </div>
 
-      <div class="audio-bindings-workspace hidden" id="bindingsWorkspace">
-        <section class="binding-browser-pane">
-          <header class="audio-panel-head binding-project-head">
-            <div>
-              <strong>声音事件</strong>
-              <span id="bindingRevision">先选择目标游戏</span>
-            </div>
-          </header>
-
-          <div class="binding-browser-scroll">
-            <section class="binding-browser-section">
-              <div class="binding-section-head">
-                <strong>当前草稿</strong>
-                <span>你与 Agent 共用</span>
-              </div>
-              <div class="binding-list-empty" id="bindingListEmpty">还没有绑定，可从扫描结果添加。</div>
-              <div class="binding-list" id="bindingList"></div>
-            </section>
-
-            <section class="binding-browser-section">
-              <div class="binding-section-head">
-                <strong>扫描发现</strong>
-                <span>不会修改游戏</span>
-              </div>
-              <div class="binding-list-empty" id="bindingCandidatesEmpty">选择游戏后点击“只读扫描事件”。</div>
-              <div class="binding-candidate-list" id="bindingCandidateList"></div>
-            </section>
-
-            <section class="binding-browser-section">
-              <div class="binding-section-head"><strong>手动添加事件</strong></div>
-              <div class="binding-manual-add">
-                <input id="bindingManualEvent" placeholder="例如 player.jump" aria-label="事件 ID" />
-                <input id="bindingManualLabel" placeholder="显示名称（可选）" aria-label="事件显示名称" />
-                <button type="button" class="audio-secondary-btn" id="bindingManualAddBtn">添加绑定</button>
-              </div>
-            </section>
-          </div>
-        </section>
-
-        <section class="binding-editor-pane">
-          <header class="audio-panel-head binding-editor-head">
-            <div>
-              <strong>绑定设置</strong>
-              <span id="bindingStatus">选择目标游戏后开始</span>
-            </div>
-            <div class="binding-header-actions">
-              <button type="button" class="audio-secondary-btn" id="bindingVerifyBtn" disabled>验证接入</button>
-              <button type="button" class="audio-secondary-btn" id="bindingSaveBtn" disabled>保存草稿</button>
-              <button type="button" class="audio-primary-btn" id="bindingApplyBtn" disabled>确认并应用</button>
-            </div>
-          </header>
-
-          <div class="audio-preview-empty" id="bindingEditorEmpty">
-            <span aria-hidden="true">⌁</span>
-            <strong>选择一个声音事件</strong>
-            <p>可以编辑 Agent 建议，也可以从扫描结果或手动添加。</p>
-          </div>
-
-          <div class="binding-editor hidden" id="bindingEditor">
-            <section class="binding-editor-section binding-identity">
-              <label class="binding-enabled"><input id="bindingEnabled" type="checkbox" /><span>启用此绑定</span></label>
-              <label><span>显示名称</span><input id="bindingLabel" /></label>
-              <div><span>游戏事件</span><code id="bindingEventId"></code></div>
-              <label><span>声音类型</span><select id="bindingKind"><option value="sfx">音效</option><option value="music">音乐</option><option value="voice">语音</option></select></label>
-            </section>
-
-            <section class="binding-editor-section">
-              <div class="binding-section-head"><div><strong>播放的声音</strong><span>可添加多个版本</span></div><button type="button" class="audio-secondary-btn" id="bindingAddAssetBtn">添加声音</button></div>
-              <div class="binding-repeat-list" id="bindingAssetList"></div>
-              <label class="binding-inline-field"><span>变体方式</span><select id="bindingVariation"><option value="single">只用第一个</option><option value="sequential">按顺序轮播</option><option value="random-no-repeat">随机且不连续重复</option></select></label>
-            </section>
-
-            <section class="binding-editor-section">
-              <div class="binding-section-head"><div><strong>跟随游戏变化</strong><span>可选；没有收到游戏值时自动播放默认声音</span></div></div>
-              <label class="binding-inline-field binding-follow-main"><span>声音跟随什么变化</span>
-                <select id="bindingFollowPreset">
-                  <option value="none">不跟随，始终使用默认声音</option>
-                  <option value="surface">地面材质</option>
-                  <option value="phase">游戏阶段</option>
-                  <option value="speed">玩家速度</option>
-                  <option value="health">玩家血量</option>
-                  <option value="distance">与玩家的距离</option>
-                  <option value="custom-cases">自定义：按不同值切换声音</option>
-                  <option value="custom-range">自定义：随数值连续变化</option>
-                </select>
-              </label>
-              <div class="binding-follow-panel hidden" id="bindingFollowPanel">
-                <label class="binding-inline-field hidden" id="bindingFollowFieldRow"><span>游戏变量</span><input id="bindingFollowField" placeholder="例如 surface.material" /></label>
-                <div class="hidden" id="bindingFollowCasesPanel">
-                  <div class="binding-section-head binding-subsection-head"><div><strong>不同值播放什么</strong><span>未匹配的值使用上面的默认声音</span></div><button type="button" class="audio-secondary-btn" id="bindingAddFollowCaseBtn">添加一种</button></div>
-                  <div class="binding-repeat-list" id="bindingFollowCaseList"></div>
-                </div>
-                <div class="hidden binding-follow-range" id="bindingFollowRangePanel">
-                  <div class="binding-field-grid">
-                    <label><span>最小值</span><input id="bindingFollowMin" type="number" /></label>
-                    <label><span>最大值</span><input id="bindingFollowMax" type="number" /></label>
-                    <label><span>变化效果</span><select id="bindingFollowEffect"><option value="intense">越大越强烈</option><option value="distant">越大越遥远</option><option value="recover">越大越恢复正常</option><option value="calm">越大越柔和</option></select></label>
-                  </div>
-                  <p>系统会自动平滑调整音量、音调和距离感。</p>
-                </div>
-              </div>
-            </section>
-
-            <section class="binding-editor-section">
-              <div class="binding-section-head"><div><strong>声音感觉</strong><span>事件级 EQ，统一作用于全部声音变体</span></div><button type="button" class="audio-text-btn" id="bindingShapingResetBtn">恢复原声</button></div>
-              <div class="binding-range-grid binding-tone-grid">
-                <label class="binding-range-field"><span><i>低频（厚度）</i><output id="bindingEqLowValue">0 dB</output></span><input id="bindingEqLow" type="range" min="-12" max="12" step="1" value="0" /></label>
-                <label class="binding-range-field"><span><i>中频（存在感）</i><output id="bindingEqMidValue">0 dB</output></span><input id="bindingEqMid" type="range" min="-12" max="12" step="1" value="0" /></label>
-                <label class="binding-range-field"><span><i>高频（清晰度）</i><output id="bindingEqHighValue">0 dB</output></span><input id="bindingEqHigh" type="range" min="-12" max="12" step="1" value="0" /></label>
-                <label class="binding-range-field"><span><i>距离感</i><output id="bindingDistanceValue">原声</output></span><input id="bindingDistance" type="range" min="0" max="100" step="1" value="0" /></label>
-              </div>
-            </section>
-
-            <section class="binding-editor-section">
-              <div class="binding-section-head"><strong>什么时候播放</strong></div>
-              <div class="binding-range-grid">
-                <label class="binding-range-field"><span><i>延迟</i><output id="bindingDelayValue">0 毫秒</output></span><input id="bindingDelay" type="range" min="0" max="5000" data-default-max="5000" step="50" /></label>
-                <label class="binding-range-field"><span><i>冷却</i><output id="bindingCooldownValue">0 毫秒</output></span><input id="bindingCooldown" type="range" min="0" max="30000" data-default-max="30000" step="100" /></label>
-                <label class="binding-range-field"><span><i>播放概率</i><output id="bindingProbabilityValue">100%</output></span><input id="bindingProbability" type="range" min="0" max="100" data-default-max="100" step="1" /></label>
-              </div>
-            </section>
-
-            <section class="binding-editor-section">
-              <div class="binding-section-head"><strong>怎么播放</strong></div>
-              <div class="binding-field-grid">
-                <label class="binding-range-field binding-wide-field"><span><i>音量</i><output id="bindingVolumeValue">100%</output></span><input id="bindingVolume" type="range" min="0" max="400" data-default-max="400" step="5" /></label>
-                <label><span>音量总线</span><select id="bindingBus"><option value="sfx">音效</option><option value="music">音乐</option><option value="voice">语音</option></select></label>
-                <label><span>空间方式</span><select id="bindingSpatial"><option value="2d">2D / 全局</option><option value="3d">3D / 跟随位置</option></select></label>
-                <label><span>播放方式</span><select id="bindingPlaybackMode"><option value="one-shot">播放一次</option><option value="loop">循环播放</option></select></label>
-                <label><span>淡入（毫秒）</span><input id="bindingFadeIn" type="number" min="0" /></label>
-                <label><span>淡出（毫秒）</span><input id="bindingFadeOut" type="number" min="0" /></label>
-                <label class="binding-wide-field"><span>收到哪个事件时停止（可选）</span><input id="bindingStopEvent" placeholder="例如 combat.end" /></label>
-              </div>
-            </section>
-
-            <section class="binding-editor-section">
-              <div class="binding-section-head"><div><strong>简单条件</strong><span>事件上下文满足时才播放</span></div><button type="button" class="audio-secondary-btn" id="bindingAddConditionBtn">添加条件</button></div>
-              <div class="binding-repeat-list" id="bindingConditionList"></div>
-            </section>
-
-            <footer class="binding-editor-footer">
-              <span>删除绑定不会删除声音文件</span>
-              <button type="button" class="audio-text-btn binding-danger" id="bindingDeleteBtn">删除此绑定</button>
-            </footer>
-          </div>
-        </section>
-      </div>
-
-      <div class="custom-audio-workspace hidden" id="customAudioWorkspace">
-        <section class="custom-audio-library-pane">
-          <header class="audio-panel-head">
-            <div>
-              <strong>我的音频资产</strong>
-              <span id="customAudioCount">尚未导入</span>
-            </div>
-            <div class="custom-audio-filter" role="tablist" aria-label="自定义资产类型">
-              <button type="button" class="is-selected" data-custom-kind="all">全部</button>
-              <button type="button" data-custom-kind="bgm">BGM</button>
-              <button type="button" data-custom-kind="sfx">音效</button>
-            </div>
-          </header>
-          <div class="audio-results-body">
-            <div class="audio-empty-state" id="customAudioEmpty">
-              <span aria-hidden="true">＋</span>
-              <strong>还没有自定义音频</strong>
-              <p>从左侧分别导入 BGM 或音效，不会自动判断类型。</p>
-            </div>
-            <div class="custom-audio-list" id="customAudioList"></div>
-          </div>
-        </section>
-
-        <section class="audio-preview-pane">
-          <header class="audio-panel-head audio-preview-head">
-            <div>
-              <strong id="customAudioPreviewTitle">自定义音频预览</strong>
-              <span id="customAudioPreviewMeta">尚未选择</span>
-            </div>
-          </header>
-          <div class="audio-preview-empty" id="customAudioPreviewEmpty">
-            <span aria-hidden="true">♫</span>
-            <strong>选择一个自定义资产</strong>
-            <p>可以试听、改类别、配入游戏或进入事件绑定。</p>
-          </div>
-          <div class="custom-audio-preview hidden" id="customAudioPreview">
-            <audio id="customAudioPlayer" controls preload="metadata"></audio>
-            <dl class="custom-audio-details">
-              <div><dt>文件</dt><dd id="customAudioFileName"></dd></div>
-              <div><dt>格式</dt><dd id="customAudioFormat"></dd></div>
-              <div><dt>时长</dt><dd id="customAudioDuration">读取中</dd></div>
-              <div><dt>类别</dt><dd id="customAudioKind"></dd></div>
-            </dl>
-            <div class="custom-audio-preview-actions">
-              <button type="button" class="audio-text-btn binding-danger" id="deleteCustomAudioBtn">删除</button>
-              <button type="button" class="audio-secondary-btn" id="changeCustomAudioKindBtn">更改类别</button>
-              <button type="button" class="audio-secondary-btn" id="attachCustomAudioBtn">配入游戏</button>
-              <button type="button" class="audio-primary-btn" id="bindCustomAudioBtn">绑定游戏事件</button>
-            </div>
-          </div>
-        </section>
-      </div>
     </main>
   </div>
 
+  <!-- Toast -->
   <div class="toast hidden" id="toast"></div>
+
+  <!-- 资产详情弹窗 -->
+  <div class="modal-overlay hidden" id="modalOverlay">
+    <div class="modal-container" id="modalContainer">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">资产详情</h3>
+        <button class="modal-close-btn" id="modalCloseBtn">✕</button>
+      </div>
+      
+      <div class="modal-version-tabs hidden" id="modalVersionTabs"></div>
+      
+      <div class="modal-content" id="modalContent">
+        <div class="modal-info-section" id="modalInfoSection">
+          <div class="info-row">
+            <span class="info-label">名称</span>
+            <span class="info-value" id="infoName">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">资产 ID</span>
+            <span class="info-value" id="infoId">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">类型</span>
+            <span class="info-value" id="infoType">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">状态</span>
+            <span class="info-value" id="infoState">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">描述</span>
+            <span class="info-value" id="infoDescription">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">路径</span>
+            <span class="info-value info-path" id="infoPath">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">版本</span>
+            <span class="info-value" id="infoVersion">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">创建时间</span>
+            <span class="info-value" id="infoCreateTime">-</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">修改时间</span>
+            <span class="info-value" id="infoUpdateTime">-</span>
+          </div>
+          <div class="info-row" id="infoAiMetaRow">
+            <span class="info-label">AI Meta</span>
+            <span class="info-value" id="infoAiMeta" style="white-space: pre-wrap; font-family: monospace; font-size: 11px; background: var(--bg-3); padding: 6px; border-radius: 4px; border: 1px solid var(--border);">-</span>
+          </div>
+          <div class="info-row" id="infoExtraRow">
+            <span class="info-label">Extra</span>
+            <span class="info-value" id="infoExtra" style="white-space: pre-wrap; font-family: monospace; font-size: 11px; background: var(--bg-3); padding: 6px; border-radius: 4px; border: 1px solid var(--border);">-</span>
+          </div>
+          <div class="info-row" id="infoTagsRow">
+            <span class="info-label">标签</span>
+            <span class="info-tags" id="infoTags"></span>
+          </div>
+          <div class="info-row" style="margin-top: 24px;">
+            <button id="modalAttachBtn" class="download-btn hidden" style="margin-bottom: 12px;">🎮 配入游戏</button>
+          </div>
+        </div>
+
+        <div class="modal-preview-section" id="modalPreviewSection">
+          <div class="modal-viewer-media hidden" id="modalViewerAudio">
+            <div class="media-wrap">
+              <div class="media-icon">🎵</div>
+              <audio id="modalAudioPlayer" controls preload="metadata"></audio>
+            </div>
+          </div>
+          <div class="modal-preview-placeholder hidden" id="modalPreviewPlaceholder">
+            <div class="placeholder-icon">📄</div>
+            <p id="modalPlaceholderText">暂不支持预览该类型</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

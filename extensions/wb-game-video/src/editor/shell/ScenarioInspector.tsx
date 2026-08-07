@@ -1,21 +1,16 @@
 /**
  * ScenarioInspector —— 场景级配置：variables / entities / overlays 目录 / formulas / 默认 BGM。
  */
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useState, type CSSProperties, type JSX } from 'react'
 import type { AttrMeta, Entity, GameScenario, Layout, Overlay, ScalarValue, Variable } from '../../runtime/schema/graph-schema'
-import type { Formula, FormulaParseFailureSnapshot } from '../persist/formula-authoring'
+import type { Formula } from '../persist/formula-authoring'
 import { OverlayCatalogPreview } from './OverlayCatalogPreview'
 import { OverlayChildStyleEditor } from './OverlayChildStyleEditor'
-import { NEW_COMPONENT_PRESETS, listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
-import { FormulaHelpContent, FormulaTextEditor } from './FormulaTextEditor'
+import { NEW_COMPONENT_PRESETS, sortSchemeIds } from '../demo/builtin-schemes'
+import { FormulaTextEditor } from './FormulaTextEditor'
 import { LooseNumberInput } from './TermChainEditor'
 import type { ScenarioIdRename } from '../persist/scenario-id'
 import { nextUniqueOverlayTitle, overlayTitleExists } from './overlay-title'
-import { injectStyleOnce } from '../../styles/injectStyle'
-import { placeAdaptivePop } from './useBlueprintNavActions'
-import { AiParameterFillButton } from './AiParameterFillButton'
-import searchIcon from '../../assets/asset-toolbar-search.svg?url'
 
 export type ScenarioMeta = Pick<GameScenario, 'variables' | 'entities' | 'ui'> & {
   formulas?: Record<string, Formula>
@@ -39,119 +34,6 @@ const sectionTitle: CSSProperties = {
 }
 const variableGridColumns = 'minmax(0, 0.9fr) minmax(0, 1.5fr) minmax(4rem, 0.5fr) minmax(3.5rem, 0.55fr) 2rem'
 const entityAttrGrid = 'minmax(4.5rem, 0.45fr) minmax(0, 0.9fr) minmax(4rem, 0.5fr) minmax(7rem, 1.25fr) 2rem'
-const FORMULA_RULES_CSS = `
-.sir-formulas { min-width:0; }
-.sir-formula-toolbar {
-  height:44px; display:flex; align-items:center; justify-content:flex-end; gap:12px;
-}
-.sir-formula-create {
-  height:24px; padding:0 10px; border:0; border-radius:6px;
-  background:rgba(255,255,255,.08); color:rgba(255,255,255,.86);
-  font-size:12px; cursor:pointer;
-}
-.sir-formula-search {
-  box-sizing:border-box; width:190px; height:24px; padding:0 10px 0 30px;
-  border:0; border-radius:6px; outline:0; color:rgba(255,255,255,.86);
-  background:rgba(255,255,255,.08);
-}
-.sir-formula-search::placeholder { color:rgba(255,255,255,.32); }
-.sir-formula-search-wrap { position:relative; display:inline-flex; }
-.sir-formula-search-icon {
-  position:absolute; left:10px; top:50%; width:12px; height:12px;
-  transform:translateY(-50%); color:rgba(255,255,255,.88); pointer-events:none;
-}
-.sir-formula-row { border-bottom:1px solid rgba(255,255,255,.08); }
-.sir-formula-row:first-of-type { border-top:1px solid rgba(255,255,255,.08); }
-.sir-formula-head {
-  min-height:64px; display:flex; align-items:center; gap:8px; position:relative;
-}
-.sir-formula-toggle {
-  width:16px; height:20px; padding:0; border:0; background:transparent;
-  display:inline-flex; align-items:center; justify-content:center; cursor:pointer;
-  color:rgba(255,255,255,.34);
-}
-.sir-formula-toggle.is-open { color:rgba(255,255,255,.92); }
-.sir-formula-toggle svg {
-  width:12px; height:12px; display:block; transition:transform .16s ease,color .16s ease;
-}
-.sir-formula-toggle.is-open svg { transform:rotate(-90deg); }
-.sir-formula-name {
-  field-sizing:content; flex:0 1 auto; min-width:2.5em; width:auto; max-width:40%; padding:0; border:0; outline:0;
-  background:transparent; color:rgba(255,255,255,.9); font:inherit; font-size:14px;
-  overflow:hidden; text-overflow:ellipsis;
-}
-.sir-formula-id { flex:0 0 auto; margin-left:-2px; color:rgba(255,255,255,.32); font-size:14px; }
-.sir-formula-more {
-  margin-left:auto; width:24px; height:24px; padding:0; border:0;
-  background:transparent; color:rgba(255,255,255,.9); font-size:18px;
-  line-height:18px; cursor:pointer;
-}
-.sir-formula-menu {
-  position:absolute; z-index:3; right:0; top:46px; padding:4px;
-  border:1px solid rgba(255,255,255,.1); border-radius:6px; background:#242424;
-  box-shadow:0 8px 20px rgba(0,0,0,.3);
-}
-.sir-formula-menu button {
-  min-width:72px; height:26px; border:0; border-radius:4px; background:transparent;
-  color:#ff8e8e; cursor:pointer;
-}
-.sir-formula-menu button:hover { background:rgba(255,255,255,.08); }
-.sir-formula-body { padding:0 0 14px; }
-.sir-formula-field { display:grid; gap:6px; margin-bottom:10px; }
-.sir-formula-field > span { color:rgba(255,255,255,.48); font-size:12px; }
-.sir-formula-label { display:flex; align-items:center; gap:4px; }
-.sir-formula-error { color:var(--gc-danger, #e0795f); font-size:11px; line-height:18px; cursor:help; }
-.sir-formula-error:focus-visible { outline:1px solid var(--gc-danger, #e0795f); outline-offset:2px; border-radius:2px; }
-.sir-formula-error-tooltip {
-  box-sizing:border-box; max-width:min(360px, calc(100vw - 16px)); padding:7px 10px;
-  border:1px solid rgba(255,255,255,.14); border-radius:7px;
-  background:var(--color-background-floating, #333); color:rgba(255,255,255,.86);
-  box-shadow:0 6px 18px rgba(0,0,0,.4); font-size:11px; line-height:1.45;
-  overflow-wrap:anywhere; pointer-events:none;
-}
-.sir-formula-error-ai { margin-left:1px; }
-.sir-formula-help-trigger {
-  width:14px; height:14px; padding:0; border:0; border-radius:50%;
-  display:inline-flex; align-items:center; justify-content:center;
-  background:transparent; color:rgba(255,255,255,.42); cursor:pointer;
-}
-.sir-formula-help-trigger:hover,
-.sir-formula-help-trigger[aria-expanded='true'] { color:rgba(255,255,255,.88); background:rgba(255,255,255,.08); }
-.sir-formula-help-trigger:focus-visible { outline:1px solid var(--gc-accent, #f08840); outline-offset:2px; }
-.sir-formula-help-trigger svg { width:12px; height:12px; display:block; }
-.sir-formula-help {
-  box-sizing:border-box; max-width:calc(100vw - 16px); max-height:min(440px, calc(100vh - 16px));
-  overflow:auto; padding:12px 14px; border:1px solid rgba(255,255,255,.14); border-radius:8px;
-  background:var(--color-background-floating, #333); color:rgba(255,255,255,.78);
-  box-shadow:0 8px 24px rgba(0,0,0,.45); font-size:12px; line-height:1.55;
-}
-.sir-formula-help::before {
-  content:''; position:absolute; width:8px; height:8px; background:inherit;
-  border:inherit; transform:rotate(45deg); pointer-events:none;
-}
-.sir-formula-help[data-side='below']::before { top:-5px; left:calc(var(--ns-arrow) - 4px); border-right:0; border-bottom:0; }
-.sir-formula-help[data-side='above']::before { bottom:-5px; left:calc(var(--ns-arrow) - 4px); border-left:0; border-top:0; }
-.sir-formula-help[data-side='right']::before { left:-5px; top:calc(var(--ns-arrow) - 4px); border-right:0; border-top:0; }
-.sir-formula-help[data-side='left']::before { right:-5px; top:calc(var(--ns-arrow) - 4px); border-left:0; border-bottom:0; }
-.sir-formula-help h3 { margin:0 0 8px; color:rgba(255,255,255,.94); font-size:13px; }
-.sir-formula-help-list { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
-.sir-formula-help-list > li { position:relative; padding-left:12px; }
-.sir-formula-help-list > li::before { content:'·'; position:absolute; left:1px; color:var(--gc-accent, #f08840); }
-.sir-formula-help strong { color:rgba(255,255,255,.94); font-weight:600; }
-.sir-formula-help p { margin:2px 0 0; color:rgba(255,255,255,.62); }
-.sir-formula-help code { font-family:var(--font-mono, ui-monospace, monospace); color:rgba(255,255,255,.9); }
-.sir-formula-help-example { display:block; margin-top:4px; padding:5px 7px; border-radius:5px; background:rgba(0,0,0,.24); overflow-wrap:anywhere; }
-.sir-formula-help-example .gc-fx-hole-tag { padding:1px 3px; }
-.sir-formula-field > input {
-  box-sizing:border-box; width:100%; height:24px; padding:0 8px;
-  border:0; border-radius:6px; outline:0; background:rgba(0,0,0,.55);
-  color:rgba(255,255,255,.88);
-}
-.sir-formula-field > input:focus {
-  border-color:var(--gc-accent); box-shadow:0 0 0 1px var(--gc-accent); outline:0;
-}
-.sir-formula-empty { padding:20px 0; color:rgba(255,255,255,.38); }
-`
 
 function field(label: string, node: JSX.Element): JSX.Element {
   return (
@@ -357,37 +239,10 @@ function UsageBadge({ count }: { count: number }): JSX.Element {
 
 export type ScenarioSection = 'overlays' | 'variables' | 'entities' | 'formulas'
 
-function RuleToolbar({
-  title,
-  search,
-  onSearchChange,
-  onCreate,
-}: {
-  title: string
-  search: string
-  onSearchChange: (value: string) => void
-  onCreate: () => void
-}): JSX.Element {
-  return (
-    <div className="gc-rule-toolbar" style={{ position: 'sticky', top: 0, zIndex: 2 }}>
-      <span className="gc-rule-section-title">{title}</span>
-      <button type="button" className="gc-rule-button" aria-label={`＋ 新建${title}`} onClick={onCreate}>
-        <span className="gc-rule-button-icon" aria-hidden />
-        <span>新建{title}</span>
-      </button>
-      <label className="gc-rule-search-wrap">
-        <span className="gc-rule-search-icon" aria-hidden><img src={searchIcon} alt="" /></span>
-        <input className="gc-rule-search" aria-label={`搜索${title}`} placeholder={`搜索${title}`} value={search} onChange={(event) => onSearchChange(event.target.value)} />
-      </label>
-    </div>
-  )
-}
-
 export function ScenarioInspector({
   value,
   section,
   overlayUsage,
-  focusItemId,
   onChange,
   onRenameId = () => ({ ok: false, reason: 'not_found' }),
 }: {
@@ -395,31 +250,19 @@ export function ScenarioInspector({
   section?: ScenarioSection
   /** overlayId → 被多少节点挂载引用（资源池「已用/未用」角标）。 */
   overlayUsage?: Record<string, number>
-  /** 外侧规则树请求定位的同域条目。 */
-  focusItemId?: string | null
   onChange: (next: ScenarioMeta) => void
   onRenameId?: (rename: ScenarioIdRename) => { ok: true } | { ok: false; reason: 'empty_id' | 'duplicate_id' | 'not_found' }
 }): JSX.Element {
-  injectStyleOnce('scenario-inspector-formulas', FORMULA_RULES_CSS)
   const show = (s: ScenarioSection) => !section || section === s
   const variables = value.variables ?? {}
   const entities = value.entities ?? {}
   const formulas = value.formulas ?? {}
   const allOverlays = value.ui?.overlays ?? {}
-  // 「通用样式」= 自由方案 + 基础覆盖物；排除每节点自动内容 overlay（node:*）。
-  const schemeIds = listSchemeAndBaseOverlayIds(allOverlays)
+  // 「通用样式」= 自由方案；排除每节点自动内容 overlay（node:*，那是时间轴的内容容器）。
+  // 内置方案（静态/动态组件方案）固定置顶，其余按目录原有顺序跟后，见 sortSchemeIds。
+  const schemeIds = sortSchemeIds(Object.keys(allOverlays).filter((id) => !id.startsWith('node:')))
   // 标题输入本地缓存：onChange 自由输入，onBlur 时提交到 renameScheme 做重名校验。
   const [schemeLocalTitles, setSchemeLocalTitles] = useState<Record<string, string>>({})
-  const [variableSearch, setVariableSearch] = useState('')
-  const [entitySearch, setEntitySearch] = useState('')
-  const [formulaSearch, setFormulaSearch] = useState('')
-  useEffect(() => {
-    if (section === 'formulas' && focusItemId) setFormulaSearch('')
-  }, [focusItemId, section])
-  useEffect(() => {
-    if (!focusItemId) return
-    document.getElementById(`rule-item:${focusItemId}`)?.scrollIntoView({ block: 'nearest' })
-  }, [focusItemId, formulaSearch, section])
   const setOverlays = (overlays: Record<string, Overlay>) => onChange({ ...value, ui: { ...value.ui, overlays } })
   const patchOverlayChildInMeta = (
     overlayId: string,
@@ -480,21 +323,9 @@ export function ScenarioInspector({
   const setVariables = (v: Record<string, Variable>) => onChange({ ...value, variables: v })
   const setEntities = (e: Record<string, Entity>) => onChange({ ...value, entities: e })
   const setFormulas = (f: Record<string, Formula>) => onChange({ ...value, formulas: f })
-  const normalizedFormulaSearch = formulaSearch.trim().toLocaleLowerCase()
-  const normalizedVariableSearch = variableSearch.trim().toLocaleLowerCase()
-  const normalizedEntitySearch = entitySearch.trim().toLocaleLowerCase()
-  const variableEntries = Object.entries(variables).filter(([id, variable]) =>
-    !normalizedVariableSearch || [id, variable.name].some((part) => part?.toLocaleLowerCase().includes(normalizedVariableSearch)))
-  const entityEntries = Object.entries(entities).filter(([id, entity]) =>
-    !normalizedEntitySearch || [id, entity.name].some((part) => part?.toLocaleLowerCase().includes(normalizedEntitySearch)))
-  const formulaEntries = Object.entries(formulas).filter(([id, formula]) => {
-    if (!normalizedFormulaSearch) return true
-    return [id, formula.name, formula.description]
-      .some((part) => part?.toLocaleLowerCase().includes(normalizedFormulaSearch))
-  })
 
   return (
-    <div className="gc-rule-root">
+    <div style={{ padding: 10, fontSize: 12 }}>
       {show('overlays') && (
         <>
           <div style={sectionTitle}>
@@ -577,15 +408,17 @@ export function ScenarioInspector({
 
       {show('variables') && (
         <>
-          <RuleToolbar
-            title="变量"
-            search={variableSearch}
-            onSearchChange={setVariableSearch}
-            onCreate={() => {
+          <div style={sectionTitle}>
+            <b>变量</b>
+            <button
+              onClick={() => {
                 const id = allocId('var', variables)
                 setVariables({ ...variables, [id]: { id, name: id, initial: 0 } })
               }}
-          />
+            >
+              + 变量
+            </button>
+          </div>
           {Object.keys(variables).length > 0 ? (
             <div
               aria-hidden
@@ -607,10 +440,9 @@ export function ScenarioInspector({
               <span />
             </div>
           ) : null}
-          {variableEntries.map(([key, v]) => (
+          {Object.entries(variables).map(([key, v]) => (
             <div
               key={key}
-              id={`rule-item:${key}`}
               style={{
                 ...box,
                 display: 'grid',
@@ -669,40 +501,40 @@ export function ScenarioInspector({
 
       {show('entities') && (
         <>
-          <RuleToolbar
-            title="实体"
-            search={entitySearch}
-            onSearchChange={setEntitySearch}
-            onCreate={() => {
+          <div style={sectionTitle}>
+            <b>实体</b>
+            <button
+              onClick={() => {
                 const id = allocId('ent-', entities)
                 setEntities({ ...entities, [id]: { id, name: id, attrs: {}, attrMeta: {} } })
               }}
-          />
-          {entityEntries.map(([key, ent]) => (
-            <div key={key} id={`rule-item:${key}`}>
-              <EntityRow
-                entKey={key}
-                ent={ent}
-                entities={entities}
-                onChange={(next) => setEntities({ ...entities, [key]: { ...next, id: key } })}
-                onRename={onRenameId}
-                onDelete={() => {
-                  const { [key]: _drop, ...rest } = entities
-                  setEntities(rest)
-                }}
-              />
-            </div>
+            >
+              + 实体
+            </button>
+          </div>
+          {Object.entries(entities).map(([key, ent]) => (
+            <EntityRow
+              key={key}
+              entKey={key}
+              ent={ent}
+              entities={entities}
+              onChange={(next) => setEntities({ ...entities, [key]: { ...next, id: key } })}
+              onRename={onRenameId}
+              onDelete={() => {
+                const { [key]: _drop, ...rest } = entities
+                setEntities(rest)
+              }}
+            />
           ))}
         </>
       )}
 
       {show('formulas') && (
-        <div className="sir-formulas">
-          <RuleToolbar
-            title="公式"
-            search={formulaSearch}
-            onSearchChange={setFormulaSearch}
-            onCreate={() => {
+        <>
+          <div style={sectionTitle}>
+            <b>公式</b>
+            <button
+              onClick={() => {
                 const id = allocId('formula-', formulas)
                 setFormulas({
                   ...formulas,
@@ -714,30 +546,31 @@ export function ScenarioInspector({
                   },
                 })
               }}
-          />
+            >
+              + 公式
+            </button>
+          </div>
           <div style={{ opacity: 0.55, fontSize: 11, marginBottom: 6 }}>
             定义可复用的计算公式（如伤害公式）；条款里的「实体」可留空，蓝图/时间轴应用该公式时再选具体实体填空。
           </div>
-          {formulaEntries.length === 0 ? (
-            <div className="sir-formula-empty">{normalizedFormulaSearch ? '没有匹配的公式' : '暂无公式'}</div>
-          ) : null}
-          {formulaEntries.map(([key, f], index) => (
+          {Object.keys(formulas).length === 0 ? <div style={{ opacity: 0.5 }}>暂无公式</div> : null}
+          {Object.entries(formulas).map(([key, f]) => (
             <FormulaRow
               key={key}
               formulaKey={key}
               formula={f}
+              formulas={formulas}
               entities={entities}
               variables={variables}
-              defaultExpanded={index === 0 || focusItemId === key}
-              focused={focusItemId === key}
               onChange={(next) => setFormulas({ ...formulas, [key]: { ...next, id: key } })}
+              onRename={onRenameId}
               onDelete={() => {
                 const { [key]: _drop, ...rest } = formulas
                 setFormulas(rest)
               }}
             />
           ))}
-        </div>
+        </>
       )}
 
     </div>
@@ -908,291 +741,64 @@ function EntityRow({
   )
 }
 
-function FormulaHelpPopover({ children }: { children: ReactNode }): JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [placement, setPlacement] = useState<ReturnType<typeof placeAdaptivePop>>(null)
-  const triggerRef = useRef<HTMLButtonElement | null>(null)
-  const panelRef = useRef<HTMLDivElement | null>(null)
-  const panelId = useId()
-  const titleId = useId()
-  const frameRef = useRef<number | null>(null)
-
-  useLayoutEffect(() => {
-    if (!open) {
-      setPlacement(null)
-      return
-    }
-    const updatePlacement = (): void => {
-      const panel = panelRef.current
-      const rect = panel?.getBoundingClientRect()
-      setPlacement(placeAdaptivePop(triggerRef.current, {
-        width: rect?.width || 360,
-        height: rect?.height || 280,
-      }))
-    }
-    const schedulePlacement = (): void => {
-      if (frameRef.current != null) return
-      frameRef.current = requestAnimationFrame(() => {
-        frameRef.current = null
-        updatePlacement()
-      })
-    }
-    updatePlacement()
-    window.addEventListener('resize', schedulePlacement)
-    window.addEventListener('scroll', schedulePlacement, true)
-    return () => {
-      window.removeEventListener('resize', schedulePlacement)
-      window.removeEventListener('scroll', schedulePlacement, true)
-      if (frameRef.current != null) cancelAnimationFrame(frameRef.current)
-      frameRef.current = null
-    }
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: MouseEvent): void => {
-      const target = event.target as Node | null
-      if (target && (triggerRef.current?.contains(target) || panelRef.current?.contains(target))) return
-      setOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      setOpen(false)
-      requestAnimationFrame(() => triggerRef.current?.focus())
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
-
-  return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="sir-formula-help-trigger"
-        aria-label="查看公式填写帮助"
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <svg viewBox="0 0 14 14" fill="none" aria-hidden>
-          <circle cx="7" cy="7" r="5.5" stroke="currentColor" />
-          <path d="M5.7 5.2a1.45 1.45 0 0 1 2.77.6c0 1.2-1.47 1.25-1.47 2.35" stroke="currentColor" strokeLinecap="round" />
-          <circle cx="7" cy="10.25" r=".55" fill="currentColor" />
-        </svg>
-      </button>
-      {open ? createPortal(
-        <div
-          ref={panelRef}
-          id={panelId}
-          className="sir-formula-help"
-          role="dialog"
-          aria-labelledby={titleId}
-          data-side={placement?.side ?? 'below'}
-          style={placement?.style ?? {
-            position: 'fixed',
-            width: 'min(360px, calc(100vw - 16px))',
-            visibility: 'hidden',
-          }}
-        >
-          <h3 id={titleId}>公式填写帮助</h3>
-          {children}
-        </div>,
-        document.body,
-      ) : null}
-    </>
-  )
-}
-
-function FormulaErrorIndicator({ failure }: { failure: FormulaParseFailureSnapshot }): JSX.Element {
-  const [visible, setVisible] = useState(false)
-  const [placement, setPlacement] = useState<ReturnType<typeof placeAdaptivePop>>(null)
-  const triggerRef = useRef<HTMLSpanElement | null>(null)
-  const tooltipRef = useRef<HTMLDivElement | null>(null)
-  const tooltipId = useId()
-
-  useLayoutEffect(() => {
-    if (!visible) {
-      setPlacement(null)
-      return
-    }
-    const updatePlacement = (): void => {
-      const rect = tooltipRef.current?.getBoundingClientRect()
-      setPlacement(placeAdaptivePop(triggerRef.current, {
-        width: rect?.width || 280,
-        height: rect?.height || 48,
-      }))
-    }
-    updatePlacement()
-    const frame = requestAnimationFrame(updatePlacement)
-    window.addEventListener('resize', updatePlacement)
-    window.addEventListener('scroll', updatePlacement, true)
-    return () => {
-      cancelAnimationFrame(frame)
-      window.removeEventListener('resize', updatePlacement)
-      window.removeEventListener('scroll', updatePlacement, true)
-    }
-  }, [visible])
-
-  useEffect(() => {
-    if (!visible) return
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setVisible(false)
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [visible])
-
-  return (
-    <>
-      <span
-        ref={triggerRef}
-        className="sir-formula-error"
-        role="status"
-        tabIndex={0}
-        data-error-detail={failure.parserDiagnostic}
-        aria-describedby={visible ? tooltipId : undefined}
-        onPointerEnter={() => setVisible(true)}
-        onPointerLeave={() => setVisible(false)}
-        onFocus={() => setVisible(true)}
-        onBlur={() => setVisible(false)}
-      >
-        公式解析失败
-      </span>
-      {visible ? createPortal(
-        <div
-          ref={tooltipRef}
-          id={tooltipId}
-          className="sir-formula-error-tooltip"
-          role="tooltip"
-          data-side={placement?.side ?? 'below'}
-          style={placement?.style ?? {
-            position: 'fixed',
-            width: 'min(280px, calc(100vw - 16px))',
-            visibility: 'hidden',
-          }}
-        >
-          错误详情：{failure.parserDiagnostic}
-        </div>,
-        document.body,
-      ) : null}
-    </>
-  )
-}
-
 function FormulaRow({
   formulaKey,
   formula,
+  formulas,
   entities,
   variables,
-  defaultExpanded,
-  focused,
   onChange,
+  onRename,
   onDelete,
 }: {
   formulaKey: string
   formula: Formula
+  formulas: Record<string, Formula>
   entities: Record<string, Entity>
   variables: Record<string, Variable>
-  defaultExpanded: boolean
-  focused: boolean
   onChange: (next: Formula) => void
+  onRename: (rename: ScenarioIdRename) => { ok: true } | { ok: false; reason: 'empty_id' | 'duplicate_id' | 'not_found' }
   onDelete: () => void
 }): JSX.Element {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [formulaFailure, setFormulaFailure] = useState<FormulaParseFailureSnapshot | null>(null)
-  useEffect(() => {
-    if (focused) setExpanded(true)
-  }, [focused])
   return (
-    <div id={`rule-item:${formulaKey}`} className="sir-formula-row">
-      <div className="sir-formula-head">
-        <button
-          type="button"
-          className={`sir-formula-toggle${expanded ? ' is-open' : ''}`}
-          aria-label={`${expanded ? '折叠' : '展开'}公式 ${formula.name || formulaKey}`}
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => {
-            if (current) setFormulaFailure(null)
-            return !current
-          })}
-        >
-          <svg viewBox="0 0 12 12" fill="none" aria-hidden>
-            <path d="M4.5 2.5L8 6L4.5 9.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+    <div style={box}>
+      {field('id', <EditableIdInput value={formula.id} existing={formulas} rename={{ kind: 'formula', oldId: formulaKey }} onRename={onRename} label="公式 ID" />)}
+      {field(
+        '名称',
         <input
-          className="sir-formula-name"
-          aria-label={`公式 ${formulaKey} 名称`}
           value={formula.name ?? ''}
-          size={Math.max(2, Math.min(24, Array.from(formula.name ?? '').length || 2))}
           onChange={(e) => onChange({ ...formula, id: formulaKey, name: e.target.value })}
-        />
-        <span className="sir-formula-id">id:{formulaKey}</span>
-        <button
-          type="button"
-          className="sir-formula-more"
-          aria-label={`${formula.name || formulaKey}更多操作`}
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((current) => !current)}
-        >
-          ⋯
-        </button>
-        {menuOpen ? (
-          <div className="sir-formula-menu" role="menu">
-            <button type="button" onClick={onDelete}>删除公式</button>
-          </div>
-        ) : null}
-      </div>
-      {expanded ? (
-        <div className="sir-formula-body">
-          <label className="sir-formula-field">
-            <span>描述</span>
-            <input
-              value={formula.description ?? ''}
-              placeholder="如：伤害 = 攻击力 × 倍率 - 防御力"
-              onChange={(e) => onChange({ ...formula, id: formulaKey, description: e.target.value || undefined })}
-            />
-          </label>
-          <div className="sir-formula-field">
-            <span className="sir-formula-label">
-              公式
-              <FormulaHelpPopover><FormulaHelpContent /></FormulaHelpPopover>
-              {formulaFailure ? (
-                <>
-                  <FormulaErrorIndicator failure={formulaFailure} />
-                  <AiParameterFillButton
-                    className="sir-formula-error-ai"
-                    ariaLabel="AI 修复公式"
-                    title="AI 公式修复暂不可用"
-                  />
-                </>
-              ) : null}
-            </span>
-            <FormulaTextEditor
-              ast={formula.ast}
-              empty={formula.draftEmpty}
-              entities={entities}
-              variables={variables}
-              onParseFailureChange={setFormulaFailure}
-              onEmpty={formula.draftEmpty
-                ? () => onChange({ ...formula, id: formulaKey, draftEmpty: true })
-                : undefined}
-              onChange={(ast) => onChange({
-                ...formula,
-                id: formulaKey,
-                ast,
-                draftEmpty: undefined,
-              })}
-            />
-          </div>
-        </div>
-      ) : null}
+          style={{ flex: 1 }}
+        />,
+      )}
+      {field(
+        '描述',
+        <input
+          value={formula.description ?? ''}
+          placeholder="如：伤害 = 攻击力 × 倍率 - 防御力"
+          onChange={(e) => onChange({ ...formula, id: formulaKey, description: e.target.value || undefined })}
+          style={{ flex: 1 }}
+        />,
+      )}
+      <div style={{ margin: '6px 0 2px', fontSize: 11, opacity: 0.7 }}>公式（留空位 = 应用时再填的参数/实体）</div>
+      <FormulaTextEditor
+        ast={formula.ast}
+        empty={formula.draftEmpty}
+        entities={entities}
+        variables={variables}
+        onEmpty={formula.draftEmpty
+          ? () => onChange({ ...formula, id: formulaKey, draftEmpty: true })
+          : undefined}
+        onChange={(ast) => onChange({
+          ...formula,
+          id: formulaKey,
+          ast,
+          draftEmpty: undefined,
+        })}
+      />
+      <button style={{ ...del, marginTop: 6 }} onClick={onDelete}>
+        删除公式
+      </button>
     </div>
   )
 }

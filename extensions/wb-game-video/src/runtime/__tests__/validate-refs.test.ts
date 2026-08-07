@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { validateGraph } from '../validate/validate'
-import { registerTestComponents } from './test-components'
+import { registerCoreSkins } from '../component-host/components'
 import type { GameGraph, Overlay } from '../schema/graph-schema'
 
 beforeAll(() => {
-    registerTestComponents()
+    registerCoreSkins()
 })
 
 const optsBase = { entities: ['ent-player', 'ent-boss'], vars: ['qi'] }

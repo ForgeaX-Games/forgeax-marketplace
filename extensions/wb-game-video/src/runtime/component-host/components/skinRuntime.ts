@@ -1,15 +1,56 @@
 /**
  * 皮肤自带运行时（component-host/ 内部工具箱）—— 让每个皮肤组件**自闭环**：只依赖 React + 本工具，
  * 不 import 游戏引擎其它代码。样式/SVG 滤镜都由皮肤自己注入，方便用户把组件整包拷走/替换。
+ *
+ * 提供：
+ *   - injectCss(id, css)：幂等注入一份 <style>（同 id HMR 覆盖）。
+ *   - ensureInkFilters()：注入水墨毛边 SVG 滤镜 #inkRough / #inkRoughNarr。
+ *   - ensureBrushFont：书法字体 HYShangWei —— 字体**自带在 component-host 层**（与用它的皮肤组件同层），
+ *     组件自调 `ensureBrushFont()` 即可，不再由 editor 全局注入，也不跨层依赖 assets。
+ *   - useDefaultEventTimeout：限时组件到点自 emit(defaultEvent)。
  */
-import type { CSSProperties } from 'react'
-
-// 字体与皮肤组件同层自带；随 runtime 一起发，不依赖 editor 注入。
-import brushFontUrl from './HYShangWei.woff2'
+import { useEffect, useRef } from 'react'
+import { usePlaybackTimeout } from '../../playback-clock'
+// 字体与皮肤组件同层自带（component-host/assets）；随 runtime 一起发，不依赖 editor 注入。
+import brushFontUrl from './assets/fonts/HYShangWei.woff2'
 
 const injected = new Map<string, HTMLStyleElement>()
 
-/** 同组件再次显示时不重复添加视觉规则，修改视觉规则后即时替换页面中的旧效果。 */
+/** 从 inputs 归一超时 ms（timeoutMs / windowMs / durationMs）。 */
+export function resolveTimeoutMs(inputs: Record<string, unknown> | undefined): number | undefined {
+  if (!inputs) return undefined
+  const raw =
+    (typeof inputs.timeoutMs === 'number' ? inputs.timeoutMs : undefined)
+    ?? (typeof inputs.windowMs === 'number' ? inputs.windowMs : undefined)
+    ?? (typeof inputs.durationMs === 'number' ? inputs.durationMs : undefined)
+  return typeof raw === 'number' && raw > 0 ? raw : undefined
+}
+
+/**
+ * 组件挂载后计时，到点 emit(defaultEvent ?? 'fail')；preview 不跑。
+ *
+ * emit 用 ref 持有——试玩面每帧 setSnap 会换新的内联 emit，若进 effect deps
+ * 会把 timeout 清掉重开，限时默认选项（如應/默 8s→默）永远到不了点。
+ */
+export function useDefaultEventTimeout(
+  emit: ((key: string) => void) | undefined,
+  inputs: Record<string, unknown> | undefined,
+  preview?: boolean,
+): void {
+  const timeoutMs = resolveTimeoutMs(inputs)
+  const defaultEvent =
+    typeof inputs?.defaultEvent === 'string' && inputs.defaultEvent
+      ? inputs.defaultEvent
+      : 'fail'
+  const emitRef = useRef(emit)
+  emitRef.current = emit
+  usePlaybackTimeout(
+    () => emitRef.current?.(defaultEvent),
+    timeoutMs,
+    !!preview || !emitRef.current,
+  )
+}
+
 export function injectCss(id: string, css: string): void {
   if (typeof document === 'undefined') return
   const existing = injected.get(id)
@@ -42,7 +83,11 @@ export function ensureInkFilters(): void {
   document.body.appendChild(host)
 }
 
-/** 注入水墨手书字体 HYShangWei（@font-face，幂等）。字体文件与本工具同层自带 */
+/**
+ * 注入水墨手书字体 HYShangWei（@font-face，幂等）。字体文件与本工具同层自带
+ * （`component-host/assets/fonts`），需要它的皮肤组件自调本函数即可——不依赖 editor、不跨层。
+ * 若字体加载失败，CSS font-family 会回落到 STKaiti/KaiTi。
+ */
 export function ensureBrushFont(): void {
   injectCss(
     'skin-brush-font',
@@ -51,38 +96,16 @@ export function ensureBrushFont(): void {
 }
 
 /**
- * catalog 叶子组件共享的文字外观输入。字段必须保持可选：皮肤定义身份默认值，
- * 组件只在自己的 manifest 中选择性暴露可由作者覆盖的字段。
- *
- * `fontSize` 的单位是画面高度百分比，渲染为 cqh；因此在不同画布尺寸下仍保持比例。
+ * 编辑器预览 scrub 精度 opt-in 辅助——**不接也没事**：宿主 `.gc-preview-clock.is-paused` 已统一
+ * 冻住子树内全部纯 CSS animation（暂停即停）。只有想让「拖播放头」精确对上入场动画某一帧的皮肤
+ * 才需要这套：配合 `animation-delay: calc(<固有 delay> - var(--preview-t, 0ms))` +
+ * preview 时整体 `animation-play-state: paused`（见 inkKou / inkYingMo 的 is-frozen 规则）。
  */
-export interface TextAppearanceInputs {
-  color?: string
-  fontSize?: number
+export function previewFreezeClass(preview: boolean | undefined): string {
+  return preview ? ' is-frozen' : ''
 }
 
-/** 将可选作者覆盖合并进组件自己的文字默认值。 */
-export function resolveTextAppearance(
-  inputs: TextAppearanceInputs,
-  defaults: Required<TextAppearanceInputs>,
-): CSSProperties {
-  return {
-    color: inputs.color ?? defaults.color,
-    // happy-dom 尚不解析 cqh；通过 CSS custom property 保持测试环境与浏览器表现一致。
-    ['--gv-text-font-size']: `${inputs.fontSize ?? defaults.fontSize}cqh`,
-  } as CSSProperties
-}
-
-/** 统一动画总时长与冻结预览时间轴的 CSS 变量契约。 */
-export function animationTimingStyle(durationMs: number, previewTimeMs?: number): CSSProperties {
-  return {
-    ['--gv-animation-duration']: `${durationMs}ms`,
-    ...(previewTimeMs == null ? {} : previewTStyle(previewTimeMs)),
-  } as CSSProperties
-}
-
-/** 预览态 CSS 动画负 delay 使用的本地时间。 */
-export function previewTStyle(localMs: number): CSSProperties {
-  const normalizedMs = Math.round(Math.max(0, localMs) * 1000) / 1000
-  return { ['--preview-t']: `${normalizedMs}ms` } as CSSProperties
+/** `--preview-t` CSS 变量：给 previewFreezeClass 配套的负 delay 表达式用。 */
+export function previewTStyle(localMs: number): Record<string, string> {
+  return { ['--preview-t']: `${Math.max(0, localMs)}ms` }
 }

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GameScenario } from '../schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../engine/session'
 import { PlayerRootContext, type SkinCtx } from '../component-host/rendererRegistry'
-import { bootComponents } from '../component-host'
+import { registerBuiltins } from '../component-host'
 import { claimPlayerFocus, releasePlayerFocus } from '../input/playerFocus'
 import { useClipPerformanceEnd } from './useClipPerformanceEnd'
 import { GameStage } from './GameStage'
@@ -35,7 +35,7 @@ export interface GamePlayerProps {
 }
 
 export function GamePlayer({ scenario, game, resolveAsset, rngSeed }: GamePlayerProps): JSX.Element {
-  void bootComponents(game)
+  registerBuiltins()
   const session = useMemo(
     () => new GraphSession(scenario, { rngSeed: rngSeed ?? createSessionSeed() }),
     [scenario, rngSeed],

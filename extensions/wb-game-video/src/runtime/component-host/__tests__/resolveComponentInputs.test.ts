@@ -4,7 +4,7 @@ import type { SkinCtx } from '../rendererRegistry'
 import { resolveComponentInputs } from '../resolveComponentInputs'
 
 const manifest: ComponentManifest = {
-  id: 'test.hud',
+  id: 'BattleEnemyHpBar',
   inputs: [
     { key: 'label', label: '显示名', valueType: 'string', default: '敌方', component: 'numberExpr' },
     { key: 'current', label: '血量', valueType: 'number', required: true, component: 'numberExpr' },
@@ -49,7 +49,7 @@ describe('resolveComponentInputs', () => {
 
   it('resolves numeric value formulas and duration defaults', () => {
     const floatManifest: ComponentManifest = {
-      id: 'test.float',
+      id: 'DamageFloatText',
       inputs: [
         { key: 'value', valueType: 'number', component: 'numberExpr' },
         { key: 'durationMs', valueType: 'number', default: 1100 },
@@ -67,7 +67,7 @@ describe('resolveComponentInputs', () => {
 
   it('resolves numeric text inputs without adding a sign', () => {
     const textManifest: ComponentManifest = {
-      id: 'test.notice',
+      id: 'StatusNotice',
       inputs: [
         { key: 'text', valueType: 'string', component: 'numberExpr', default: '' },
       ],

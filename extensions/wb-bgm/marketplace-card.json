@@ -1,7 +1,7 @@
 {
   "summary": {
-    "zh": "BGM / 音效工作台，包含玩家端搜索试听和 AI 端游戏音效接入 Skill。输入 /game-audio 后，Agent 会读取策划与代码，生成 Audio Plan，批量精准检索、幂等挂载、接通真实游戏事件并自动审计。",
-    "en": "The BGM & SFX workbench combines player-facing search and preview with an AI game-audio integration skill. Type /game-audio to turn design and code into an Audio Plan, retrieve and attach assets in a batch, bind real game events, and audit the result."
+    "zh": "BGM / 音效工作台,一个本地的音频素材库 + 配入游戏的工具。你搜索、试听音频素材库里的 BGM 与音效,选中后一键配入当前游戏:文件下载到 .forgeax/games/<slug>/audio/ 并写入(upsert)audio/manifest.json,引擎据 manifest 播放。它把「找一段合适的音乐/音效并接进游戏」这件事收进一个面板,搜、听、配一气呵成。",
+    "en": "The BGM & SFX workbench — a local audio asset library plus an attach-to-game tool. You search and preview BGM and SFX from the library, then attach a pick to the current game in one click: the file downloads into .forgeax/games/<slug>/audio/ and is upserted into audio/manifest.json, which the engine plays from. It folds 'find the right music/SFX and wire it into the game' into one panel — search, listen, attach in one go."
   },
   "sections": [
     {
@@ -10,18 +10,18 @@
         "en": "What it does"
       },
       "body": {
-        "zh": "玩家端：搜索、筛选、试听音频素材\nAI端：需求分析、Audio Plan、精准检索、批量挂载、事件接入",
-        "en": "Player: search, filter, and preview audio\nAI: requirements, Audio Plan, precise retrieval, batch attach, and event binding"
+        "zh": "搜索 + 试听音频素材库\n一键配入游戏 → audio/ + audio/manifest.json",
+        "en": "Search + preview the audio library\nOne-click attach → audio/ + audio/manifest.json"
       }
     },
     {
       "title": {
-        "zh": "AI Skill",
-        "en": "AI Skill"
+        "zh": "工具",
+        "en": "Tools"
       },
       "body": {
-        "zh": "/game-audio\nresolve-audio-plan → apply-audio-plan → 播放器适配 → 事件绑定 → 自动审计",
-        "en": "/game-audio\nresolve-audio-plan → apply-audio-plan → player adaptation → event binding → automated audit"
+        "zh": "search-audio / attach-audio / list-audio",
+        "en": "search-audio / attach-audio / list-audio"
       }
     },
     {
@@ -30,8 +30,8 @@
         "en": "How to use"
       },
       "body": {
-        "zh": "玩家端：面板管理启用 → 打开「音乐音效」\nAI端：在聊天框输入 /game-audio",
-        "en": "Player: enable it in Admin → open BGM & SFX\nAI: type /game-audio in chat"
+        "zh": "面板管理启用 → 打开「bgm」面板",
+        "en": "Enable in Admin → open the 'bgm' panel"
       }
     }
   ],

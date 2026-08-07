@@ -12,13 +12,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
-import type { WorkbenchExtensionContext } from '@forgeax/workbench-host/node'
-import {
-  createHostAssetRegistry,
-  mimeForPath,
-  upsertAsset,
-  type HostAssetRegistry,
-} from '../asset-registry'
+import { mimeForPath, upsertAsset } from '../asset-registry'
 import type { MediaAsset } from '../../src/editor/assets/registry-types'
 
 interface CharManifest {
@@ -88,82 +82,4 @@ export function importCharacterRefs(opts: { assetsDir: string; charactersDir: st
     )
   }
   return out
-}
-
-function safeCharacterId(value: string): boolean {
-  return (
-    value.length > 0
-    && value !== '.'
-    && value !== '..'
-    && !value.includes('/')
-    && !value.includes('\\')
-  )
-}
-
-function boundedPortraitPath(charId: string, value: string): string {
-  const normalized = value.replace(/\\/g, '/')
-  if (
-    normalized.length === 0
-    || normalized.startsWith('/')
-    || /^[A-Za-z]:\//.test(normalized)
-    || normalized.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
-  ) {
-    throw new TypeError('Character portrait must be a bounded relative path')
-  }
-  return `characters/${charId}/${normalized}`
-}
-
-/**
- * Scans the existing wb-character directory contract through the host's
- * bounded directory listing. Reference bytes are copied into host media; no
- * source path is stored in the registry or returned to callers.
- */
-export async function importCharacterRefsFromHost(
-  context: WorkbenchExtensionContext,
-  registry: HostAssetRegistry = createHostAssetRegistry(context),
-): Promise<MediaAsset[]> {
-  const entries = await context.files.list('characters')
-  const refs: MediaAsset[] = []
-  for (const charId of entries) {
-    if (!safeCharacterId(charId)) continue
-    const manifestBytes = await context.files.read(
-      `characters/${charId}/manifest.json`,
-    )
-    if (!manifestBytes) continue
-    let manifest: CharManifest
-    try {
-      manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as CharManifest
-    } catch {
-      continue
-    }
-    if (manifest.charId !== undefined && manifest.charId !== charId) continue
-    const portrait = pickPortraitRel(manifest)
-    if (typeof portrait !== 'string' || !portrait) continue
-    try {
-      const relativePath = boundedPortraitPath(charId, portrait)
-      const mime = mimeForPath(portrait)
-      refs.push(await registry.importGameFile({
-        registryId: `a-charref-${charId}`,
-        relativePath,
-        filename: `character-${charId.replace(/[^a-z0-9_-]+/gi, '-') || 'character'}.${mime.split('/')[1] ?? 'png'}`,
-        contentType: mime,
-        productionType: 'character_ref',
-        label: manifest.name || charId,
-        sourceModule: 'wb-character',
-        meta: { charId, role: manifest.role },
-      }))
-    } catch (error) {
-      if (
-        error instanceof Error
-        && (
-          error instanceof TypeError
-          || error.message.startsWith('Reference media was not found:')
-        )
-      ) {
-        continue
-      }
-      throw error
-    }
-  }
-  return refs
 }

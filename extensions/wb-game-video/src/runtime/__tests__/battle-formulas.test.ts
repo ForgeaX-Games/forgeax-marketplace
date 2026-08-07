@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import demo from '../../editor/demo/__tests__/fixtures/nodia.graph.json'
+import demo from '../../editor/demo/nodia.graph.json'
 import { evalExpr } from '../engine/expr'
 import { createRng } from '../engine/rng'
 import type { EvalCtx } from '../engine/expr'
