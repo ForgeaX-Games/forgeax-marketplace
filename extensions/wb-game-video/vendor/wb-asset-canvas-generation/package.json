@@ -1,0 +1,11 @@
+{
+  "name": "@forgeax-extension/wb-asset-canvas",
+  "version": "0.2.0",
+  "type": "module",
+  "exports": {
+    "./generation": {
+      "types": "./dist/generation-lib.d.ts",
+      "import": "./dist/generation-lib.js"
+    }
+  }
+}

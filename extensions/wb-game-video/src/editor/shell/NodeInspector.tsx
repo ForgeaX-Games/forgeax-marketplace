@@ -36,6 +36,10 @@ import type {
   VariableCreateHandler,
 } from './component-form-fields'
 import { ComponentInputsDisclosure } from './ComponentInputsDisclosure'
+import {
+  collectCurrentNodeKeyBindingSites,
+  findKeyBindingConflicts,
+} from './keyBindingConflicts'
 import { overlayDisplayLabel, PRESET_SCHEME_BY_ID } from './schemeOverlays'
 import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
 import { NodeActionsEditor } from './NodeActionsEditor'
@@ -194,8 +198,6 @@ function RouteTimingEditor({
 /** 悬停 / 模块内聚焦时边框微亮；`nested` 仅略缩进，底色与父级一致。 */
 const HOVER_CARD_CLASS = 'ni-hover-card'
 const HOVER_CARD_NESTED = 'ni-hover-card--nested'
-/** 图标按钮：对齐宿主侧栏 `.sb-icon-btn`（透明底、无边框、hover 才提亮）；无 padding，按钮尺寸 = 图标尺寸。 */
-const ICON_BTN_CLASS = 'ni-icon-btn'
 const HOVER_CARD_STYLE_ID = 'ni-hover-card-style-v8'
 
 function ensureHoverCardStyle(): void {
@@ -238,27 +240,6 @@ function ensureHoverCardStyle(): void {
 .${HOVER_CARD_CLASS}.${HOVER_CARD_NESTED}:hover,
 .${HOVER_CARD_CLASS}.${HOVER_CARD_NESTED}:focus-within {
   border-color: #6bc4a8;
-}
-.${ICON_BTN_CLASS} {
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--faint, #8c8377);
-  flex-shrink: 0;
-  line-height: 0;
-}
-.${ICON_BTN_CLASS}:hover {
-  color: var(--txt, #f6f1e9);
-  background: rgba(255, 255, 255, 0.08);
-}
-.${ICON_BTN_CLASS}:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.55);
-  outline-offset: -1px;
 }
 `
   document.head.appendChild(el)
@@ -579,7 +560,7 @@ function LifecycleReactionsEditor({
               onFocusIndex?.(i)
             }}
             style={{
-              border: `1px solid ${focused ? '#5ad4c0' : '#2a2a2a'}`,
+              border: `1px solid ${focused ? '#b9d79c' : '#2a2a2a'}`,
               borderRadius: 6,
               padding: 6,
               transition: 'border-color 120ms ease',
@@ -1090,8 +1071,6 @@ export function NodeInspector({
   focusAnchorRevision,
   onFocusMount,
   onFocusLifecycle,
-  previewOpen,
-  onTogglePreview,
   onChange,
   onPacksChange,
   onEnsureOverlay,
@@ -1137,10 +1116,6 @@ export function NodeInspector({
   onFocusMount?: (mountId: string | null) => void
   /** 点击某条结算时上抛（与时间轴菱形双向联动）。 */
   onFocusLifecycle?: (lifecycleIndex: number | null) => void
-  /** 宿主左侧预览区当前是否展开（驱动头部弧形把手的朝向与文案）。 */
-  previewOpen?: boolean
-  /** 传了才渲染头部弧形把手：切换宿主左侧预览区的展开/收起。 */
-  onTogglePreview?: () => void
   onChange: (g: GameGraph) => void
   onPacksChange?: (packs: SubFlowPackDef[]) => void
   /**
@@ -1188,6 +1163,9 @@ export function NodeInspector({
   const node = graph.nodes.find((n) => n.id === nodeId)
   if (!node || !nodeId) return <div style={{ padding: 10, opacity: 0.6, fontSize: 12 }}>点画布上的节点以编辑</div>
   const d = node.data
+  const keyConflicts = findKeyBindingConflicts(
+    collectCurrentNodeKeyBindingSites(overlays, nodeId, d.overlayNodes),
+  )
   const nodeIds = graph.nodes.map((n) => n.id)
   /** 下拉展示：中文名称只显示名称；没有中文名称时保留 id 兜底。 */
   const nodeLabel = (id: string) => {
@@ -1372,38 +1350,6 @@ export function NodeInspector({
           borderBottom: '1px solid #2e2924',
         }}
       >
-        {/* 预览区开关：对齐宿主侧栏折叠按钮（lucide panel-left-close / panel-left-open，本包无
-            图标库，图标手写 inline SVG——与 GraphCanvas 的 Ico 同款做法）。 */}
-        {onTogglePreview ? (
-          <button
-            type="button"
-            className={ICON_BTN_CLASS}
-            onClick={onTogglePreview}
-            aria-expanded={!!previewOpen}
-            aria-label={previewOpen ? '收起预览区' : '展开预览区'}
-            title={previewOpen ? '收起左侧预览区' : '展开左侧预览区'}
-            // 按钮无 padding（尺寸=图标），只需抵掉 svg viewBox 内缩（rect x=3 → 16px 下约 2px），
-            // 让图标可见左缘落在表单内容列（节点标题 / 各区标题都从这一列起）上。
-            style={{ marginLeft: -2 }}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <rect width="18" height="18" x="3" y="3" rx="2" />
-              <path d="M9 3v18" />
-              {previewOpen ? <path d="m16 15-3-3 3-3" /> : <path d="m14 9 3 3-3 3" />}
-            </svg>
-          </button>
-        ) : null}
         <b style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>节点 {node.id}</b>
         <span style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
           <button
@@ -1622,6 +1568,11 @@ export function NodeInspector({
                           onCreateEntity={onCreateEntity}
                           onCreateVariable={onCreateVariable}
                           onCreateFormula={onCreateFormula}
+                          keyConflicts={{
+                            overlayId: mid,
+                            childId: child.id,
+                            conflicts: keyConflicts,
+                          }}
                         />
                       )
                     })}

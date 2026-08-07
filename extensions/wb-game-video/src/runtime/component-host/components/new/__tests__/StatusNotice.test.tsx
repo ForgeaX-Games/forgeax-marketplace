@@ -35,6 +35,21 @@ describe('StatusNotice', () => {
     expect(screen.getByText('攻击 12').parentElement).toHaveStyle({ '--gv-animation-duration': '2400ms' })
   })
 
+  it('preserves color alpha through the runtime host', () => {
+    const skins = createCoreSkinRegistry()
+    render(
+      <>
+        {skins.renderOverlay({
+          elementId: 'transparent-notice',
+          component: 'StatusNotice',
+          inputs: { fixedText: '半透明', parameter: '', color: 'rgba(240,240,240,0.5)' },
+        })}
+      </>,
+    )
+
+    expect(screen.getByText('半透明')).toHaveStyle({ color: 'rgba(240, 240, 240, 0.5)' })
+  })
+
   it('leaf renders already-resolved flat props', () => {
     render(<StatusNotice fixedText="攻击 " parameter="+12" color="#ffd54a" durationMs={2400} />)
     expect(screen.getByText('攻击 +12')).toBeTruthy()

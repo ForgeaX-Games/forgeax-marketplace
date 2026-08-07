@@ -1,11 +1,8 @@
 /**
- * VersionPicker —— 历史版本切换（game-host 模型）。
+ * VersionPicker —— 历史用户版本列表（game-host 模型）。
  *
- * 「保存 = 打版本」：打版本动作在工具条的 💾 保存 按钮（`store.commit()`）。
- * 这里只提供「历史版本」下拉：选某个 vN = **非破坏式载入**该版内容到编辑器
- * （不改 git 历史、不 checkout），用户再点保存时才在最新之上新增一版。
- * 当前有未保存草稿时，下拉下方 popConfirm 二次确认（portal 到 body，避免被工具条/
- * 上方 chrome 裁切或盖住），不走原生 confirm。
+ * 选某个 vN = **恢复为当前 tip**（Host restore），不是只读灌画布。
+ * 有未保存编辑时 popConfirm 二次确认。
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
@@ -143,12 +140,12 @@ export function VersionPicker(): JSX.Element {
       ref={popRef}
       className="gv-version-confirm-pop"
       role="dialog"
-      aria-label="确认载入版本"
+      aria-label="确认恢复版本"
       data-placement={placement}
       style={popStyle}
     >
       <div className="gv-version-confirm-msg">
-        载入版本 {pendingTag} 会覆盖当前未保存的修改，继续？
+        恢复版本 {pendingTag} 会写回当前 tip 并覆盖未保存修改，继续？
       </div>
       <div className="gv-version-confirm-actions">
         <button type="button" onClick={cancelPending}>取消</button>

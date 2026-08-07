@@ -46,8 +46,10 @@ import { TextValueEditor, type TextOrRef } from './TextValueEditor'
 import { LooseNumberInput } from './TermChainEditor'
 import { EffectOpButtons } from './OpSymbolButtons'
 import {
+  compileValuePick,
   decodeEffectOperation,
   encodeEffectOperation,
+  resolveValuePick,
   type EffectDisplayOp,
 } from './valueExprPick'
 
@@ -166,7 +168,7 @@ function field(
 ): JSX.Element {
   // 用 div 而非 label：子树常含 button，包在 label 里会点到文字也触发按钮（如「乘」误删）。
   return (
-    <div style={rowStyle}>
+    <div className="editor-field-row" style={rowStyle}>
       <span style={labelWidth === undefined ? lbl : { ...lbl, width: labelWidth }}>{label}</span>
       {node}
     </div>
@@ -416,6 +418,8 @@ export function ValueInput({
   createVariable,
   createFormula,
   stackControls,
+  assignmentLayout,
+  propertyLayout,
 }: {
   value: NumOrExpr | string | undefined
   defaultValue?: number
@@ -431,13 +435,15 @@ export function ValueInput({
   createVariable?: ValueExprVariableCreateConfig
   createFormula?: ValueExprFormulaCreateConfig
   stackControls?: boolean
+  assignmentLayout?: boolean
+  propertyLayout?: boolean
   /** 挂了这个 = 这个值要配一个 Effect「运算」符号按钮，嵌进编辑器顶部（跟常量/选取公式同一行）。 */
   effectOp?: { op: EffectDisplayOp; onOpChange: (next: EffectDisplayOp) => void }
   fieldLabels?: { source: string; value: string }
   fieldLabelWidth?: CSSProperties['width']
 } & MetaCatalogProps): JSX.Element {
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    <div className="value-input-shell" style={{ flex: 1, minWidth: 0 }}>
       <ValueExprEditor
         value={value ?? defaultValue}
         entities={entities}
@@ -458,6 +464,9 @@ export function ValueInput({
         fieldLabels={fieldLabels}
         fieldLabelWidth={fieldLabelWidth}
         stackControls={stackControls}
+        assignmentLayout={assignmentLayout}
+        propertyLayout={propertyLayout}
+        numericOnly
       />
     </div>
   )
@@ -476,6 +485,7 @@ export function TextValueInput({
   createVariable,
   createFormula,
   stackControls,
+  propertyLayout,
 }: {
   value: TextOrRef | undefined
   onChange: (v: TextOrRef) => void
@@ -489,9 +499,10 @@ export function TextValueInput({
   createVariable?: ValueExprVariableCreateConfig
   createFormula?: ValueExprFormulaCreateConfig
   stackControls?: boolean
+  propertyLayout?: boolean
 }): JSX.Element {
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    <div className="text-value-input-shell" style={{ flex: 1, minWidth: 0 }}>
       <TextValueEditor
         value={value}
         entities={entities}
@@ -504,6 +515,7 @@ export function TextValueInput({
         createVariable={createVariable}
         createFormula={createFormula}
         stackControls={stackControls}
+        propertyLayout={propertyLayout}
         onChange={onChange}
       />
     </div>
@@ -562,16 +574,6 @@ export function EntitySelect({
       presentation: 'create',
       label: `配置「${draft.name.trim() || entityId || defaultId}」实体`,
       children: [
-        {
-          key: `detail:${actionKey}:id`,
-          label: '实体 ID',
-          editor: {
-            value: draft.entityId,
-            ariaLabel: '效果目标的新实体 ID',
-            invalid: !entityId || catalogIdOccupied(entities, entityId),
-            onChange: (next) => patch({ entityId: next }),
-          },
-        },
         {
           key: `detail:${actionKey}:name`,
           label: '显示名',
@@ -721,16 +723,6 @@ export function AttrSelect({
       presentation: 'create',
       label: `配置「${draft.label.trim() || attrId || defaultAttrId}」属性`,
       children: [
-        {
-          key: `detail:${actionKey}:id`,
-          label: '属性 ID',
-          editor: {
-            value: draft.attrId,
-            ariaLabel: `${entityDisplayName(entity, entityId)}的新属性 ID`,
-            invalid: !attrId || occupiedAttr,
-            onChange: (next) => patch({ attrId: next }),
-          },
-        },
         {
           key: `detail:${actionKey}:label`,
           label: '显示名',
@@ -889,6 +881,7 @@ function EffectRow({
   onOpSnapshot,
   onUndoOp,
   labelWidth,
+  propertyLayout = false,
 }: {
   eff: GraphEffect
   allowedKinds: readonly EffectKind[]
@@ -903,6 +896,7 @@ function EffectRow({
   onOpSnapshot?: (snap: { op: NumericEffectOp; value: NumOrExpr }) => void
   onUndoOp?: () => void
   labelWidth?: CSSProperties['width']
+  propertyLayout?: boolean
 } & MetaCatalogProps): JSX.Element {
   const entityOpts = listEntityOptions(entities)
   const numVars = listVarOptions(variables, { numbersOnly: true })
@@ -928,8 +922,64 @@ function EffectRow({
     onChange({ ...eff, ...encodeEffectOperation(operation.op, value) })
   }
 
+  if (propertyLayout && operation && (eff.kind === 'attr' || eff.kind === 'var')) {
+    const subjectValue = compileValuePick({
+      mode: 'pick',
+      terms: [eff.kind === 'attr'
+        ? { op: '+', source: 'entity', refId: eff.entityId, attr: eff.attr }
+        : { op: '+', source: 'var', refId: eff.varId }],
+    })
+    const selectSubject = (next: NumOrExpr): void => {
+      const selected = resolveValuePick(next, entities, variables)
+      if (selected.mode !== 'pick') return
+      const term = selected.terms[0]
+      if (term?.source === 'entity' && term.refId && term.attr) {
+        onChange({ kind: 'attr', entityId: term.refId, attr: term.attr, ...encodeEffectOperation(operation.op, operation.value) })
+      } else if (term?.source === 'var' && term.refId) {
+        onChange({ kind: 'var', varId: term.refId, ...encodeEffectOperation(operation.op, operation.value) })
+      }
+    }
+    return (
+      <div data-effect-editor data-property-effect-editor>
+        <div className="editor-property-cascade-field">
+          <span>效果主体</span>
+          <ValueExprEditor
+            value={subjectValue}
+            entities={entities}
+            variables={variables}
+            formulas={formulas}
+            createAttribute={createAttribute}
+            createEntity={createEntity}
+            createVariable={createVariable}
+            allowedSources={['entity', 'var']}
+            pickerAriaLabel="效果主体"
+            numericOnly
+            stackControls
+            onChange={selectSubject}
+          />
+        </div>
+        <div className="editor-property-assign-field">
+          <span>赋值</span>
+          <ValueInput
+            value={operation.value}
+            entities={entities}
+            variables={variables}
+            formulas={formulas}
+            createAttribute={createAttribute}
+            createEntity={createEntity}
+            createVariable={createVariable}
+            createFormula={createFormula}
+            effectOp={{ op: operation.op, onOpChange: handleOpChange }}
+            assignmentLayout
+            onChange={handleValueChange}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div style={box}>
+    <div data-effect-editor style={box}>
       <div style={rowStyle}>
         <span style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0 }} title={summary}>
           {summary}
@@ -1084,6 +1134,7 @@ export function EffectsEditor({
   labelWidth,
   allowAdd = true,
   allowedKinds = EFFECT_KINDS,
+  propertyLayout = false,
 }: {
   value: GraphEffect[] | undefined
   onChange: (v: GraphEffect[]) => void
@@ -1096,6 +1147,7 @@ export function EffectsEditor({
   allowAdd?: boolean
   /** 限制新建/切换效果时可选择的类型；既有的其他类型仍保留显示，避免静默改写历史数据。 */
   allowedKinds?: readonly EffectKind[]
+  propertyLayout?: boolean
 } & MetaCatalogProps): JSX.Element {
   const cat = resolveCatalog({ entities, variables, formulas, itemIds, pickers })
   const list = value ?? []
@@ -1120,6 +1172,7 @@ export function EffectsEditor({
           createVariable={createVariable}
           createFormula={createFormula}
           labelWidth={labelWidth}
+          propertyLayout={propertyLayout}
           onChange={(next) => onChange(list.map((e, idx) => (idx === i ? next : e)))}
           onDelete={() => { opStacks.current.delete(i); onChange(list.filter((_, idx) => idx !== i)) }}
           canUndoOp={(opStacks.current.get(i)?.length ?? 0) > 0}

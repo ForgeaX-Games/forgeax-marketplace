@@ -476,14 +476,31 @@ export function isGameGraph(v: unknown): v is GameGraph {
   })
 }
 
+/** 编辑器界面目录 sidecar；scheme 只引用 `ui.overlays`，不复制标题或 Overlay 内容。 */
+export type UiTreeNode = UiTreeFolderNode | UiTreeSchemeNode
+export interface UiTreeFolderNode {
+  kind: 'folder'
+  id: string
+  name: string
+  children: UiTreeNode[]
+}
+export interface UiTreeSchemeNode {
+  kind: 'scheme'
+  id: string
+  overlayId: string
+}
+export interface UiTree {
+  root: UiTreeNode[]
+}
+
 /**
  * 全 game 共享的场景级 meta（不属于任何单张图）。编辑器公式库 formulas 与之同级。
- * `formulas` 的值形状是 `editor/persist/formula-authoring` 的 `Formula`；runtime 层不
- * 声明该具体类型（`runtime ↛ editor`，见 check-module-boundaries.mjs），改为 `unknown`——
- * 消费处（store）用窄类型断言恢复 `Formula`。
+ * `formulas` 的值形状是 `editor/persist/formula-authoring` 的 `Formula`；uiTree 是作者态
+ * Overlay 目录 sidecar。两者均不参与执行，runtime 层不依赖 editor 实现。
  */
 export type ScenarioMetaFields = Pick<GameScenario, 'variables' | 'entities' | 'ui' | 'textStylePresets' | 'bgm'> & {
   formulas?: Record<string, unknown>
+  uiTree?: UiTree
 }
 
 /** 蓝图文档：一张独立可存取的图（主蓝图或子蓝图），与 `SubFlowPackDef` 同级但语义面向新蓝图库。 */
@@ -514,6 +531,7 @@ export interface BlueprintManifest {
  */
 export type GraphLibraryDocument = GameScenario & {
   formulas?: Record<string, unknown>
+  uiTree?: UiTree
   manifest: BlueprintManifest
 }
 

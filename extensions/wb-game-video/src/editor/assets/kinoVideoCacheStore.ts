@@ -62,6 +62,7 @@ export const useKinoVideoCache = create<KinoVideoCacheStore>((set, get) => ({
       const kino = clientOf(client)
       const items: KinoResourceDTO[] = []
       let total = 0
+      let received = 0
       for (let page = 1; page <= 100; page += 1) {
         const result = await kino.list({
           game_id: gameId,
@@ -69,9 +70,13 @@ export const useKinoVideoCache = create<KinoVideoCacheStore>((set, get) => ({
           page,
           page_size: MAX_KINO_RESOURCE_PAGE_SIZE,
         })
-        items.push(...result.items)
+        // The video workspace must never trust an upstream page to be
+        // type-pure: an image record in a cached or misrouted response must
+        // not surface as a playable video card.
+        items.push(...result.items.filter((item) => item.media_type === 'video'))
+        received += result.items.length
         total = result.total
-        if (result.items.length === 0 || items.length >= total) break
+        if (result.items.length === 0 || received >= total) break
       }
       if ((get().byGame[gameId]?.generation ?? 0) !== generation) return
       set((state) => ({

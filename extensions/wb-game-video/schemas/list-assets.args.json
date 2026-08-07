@@ -4,7 +4,6 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "gameSlug": { "type": "string", "pattern": "^(?!\\.{1,2}$)[^/\\\\]+$", "description": "Optional explicit game id; when present it must exactly equal the host-bound game. Unicode and single-character ids are supported." },
     "kind": { "enum": ["image", "video"], "description": "Filter by media kind." },
     "productionType": { "enum": ["character_ref", "scene_ref", "shot_image", "video_clip"], "description": "Filter by production type." },
     "sceneNodeId": { "type": "string", "description": "Filter by owning node id." }

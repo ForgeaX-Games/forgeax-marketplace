@@ -92,6 +92,29 @@ describe('flow preview timeline ledger', () => {
     expect(projected.maxMs).toBe(22_000)
   })
 
+  it('attaches per-segment videoSrc for filmstrip frames when resolver is provided', () => {
+    let ledger = visitFlowTimeline(emptyFlowTimeline(), visit('a', 1000))
+    ledger = visitFlowTimeline(ledger, visit('b', 2000))
+    const a = node('a', { media: { ref: 'clip-a' } })
+    const b = node('b', { media: { ref: 'clip-b' } })
+    const scenario = scnOf({ nodes: [a, b], edges: [] })
+
+    const projected = projectFlowTimeline(
+      ledger,
+      0,
+      (segment) => ({
+        scenario,
+        node: segment.nodeId === 'a' ? a : b,
+      }),
+      (_segment, source) => source ? `/media/${source.node.data.media?.ref}` : undefined,
+    )
+
+    expect(projected.materials.filter((m) => m.kind === 'video').map((m) => m.videoSrc)).toEqual([
+      '/media/clip-a',
+      '/media/clip-b',
+    ])
+  })
+
   it('projects each node settlement into the global route coordinates', () => {
     const first = node('a', {
       durationMs: 1000,

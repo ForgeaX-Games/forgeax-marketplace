@@ -2,8 +2,12 @@ import { cp } from 'node:fs/promises'
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['server/tool-handlers.ts'],
-  outDir: 'dist/server',
+  entry: {
+    index: 'src/mount.tsx',
+    'server/host': 'server/host.ts',
+  },
+  outDir: 'dist',
+  dts: true,
   format: ['esm'],
   platform: 'node',
   target: 'node20',
@@ -12,6 +16,7 @@ export default defineConfig({
   sourcemap: true,
   clean: false,
   external: ['@forgeax/extension-platform'],
+  noExternal: ['@forgeax-extension/wb-asset-canvas'],
   onSuccess: async () => {
     await cp('server/engine/llm/skills', 'dist/skills', { recursive: true })
   },
