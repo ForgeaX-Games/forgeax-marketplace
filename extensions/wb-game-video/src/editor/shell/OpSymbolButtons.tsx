@@ -26,8 +26,10 @@ export function OpSymbolButtons({
   onPick: (key: string) => void
   ariaLabel?: string
 }): JSX.Element {
+  // 类名只是给外部作用域的换肤钩子（节点配置面板把这一组画成 27×27 方格），
+  // 本文件不为它写任何规则：视觉默认值仍全在上面的行内 style 里。
   return (
-    <div style={row} role="group" aria-label={ariaLabel}>
+    <div className="gc-op-symbols" style={row} role="group" aria-label={ariaLabel}>
       {options.map((o) => (
         <button
           key={o.key}

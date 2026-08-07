@@ -129,6 +129,65 @@ describe('CascadingPicker interaction stability', () => {
     expect(panel.style.height).toBe('')
   })
 
+  it('supports compact toolbar triggers, disabled state, and open lifecycle reasons', () => {
+    const calls: Array<string> = []
+    const onSelect = vi.fn(() => calls.push('select'))
+    const onOpenChange = vi.fn((open: boolean, detail: { reason: string }) => {
+      calls.push(`${open ? 'open' : 'close'}:${detail.reason}`)
+    })
+    const { rerender } = render(
+      <CascadingPicker
+        ariaLabel="插入变量"
+        value=""
+        displayValue="变量"
+        options={[{ key: 'rage', label: '怒气', value: 'rage' }]}
+        onSelect={onSelect}
+        variant="toolbar"
+        onOpenChange={onOpenChange}
+      />,
+    )
+
+    const trigger = screen.getByRole('combobox', { name: '插入变量' })
+    expect(trigger.parentElement).toHaveClass('is-toolbar')
+    expect(trigger).toHaveTextContent('+变量')
+    expect(trigger.querySelector('.gc-cascade-trigger-add')).toHaveStyle({ width: '18px', height: '18px' })
+    expect(window.getComputedStyle(trigger).height).toBe('26px')
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: '怒气' }))
+    expect(calls).toEqual(['open:trigger', 'select', 'close:select'])
+
+    calls.length = 0
+    fireEvent.click(trigger)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(calls).toEqual(['open:trigger', 'close:escape'])
+
+    calls.length = 0
+    fireEvent.click(trigger)
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    fireEvent.pointerDown(outside)
+    expect(calls).toEqual(['open:trigger', 'close:outside-pointer'])
+    outside.remove()
+
+    rerender(
+      <CascadingPicker
+        ariaLabel="插入变量"
+        value=""
+        displayValue="变量"
+        options={[{ key: 'rage', label: '怒气', value: 'rage' }]}
+        onSelect={onSelect}
+        variant="toolbar"
+        disabled
+        onOpenChange={onOpenChange}
+      />,
+    )
+    expect(trigger).toBeDisabled()
+    calls.length = 0
+    fireEvent.click(trigger)
+    expect(screen.queryByRole('menu', { name: '插入变量选项' })).toBeNull()
+    expect(calls).toEqual([])
+  })
+
   it('opens branches on hover in the column to the left', () => {
     renderPicker()
     fireEvent.click(screen.getByRole('combobox', { name: '绑定属性' }))

@@ -28,4 +28,38 @@ describe('SelectDropdown', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '技能条' }))
     expect(onChange).toHaveBeenCalledWith('hud/skill')
   })
+
+  it('forwards toolbar, disabled, and open lifecycle props', () => {
+    const onOpenChange = vi.fn()
+    const { rerender } = render(
+      <SelectDropdown
+        ariaLabel="插入函数"
+        value=""
+        placeholder="函数"
+        options={[{ value: 'max', label: 'max()' }]}
+        onChange={vi.fn()}
+        variant="toolbar"
+        onOpenChange={onOpenChange}
+      />,
+    )
+
+    const trigger = screen.getByRole('combobox', { name: '插入函数' })
+    expect(trigger.parentElement).toHaveClass('is-toolbar')
+    fireEvent.click(trigger)
+    expect(onOpenChange).toHaveBeenCalledWith(true, expect.objectContaining({ reason: 'trigger' }))
+
+    rerender(
+      <SelectDropdown
+        ariaLabel="插入函数"
+        value=""
+        placeholder="函数"
+        options={[{ value: 'max', label: 'max()' }]}
+        onChange={vi.fn()}
+        variant="toolbar"
+        disabled
+        onOpenChange={onOpenChange}
+      />,
+    )
+    expect(trigger).toBeDisabled()
+  })
 })

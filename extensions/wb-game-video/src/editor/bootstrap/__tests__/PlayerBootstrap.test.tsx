@@ -32,7 +32,7 @@ vi.mock('../../persist/persist-client', async (importOriginal) => {
 
 vi.mock('../../../runtime/component-host', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../runtime/component-host')>()
-  return { ...actual, loadGameComponents: vi.fn(async () => {}) }
+  return { ...actual, bootComponents: vi.fn(async () => {}) }
 })
 
 vi.mock('../../shell/GraphPlayer', () => ({

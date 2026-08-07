@@ -26,6 +26,7 @@ const request: ClipGenerationRequest = {
   size: '1440x2560',
   resolution: '1080p',
   model: 'seedance2',
+  visualStyleKey: 'bwcinema',
   label: 'Bridge shot',
 }
 
@@ -75,6 +76,7 @@ describe('Workbench Host generation tool', () => {
       mode: 'strict',
       firstFrameAssetId: 'first-frame',
       lastFrameAssetId: 'last-frame',
+      visualStyleKey: 'bwcinema',
       requestId: requestIdA,
     }, port)).resolves.toEqual({ assetId: 'generated-video', status: 'ready' })
     expect(port.call).toHaveBeenCalledWith(CLIP_GENERATION_TOOL_ID, expect.any(Object))
@@ -126,6 +128,29 @@ describe('Workbench Host generation tool', () => {
 })
 
 describe('useClipGeneration Host-only flow', () => {
+  it('restores a globally selected Kino task and its prompt without resubmitting', () => {
+    const submitClip = vi.fn()
+    const restoredTask = {
+      generationId: 'generation-1',
+      status: 'polling' as const,
+      prompt: '刷新前的提示词',
+      createdAt: 123,
+    }
+    const { result } = renderHook(() => useClipGeneration([], {
+      submitClip,
+      restoredTask,
+      activeTasks: [restoredTask],
+    }))
+
+    expect(result.current.state).toMatchObject({
+      phase: 'generating',
+      generationId: 'generation-1',
+      prompt: '刷新前的提示词',
+      activeTasks: [restoredTask],
+    })
+    expect(submitClip).not.toHaveBeenCalled()
+  })
+
   it('starts in Host tool mode and never sends game/provider identities', async () => {
     const submitClip = vi.fn().mockResolvedValue({ assetId: 'video-1', status: 'ready' })
     const { result } = renderHook(() => useClipGeneration([], {
@@ -144,6 +169,7 @@ describe('useClipGeneration Host-only flow', () => {
       mode: 'strict',
       firstFrameAssetId: 'first-frame',
       lastFrameAssetId: 'last-frame',
+      visualStyleKey: 'bwcinema',
       label: 'Bridge shot',
       requestId: requestIdA,
     })

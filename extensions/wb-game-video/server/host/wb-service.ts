@@ -20,6 +20,7 @@ import {
   type VideoGenInput,
 } from '../generation/orchestrate'
 import { generateVideoClip, type GenerateVideoClipArgs } from '../generation/clip'
+import { listVideoVisualStyles } from '../generation/visual-styles'
 import {
   importCharacterRefsFromHost,
   importSceneRefsFromHost,
@@ -29,11 +30,13 @@ import {
   type ServiceSchemaName,
 } from './service-validation'
 import { NODIA_ASSETS_MANIFEST } from './nodia-assets'
+import { applyPatchGraphOps } from './patch-graph-ops'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const BLUEPRINT_FILE = 'blueprint.json'
 const PROJECT_FILE = 'project.json'
+const ASSETS_MANIFEST_FILE = 'assets/manifest.json'
 const GRAPH_SAVE_LOCK = 'wb-game-video-graph-save'
 
 export class WbServiceInputError extends TypeError {
@@ -43,6 +46,7 @@ export class WbServiceInputError extends TypeError {
 export interface WbGameVideoService {
   getGraph(input?: unknown): Promise<unknown>
   saveGraph(input: unknown): Promise<unknown>
+  patchGraph(input: unknown): Promise<unknown>
   listVideos(input: unknown): Promise<unknown>
   listAssets(query: unknown): Promise<unknown>
   getAsset(assetId: string): Promise<unknown>
@@ -52,6 +56,7 @@ export interface WbGameVideoService {
   generateKeyframe(input: unknown): Promise<unknown>
   generateVideo(input: unknown): Promise<unknown>
   generateVideoClip(input: unknown): Promise<unknown>
+  listVideoVisualStyles(input?: unknown): Promise<unknown>
   generateNodeVideo(input: unknown): Promise<unknown>
 }
 
@@ -287,7 +292,7 @@ function videoClipInput(value: unknown): GenerateVideoClipArgs {
   assertOnlyKeys(input, [
     'prompt', 'durationSeconds', 'generateAudio', 'mode',
     'firstFrameAssetId', 'lastFrameAssetId', 'referenceImageAssetIds',
-    'label', 'requestId',
+    'label', 'requestId', 'visualStyleKey',
   ])
   return {
     prompt: stringValue(input.prompt, 'prompt', true)!,
@@ -301,6 +306,7 @@ function videoClipInput(value: unknown): GenerateVideoClipArgs {
       : stringArray(input.referenceImageAssetIds, 'referenceImageAssetIds'),
     label: stringValue(input.label, 'label'),
     requestId: stringValue(input.requestId, 'requestId'),
+    visualStyleKey: stringValue(input.visualStyleKey, 'visualStyleKey'),
   }
 }
 
@@ -392,8 +398,69 @@ export function createWbGameVideoService(
             encoder.encode(JSON.stringify(projectMetadata(context.gameId), null, 2)),
           )
         }
+        // project.json / blueprint.json / assets/manifest.json are the Workbench
+        // Host package-status set; back-filling all three on first save lets a
+        // host report `initialized` for agent-authored games instead of
+        // stranding them at `inconsistent`.
+        if (!await context.files.read(ASSETS_MANIFEST_FILE)) {
+          await context.files.write(
+            ASSETS_MANIFEST_FILE,
+            encoder.encode(JSON.stringify({ version: 2, assets: [] }, null, 2)),
+          )
+        }
       })
       return { ok: true, versions: [], gameSlug: context.gameId }
+    },
+    async patchGraph(value) {
+      assertSchema('patchGraph', value)
+      const input = record(value)
+      // 整个 read→apply→validate→write 必须在同一把锁里：增量补丁基于读到的那份文档，
+      // 锁外读会让并发批次各自基于旧快照覆盖对方。
+      type PatchOutcome =
+        | { ok: true; applied: number }
+        | { ok: false; errors: string[]; failedOpIndex?: number }
+      const outcome = await context.files.withLocks<PatchOutcome>([GRAPH_SAVE_LOCK], async () => {
+        const current = parseGraph(await context.files.read(BLUEPRINT_FILE))
+        if (!current) {
+          return { ok: false, errors: ['缺少 blueprint.json'] }
+        }
+        const applied = applyPatchGraphOps(current, {
+          blueprintId: typeof input.blueprintId === 'string' ? input.blueprintId : undefined,
+          ops: input.ops as Array<Record<string, unknown>>,
+        })
+        if (!applied.ok) {
+          return { ok: false, errors: applied.errors, failedOpIndex: applied.failedOpIndex }
+        }
+        const errors = validateDocument(applied.document)
+        if (errors.length) {
+          return { ok: false, errors }
+        }
+        await context.files.write(
+          BLUEPRINT_FILE,
+          encoder.encode(JSON.stringify(applied.document, null, 2)),
+        )
+        if (!await context.files.read(PROJECT_FILE)) {
+          await context.files.write(
+            PROJECT_FILE,
+            encoder.encode(JSON.stringify(projectMetadata(context.gameId), null, 2)),
+          )
+        }
+        return { ok: true, applied: applied.applied }
+      })
+      if (!outcome.ok) {
+        return {
+          ok: false,
+          errors: outcome.errors,
+          failedOpIndex: outcome.failedOpIndex,
+          gameSlug: context.gameId,
+        }
+      }
+      return {
+        ok: true,
+        applied: outcome.applied,
+        versions: [],
+        gameSlug: context.gameId,
+      }
     },
     async listVideos(value) {
       assertSchema('listVideos', value)
@@ -486,6 +553,11 @@ export function createWbGameVideoService(
     async generateVideoClip(value) {
       assertSchema('generateVideoClip', value)
       return generateVideoClip(context, videoClipInput(value), registry)
+    },
+    async listVideoVisualStyles(value = {}) {
+      const input = record(value)
+      assertOnlyKeys(input, [])
+      return listVideoVisualStyles(context)
     },
     async generateNodeVideo(value) {
       assertSchema('generateNodeVideo', value)

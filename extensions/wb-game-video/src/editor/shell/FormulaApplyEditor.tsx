@@ -11,6 +11,7 @@ import { createRng } from '../../runtime/engine/rng'
 import { LooseNumberInput } from './TermChainEditor'
 import { CascadingPicker, type CascadingPickerOption } from './CascadingPicker'
 import { AiParameterFillButton } from './AiParameterFillButton'
+import { NiSelect } from './ni-ui'
 import {
   compileFormula,
   formulaHoleBindingIssues,
@@ -334,12 +335,12 @@ export function FormulaApplyEditor({
     >
       {showFormulaPicker ? (
         <div style={row} role="group" aria-label="选择公式">
-          <select value={formulaId} onChange={(e) => pickFormula(e.target.value)} aria-label="公式" style={{ flex: 1, minWidth: 140 }}>
+          <NiSelect value={formulaId} onChange={pickFormula} ariaLabel="公式" style={{ flex: 1, minWidth: 140 }}>
             <option value="" disabled>选择公式…</option>
             {options.map((o) => (
               <option key={o.id} value={o.id}>{o.label}</option>
             ))}
-          </select>
+          </NiSelect>
         </div>
       ) : null}
       {!formula ? (

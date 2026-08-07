@@ -10,6 +10,14 @@ import {
 import { createPortal } from 'react-dom'
 import { injectStyleOnce } from '../../styles/injectStyle'
 
+export type CascadingPickerVariant = 'field' | 'toolbar'
+export type CascadingPickerOpenChangeReason = 'trigger' | 'select' | 'escape' | 'outside-pointer'
+
+export interface CascadingPickerOpenChangeDetail {
+  reason: CascadingPickerOpenChangeReason
+  target: EventTarget | null
+}
+
 export interface CascadingPickerOption {
   key: string
   label: string
@@ -45,6 +53,7 @@ const HIDDEN_PANEL_STYLE: CSSProperties = {
 
 const CASCADING_PICKER_CSS = `
 .gc-cascade-root { position: relative; display: flex; flex: 1; min-width: 0; }
+.gc-cascade-root.is-toolbar { display:inline-flex; flex:0 0 auto; width:auto; }
 .gc-cascade-trigger {
   box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 8px;
   width: 100%; min-width: 180px; min-height: 28px; padding: 4px 8px;
@@ -54,7 +63,24 @@ const CASCADING_PICKER_CSS = `
   color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
 .gc-cascade-root.is-narrow-safe .gc-cascade-trigger { min-width: 0; }
-.gc-cascade-trigger:hover, .gc-cascade-trigger[aria-expanded="true"] {
+.gc-cascade-root.is-toolbar .gc-cascade-trigger {
+  width:auto; min-width:0; min-height:26px; height:26px; padding:0 7px 0 4px;
+  gap:5px; border-radius:7px; border-color:rgba(255,255,255,.1);
+  background:#181818; color:rgba(255,255,255,.76); font-size:11.5px;
+  font-family:var(--font-mono, ui-monospace, monospace); white-space:nowrap;
+}
+.gc-cascade-trigger-add {
+  display:inline-flex; align-items:center; justify-content:center;
+  flex:0 0 18px; width:18px; height:18px;
+  font-family:system-ui,sans-serif; font-size:16px; font-weight:400; line-height:18px;
+}
+.gc-cascade-root.is-toolbar .gc-cascade-trigger-label {
+  display:inline-flex; align-items:center; height:18px; line-height:18px;
+}
+.gc-cascade-root.is-toolbar .gc-cascade-trigger-label.is-placeholder { opacity:1; }
+.gc-cascade-root.is-toolbar .gc-cascade-trigger-arrow { width:10px; height:7px; margin:0 0 0 2px; }
+.gc-cascade-trigger:disabled { opacity:.42; cursor:default; }
+.gc-cascade-trigger:hover:not(:disabled), .gc-cascade-trigger[aria-expanded="true"] {
   border-color: rgb(255, 156, 42);
 }
 .gc-cascade-trigger-label {
@@ -88,7 +114,7 @@ const CASCADING_PICKER_CSS = `
 .gc-cascade-column {
   box-sizing: border-box; width: 210px; min-width: 210px;
   height: min(280px, calc(100vh - 16px));
-  overflow-y: auto; scrollbar-gutter: stable; padding: 5px;
+  overflow-y: auto; scrollbar-gutter: auto; padding: 5px;
   border-right: 1px solid var(--color-border-default, #404040);
 }
 /* 通用单列下拉：高度随选项收缩，选项多时才滚动到 max-height。 */
@@ -283,6 +309,9 @@ export function CascadingPicker({
   onSelect,
   narrowSafe = false,
   fitContent = false,
+  variant = 'field',
+  disabled = false,
+  onOpenChange,
 }: {
   ariaLabel: string
   value: string
@@ -293,6 +322,9 @@ export function CascadingPicker({
   narrowSafe?: boolean
   /** 面板高度随选项收缩（max-height 上限），用于扁平单列下拉。 */
   fitContent?: boolean
+  variant?: CascadingPickerVariant
+  disabled?: boolean
+  onOpenChange?: (open: boolean, detail: CascadingPickerOpenChangeDetail) => void
 }): JSX.Element {
   injectStyleOnce('gc-cascading-picker', CASCADING_PICKER_CSS)
   const [open, setOpen] = useState(false)
@@ -306,10 +338,10 @@ export function CascadingPicker({
   const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null)
   const [createDialogStyle, setCreateDialogStyle] = useState<CSSProperties | null>(null)
 
-  const columns = menuColumns(options, activePath)
-  const renderedColumns = columns
-    .map((column, depth) => ({ column, depth }))
-    .reverse()
+  const columns = open ? menuColumns(options, activePath) : []
+  const renderedColumns = open
+    ? columns.map((column, depth) => ({ column, depth })).reverse()
+    : []
   const panelPathKey = activePath.join('/')
   const createPathKey = createPath?.join('/') ?? ''
   const createOption = createPath ? optionAtPath(options, createPath) : undefined
@@ -322,13 +354,15 @@ export function CascadingPicker({
     ))
   }
 
-  function closePicker(): void {
+  function closePicker(reason: CascadingPickerOpenChangeReason, target: EventTarget | null = null): void {
     setCreatePath(null)
     setCreateDialogStyle(null)
     setOpen(false)
+    onOpenChange?.(false, { reason, target })
   }
 
   function openPicker(): void {
+    if (disabled) return
     setPanelStyle(null)
     setCreatePath(null)
     setCreateDialogStyle(null)
@@ -337,6 +371,7 @@ export function CascadingPicker({
       findOptionPath(options, value) ?? [],
     ))
     setOpen(true)
+    onOpenChange?.(true, { reason: 'trigger', target: triggerRef.current })
   }
 
   function closeCreateDialog(): void {
@@ -365,13 +400,13 @@ export function CascadingPicker({
     }
     if (option.value == null) return
     onSelect(option.value)
-    closePicker()
+    closePicker('select', anchor ?? null)
   }
 
   function chooseCreateOption(option: CascadingPickerOption): void {
     if (option.disabled || option.value == null) return
     onSelect(option.value)
-    closePicker()
+    closePicker('select', createAnchorRef.current)
   }
 
   useLayoutEffect(() => {
@@ -379,6 +414,7 @@ export function CascadingPicker({
       setPanelStyle(null)
       return
     }
+    const frameRef = { current: null as number | null }
     const place = () => {
       const trigger = triggerRef.current
       const panel = panelRef.current
@@ -405,14 +441,24 @@ export function CascadingPicker({
         visibility: 'visible',
       })
     }
+    const schedulePlace = (event?: Event) => {
+      const target = event?.target as Node | null
+      if (target && (panelRef.current?.contains(target) || createDialogRef.current?.contains(target))) return
+      if (frameRef.current != null) return
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null
+        place()
+      })
+    }
     place()
     const frame = requestAnimationFrame(place)
-    window.addEventListener('resize', place)
-    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', schedulePlace)
+    window.addEventListener('scroll', schedulePlace, true)
     return () => {
       cancelAnimationFrame(frame)
-      window.removeEventListener('resize', place)
-      window.removeEventListener('scroll', place, true)
+      if (frameRef.current != null) cancelAnimationFrame(frameRef.current)
+      window.removeEventListener('resize', schedulePlace)
+      window.removeEventListener('scroll', schedulePlace, true)
     }
   }, [open, panelPathKey])
 
@@ -488,7 +534,7 @@ export function CascadingPicker({
         || panelRef.current?.contains(target)
         || createDialogRef.current?.contains(target)
       ) return
-      closePicker()
+      closePicker('outside-pointer', event.target)
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
@@ -497,7 +543,7 @@ export function CascadingPicker({
         closeCreateDialog()
         return
       }
-      closePicker()
+      closePicker('escape', event.target)
       triggerRef.current?.focus()
     }
     document.addEventListener('pointerdown', onPointerDown)
@@ -722,7 +768,14 @@ export function CascadingPicker({
   ) : null
 
   return (
-    <div className={`gc-cascade-root${narrowSafe ? ' is-narrow-safe' : ''}`} ref={rootRef}>
+    <div
+      className={[
+        'gc-cascade-root',
+        narrowSafe ? 'is-narrow-safe' : '',
+        variant === 'toolbar' ? 'is-toolbar' : '',
+      ].filter(Boolean).join(' ')}
+      ref={rootRef}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -732,9 +785,13 @@ export function CascadingPicker({
         aria-expanded={open}
         className="gc-cascade-trigger"
         value={value}
-        onClick={() => open ? closePicker() : openPicker()}
+        disabled={disabled}
+        onClick={(event) => open
+          ? closePicker('trigger', event.currentTarget)
+          : openPicker()}
         onChange={(event) => onSelect((event.target as HTMLButtonElement).value)}
       >
+        {variant === 'toolbar' ? <span className="gc-cascade-trigger-add" aria-hidden="true">+</span> : null}
         <span className={`gc-cascade-trigger-label${displayValue ? '' : ' is-placeholder'}`}>
           {displayValue || placeholder || ''}
         </span>

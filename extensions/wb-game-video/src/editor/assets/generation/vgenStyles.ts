@@ -70,6 +70,114 @@ export const VGEN_CSS = `
   border-radius: 0 0 16px 16px;
   background: var(--gc-panel2, #252019);
 }
+.vgen-panel.is-page.vgen-design-panel { overflow: hidden; background: #1a1a1a; color: #fff; }
+.vgen-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.vgen-design-workspace { box-sizing: border-box; display: grid; width: 100%; height: 100%; min-height: 0; grid-template-columns: 225px minmax(0,1fr); grid-template-rows: minmax(300px,1.65fr) minmax(255px,1fr); gap: 5px; padding: 5px; background: #1a1a1a; }
+.vgen-settings { box-sizing: border-box; display: flex; min-height: 0; flex-direction: column; gap: 20px; overflow: auto; padding: 16px; background: #2c2c2c; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
+.vgen-setting-group { display: flex; flex: none; flex-direction: column; gap: 8px; }
+.vgen-setting-group h3 { display: flex; align-items: center; gap: 8px; margin: 0; color: #fff; font-size: 14px; font-weight: 500; line-height: 21px; }
+.vgen-setting-group h3 > span { display: block; width: 3px; height: 11px; border-radius: 3px; background: #e8864a; }
+.vgen-setting-select, .vgen-custom-duration { box-sizing: border-box; width: 100%; height: 40px; padding: 0 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; outline: 0; background: #1a1a1a; color: #fff; font: inherit; font-size: 14px; }
+.vgen-setting-select:disabled { opacity: 1; cursor: not-allowed; color: rgba(255,255,255,.82); }
+.vgen-setting-pills { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; }
+.vgen-setting-pills button { box-sizing: border-box; min-width: 0; height: 31px; padding: 0 5px; border: 0; border-radius: 8px; background: #1a1a1a; color: rgba(255,255,255,.6); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+.vgen-setting-pills button.is-on { background: #e8864a; color: #000; }
+.vgen-setting-pills button:disabled { cursor: not-allowed; opacity: .55; }
+.vgen-setting-pills button.is-on:disabled { opacity: 1; }
+.vgen-camera-pills { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.vgen-custom-duration { height: 32px; }
+.vgen-preview-stage { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; border-radius: 10px; background: #1f1f1f; }
+.vgen-preview-empty { display: flex; width: min(440px,calc(100% - 40px)); flex-direction: column; align-items: center; color: rgba(255,255,255,.4); text-align: center; }
+.vgen-preview-empty > img { display: block; width: 164px; height: 128px; }
+.vgen-preview-empty p { margin: 12px 0 4px; color: rgba(255,255,255,.72); font-size: 14px; }
+.vgen-preview-empty > span { font-size: 12px; line-height: 1.5; }
+.vgen-preview-progress { width: min(280px,80%); height: 4px; margin-top: 18px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.12); }
+.vgen-preview-progress i { display: block; width: 36%; height: 100%; border-radius: inherit; background: #e8864a; animation: vgen-indeterminate 1.2s ease-in-out infinite; }
+.vgen-design-status { position: absolute; top: 12px; left: 12px; z-index: 2; padding: 3px 8px; border-radius: 999px; background: rgba(0,0,0,.55); color: rgba(255,255,255,.58); font-size: 11px; }
+.vgen-design-status.running, .vgen-design-status.done { color: #ff9c2a; }
+.vgen-design-status.failed, .vgen-design-error { color: #ff8f8f; }
+.vgen-design-error { font-size: 12px; line-height: 1.5; }
+.vgen-generated-preview { position: absolute; inset: 0; overflow: hidden; border-radius: 10px; background: #111; }
+.vgen-generated-preview > video { display: block; width: 100%; height: 100%; object-fit: cover; cursor: pointer; }
+.vgen-preview-close { position: absolute; z-index: 4; top: 5px; right: 5px; display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 6px; background: rgba(0,0,0,.18); color: #fff; cursor: pointer; font: inherit; font-size: 20px; line-height: 1; }
+.vgen-preview-close:hover, .vgen-preview-close:focus-visible { background: rgba(0,0,0,.6); outline: none; }
+.vgen-player-controls { position: absolute; z-index: 3; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: 12px; padding: 54px 16px 15px; background: linear-gradient(to top,rgba(0,0,0,.9),rgba(0,0,0,.5) 50%,transparent); }
+.vgen-player-row { display: flex; height: 16px; align-items: center; gap: 10px; color: rgba(255,255,255,.6); font-size: 11px; font-variant-numeric: tabular-nums; }
+.vgen-player-row button { border: 0; background: transparent; color: rgba(255,255,255,.82); cursor: pointer; font: inherit; }
+.vgen-player-play { width: 18px; padding: 0; }
+.vgen-player-rate { margin-left: auto; color: #ff9c2a !important; }
+.vgen-player-fullscreen { width: 20px; padding: 0; font-size: 17px !important; }
+.vgen-player-progress { --vgen-progress: 0%; width: 100%; height: 4px; margin: 0; appearance: none; border-radius: 999px; background: linear-gradient(to right,#ff9c2a 0 var(--vgen-progress),rgba(255,255,255,.2) var(--vgen-progress) 100%); cursor: pointer; }
+.vgen-player-progress::-webkit-slider-thumb { width: 0; height: 0; appearance: none; }
+.vgen-apply { width: 145px; height: 32px; align-self: center; border: 0; border-radius: 8px; background: linear-gradient(90deg,#ff7001,#ff9c2a); color: #000; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; }
+.vgen-apply:disabled { opacity: .45; cursor: not-allowed; }
+.vgen-composer { box-sizing: border-box; display: flex; min-width: 0; min-height: 0; grid-column: 1 / -1; flex-direction: column; gap: 15px; overflow: auto; padding: 16px; background: #2c2c2c; }
+.vgen-mode-tabs { display: inline-flex; width: max-content; max-width: 100%; flex: none; align-self: flex-start; gap: 4px; overflow-x: auto; padding: 6px; border-radius: 9px; background: rgba(0,0,0,.2); }
+.vgen-mode-tabs button { height: 30px; flex: none; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; color: rgba(255,255,255,.6); cursor: pointer; font: inherit; font-size: 14px; white-space: nowrap; }
+.vgen-mode-tabs button:hover, .vgen-mode-tabs button:focus-visible { color: #fff; outline: none; }
+.vgen-mode-tabs button.is-on { background: #fff; color: #000; }
+.vgen-media-row { display: flex; min-height: 95px; flex: none; align-items: center; gap: 12px; overflow-x: auto; }
+.vgen-style-tile, .vgen-frame-tile, .vgen-page-ref-add { box-sizing: border-box; display: flex; width: 79px; height: 95px; flex: 0 0 79px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; overflow: hidden; border: 0; border-radius: 8px; color: #fff; font: inherit; font-size: 12px; }
+.vgen-style-tile { position: relative; padding: 0; background: linear-gradient(145deg,#ffae68 0%,#cd7656 40%,#4b3027 100%) center/cover no-repeat; cursor: pointer; }
+.vgen-style-tile::after { content: ''; position: absolute; right: 0; bottom: 0; width: 45px; height: 45px; border-radius: 50%; background: rgba(255,255,255,.16); filter: blur(14px); }
+.vgen-style-tile img { position: relative; z-index: 1; width: 29px; height: 31px; }
+.vgen-style-tile span { position: relative; z-index: 1; }
+.vgen-style-tile.has-style { justify-content: flex-end; box-shadow: inset 0 0 0 1px #e8864a; }
+.vgen-style-tile.has-style::after { display: none; }
+.vgen-style-tile.has-style span { box-sizing: border-box; width: 100%; overflow: hidden; padding: 7px 5px; background: rgba(0,0,0,.62); text-overflow: ellipsis; white-space: nowrap; }
+.vgen-style-tile:hover, .vgen-style-tile:focus-visible { box-shadow: inset 0 0 0 1px #e8864a; outline: none; }
+.vgen-media-divider { width: 1px; height: 74px; flex: 0 0 1px; margin: 0 2px; background: rgba(255,255,255,.16); }
+.vgen-frame-tile, .vgen-page-ref-add { padding: 0; background: rgba(0,0,0,.2) center/cover no-repeat; color: rgba(255,255,255,.6); cursor: pointer; }
+.vgen-frame-tile:hover, .vgen-frame-tile:focus-visible, .vgen-page-ref-add:hover, .vgen-page-ref-add:focus-visible { box-shadow: inset 0 0 0 1px #e8864a; outline: none; }
+.vgen-frame-tile.has-image { justify-content: flex-end; }
+.vgen-frame-tile.has-image span { width: 100%; box-sizing: border-box; overflow: hidden; padding: 6px; background: rgba(0,0,0,.6); color: #fff; text-overflow: ellipsis; white-space: nowrap; }
+.vgen-frame-tile img, .vgen-page-ref-add img { width: 22px; height: 22px; }
+.vgen-frame-swap { display: grid; width: 18px; flex: 0 0 18px; place-items: center; }
+.vgen-frame-swap img { width: 15px; height: 13px; }
+.vgen-page-refs { display: flex; align-items: center; gap: 8px; }
+.vgen-page-ref { position: relative; width: 79px; height: 95px; flex: 0 0 79px; border: 0; border-radius: 8px; background: #1a1a1a center/cover no-repeat; cursor: pointer; }
+.vgen-page-ref span { position: absolute; top: 4px; right: 4px; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; background: rgba(0,0,0,.62); color: #fff; }
+.vgen-prompt-box { display: flex; min-height: 120px; flex: 1; flex-direction: column; overflow: hidden; padding: 15px 19px; border-radius: 12px; background: rgba(0,0,0,.2); }
+.vgen-prompt-box textarea { box-sizing: border-box; width: 100%; min-height: 48px; flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: #fff; font: inherit; font-size: 14px; line-height: 1.5; }
+.vgen-prompt-box textarea::placeholder { color: rgba(255,255,255,.4); }
+.vgen-prompt-tools { display: flex; min-height: 32px; align-items: center; gap: 12px; }
+.vgen-prompt-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.vgen-audio-toggle { display: inline-flex; align-items: center; gap: 7px; color: rgba(255,255,255,.82); font-size: 12px; cursor: pointer; }
+.vgen-audio-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.vgen-audio-toggle > span { position: relative; display: block; width: 28px; height: 16px; border-radius: 999px; background: rgba(255,255,255,.2); transition: background .15s ease; }
+.vgen-audio-toggle > span::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform .15s ease; }
+.vgen-audio-toggle input:checked + span { background: #e8864a; }
+.vgen-audio-toggle input:checked + span::after { transform: translateX(12px); }
+.vgen-prompt-undo, .vgen-prompt-helper { height: 28px; border: 0; border-radius: 6px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; }
+.vgen-prompt-undo { display: grid; width: 28px; place-items: center; padding: 0; }
+.vgen-prompt-undo img { width: 12px; height: 12px; }
+.vgen-prompt-undo:hover:not(:disabled), .vgen-prompt-helper:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+.vgen-prompt-undo:disabled, .vgen-prompt-helper:disabled { opacity: .45; cursor: not-allowed; }
+.vgen-prompt-helper { padding: 0 8px; }
+.vgen-send { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #e8864a; cursor: pointer; }
+.vgen-send img { width: 21px; height: 18px; }
+.vgen-send:disabled { opacity: .45; cursor: not-allowed; }
+.vgen-send.running::before { content: ''; position: absolute; width: 16px; height: 16px; border: 2px solid rgba(0,0,0,.25); border-top-color: #000; border-radius: 50%; animation: vgen-spin .8s linear infinite; }
+.vgen-send.running img { opacity: 0; }
+.vgen-style-layer { position: fixed; inset: 0; z-index: 330; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.68); }
+.vgen-style-dialog { box-sizing: border-box; width: min(971px,calc(100vw - 48px)); max-height: min(760px,calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; padding: 24px 40px 32px; border: 1px solid rgba(255,255,255,.2); border-radius: 14px; background: #141414; color: #fff; box-shadow: 0 24px 72px rgba(0,0,0,.5); }
+.vgen-style-head { display: flex; align-items: center; }
+.vgen-style-head h3 { margin: 0; font-size: 20px; font-weight: 700; }
+.vgen-style-head button { width: 32px; height: 32px; margin-left: auto; border: 0; border-radius: 7px; background: transparent; color: rgba(255,255,255,.72); cursor: pointer; font-size: 22px; }
+.vgen-style-head button:hover, .vgen-style-head button:focus-visible { background: rgba(255,255,255,.08); color: #fff; outline: none; }
+.vgen-style-toolbar { display: flex; align-items: center; gap: 16px; margin: 22px 0 18px; }
+.vgen-style-categories { display: flex; min-width: 0; flex: 1; gap: 4px; overflow-x: auto; }
+.vgen-style-categories button { flex: none; padding: 7px 13px; border: 0; border-radius: 7px; background: transparent; color: rgba(255,255,255,.55); cursor: pointer; font: inherit; font-size: 13px; }
+.vgen-style-categories button.is-on { background: rgba(255,255,255,.12); color: #fff; }
+.vgen-style-toolbar > input { box-sizing: border-box; width: 203px; height: 34px; padding: 0 12px; border: 1px solid rgba(255,255,255,.16); border-radius: 8px; outline: none; background: rgba(255,255,255,.06); color: #fff; font: inherit; font-size: 13px; }
+.vgen-style-toolbar > input:focus { border-color: #e8864a; }
+.vgen-style-grid { min-height: 160px; overflow-y: auto; display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); grid-auto-rows: 111px; align-content: start; gap: 15px 18px; padding-right: 4px; }
+.vgen-style-card { position: relative; min-width: 0; height: 111px; overflow: hidden; padding: 0; border: 1px solid transparent; border-radius: 8px; background: #242424; color: #fff; cursor: pointer; }
+.vgen-style-card img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.vgen-style-card span { position: absolute; inset: auto 0 0; overflow: hidden; padding: 22px 8px 7px; background: linear-gradient(transparent,rgba(0,0,0,.76)); text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.vgen-style-card:hover, .vgen-style-card:focus-visible, .vgen-style-card.is-selected { border-color: #e8864a; outline: none; }
+.vgen-style-message { grid-column: 1/-1; display: grid; min-height: 160px; place-items: center; margin: 0; color: rgba(255,255,255,.55); font-size: 13px; }
+.vgen-style-message.error { color: #ff8f8f; }
 .vgen-sheet.on .vgen-panel { transform: translateY(0); }
 .vgen-head { display: flex; align-items: center; gap: 10px; padding: 14px 24px; border-bottom: 1px solid var(--gc-line-soft, #2e2924); }
 .vgen-title { margin: 0; font-size: .92rem; font-weight: 700; color: var(--gc-text, #f6f1e9); }
@@ -163,6 +271,10 @@ export const VGEN_CSS = `
 .vgen-import input:disabled { cursor: not-allowed; }
 .vgen-import-error { margin-left: auto; font-size: .68rem; }
 @media (max-width:820px) {
+  .vgen-design-workspace { grid-template-columns: 190px minmax(360px,1fr); grid-template-rows: minmax(320px,1fr) minmax(280px,auto); overflow: auto; }
+  .vgen-settings { padding: 14px 12px; }
+  .vgen-setting-pills { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .vgen-composer { min-width: 555px; }
   .vgen-body { grid-template-columns: 1fr; }
   .vgen-panel.is-page .vgen-body { padding: 16px 14px; }
   .vgen-panel.is-page .vgen-page-results .vgen-card { display: block; }
@@ -170,6 +282,7 @@ export const VGEN_CSS = `
   .vgen-panel.is-page .vgen-page-composer,
   .vgen-panel.is-page .vgen-foot { width: calc(100% - 28px); }
 }
-@media (max-width:520px) { .vgen-head, .vgen-body, .vgen-foot { padding-left: 14px; padding-right: 14px; } .vgen-grid2, .vgen-frame-grid { grid-template-columns: 1fr; } .vgen-picker-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width:700px) { .vgen-style-dialog { padding: 20px; } .vgen-style-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@media (max-width:520px) { .vgen-head, .vgen-body, .vgen-foot { padding-left: 14px; padding-right: 14px; } .vgen-grid2, .vgen-frame-grid { grid-template-columns: 1fr; } .vgen-picker-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } .vgen-style-toolbar { align-items: stretch; flex-direction: column; } .vgen-style-toolbar > input { width: 100%; } .vgen-style-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (prefers-reduced-motion:reduce) { .vgen-panel { transition: none; } .vgen-out-progress .fill, .vgen-btn-primary.running::before { animation-duration: 2.4s; } }
 `

@@ -54,6 +54,7 @@ function baseArgs(overrides: Partial<GenerateVideoClipArgs> = {}): GenerateVideo
     firstFrameAssetId: 'first',
     lastFrameAssetId: 'last',
     label: 'Rainy crossing',
+    visualStyleKey: 'bwcinema',
     ...overrides,
   }
 }
@@ -105,12 +106,14 @@ describe('generateVideoClip', () => {
           source: 'asset-library-generation',
           mode: 'strict',
           requestId: 'request-ready-1',
+          visualStyleKey: 'bwcinema',
         }),
       })
       expect(input).toMatchObject({
         prompt: '  A heroine crosses a rain-soaked alley.  ',
         durationSeconds: 6,
         generateAudio: true,
+        visualStyleKey: 'bwcinema',
         references: [
           { assetId: 'host:first', role: 'first_frame' },
           { assetId: 'host:last', role: 'last_frame' },

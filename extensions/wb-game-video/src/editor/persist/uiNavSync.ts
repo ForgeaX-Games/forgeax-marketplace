@@ -36,9 +36,9 @@ export interface UiNavSnapshot {
 
 export type UiNavCommand =
   | { type: 'select'; treeNodeId: string | null; overlayId: string | null }
-  | { type: 'add-root-folder' }
-  | { type: 'add-folder'; parentId: string }
-  | { type: 'add-scheme'; parentId: string }
+  | { type: 'add-root-folder'; name?: string }
+  | { type: 'add-folder'; parentId: string; name?: string }
+  | { type: 'add-scheme'; parentId: string; name?: string }
   | { type: 'rename'; nodeId: string; name: string }
   | { type: 'remove'; nodeId: string }
 
@@ -96,10 +96,24 @@ function isCommand(value: unknown): value is UiNavCommand {
       return hasOnlyKeys(value, ['type', 'treeNodeId', 'overlayId'])
         && isNullableString(value.treeNodeId) && isNullableString(value.overlayId)
     case 'add-root-folder':
-      return Object.keys(value).length === 1
+      return (
+        hasOnlyKeys(value, ['type'])
+        || (
+          hasOnlyKeys(value, ['type', 'name'])
+          && typeof value.name === 'string'
+          && value.name.trim().length > 0
+        )
+      )
     case 'add-folder':
     case 'add-scheme':
-      return hasOnlyKeys(value, ['type', 'parentId'])
+      return (
+        hasOnlyKeys(value, ['type', 'parentId'])
+        || (
+          hasOnlyKeys(value, ['type', 'parentId', 'name'])
+          && typeof value.name === 'string'
+          && value.name.trim().length > 0
+        )
+      )
         && typeof value.parentId === 'string' && value.parentId.length > 0
     case 'rename':
       return hasOnlyKeys(value, ['type', 'nodeId', 'name'])
@@ -187,7 +201,7 @@ export function executeUiNavCommand(command: UiNavCommand): boolean {
     const parentId = command.type === 'add-folder' ? command.parentId : null
     if (parentId !== null && findUiTreeNode(tree, parentId)?.kind !== 'folder') return false
     const id = nextId('ui-folder:', collectUiTreeNodeIds(tree))
-    const nextTree = addUiTreeFolder(tree, parentId, { id, name: '新文件夹' })
+    const nextTree = addUiTreeFolder(tree, parentId, { id, name: command.name?.trim() || '新文件夹' })
     if (nextTree === tree) return false
     state.setMeta((current) => ({ ...current, uiTree: nextTree }))
     useUiSelection.getState().selectUiNode(id, null)
@@ -201,7 +215,11 @@ export function executeUiNavCommand(command: UiNavCommand): boolean {
     const nextTree = addUiTreeScheme(tree, command.parentId, { id: nodeId, overlayId })
     if (nextTree === tree) return false
     const nextOverlays: Record<string, Overlay> = {
-      [overlayId]: { id: overlayId, title: nextUniqueOverlayTitle(overlays), children: [] },
+      [overlayId]: {
+        id: overlayId,
+        title: command.name?.trim() || nextUniqueOverlayTitle(overlays),
+        children: [],
+      },
       ...overlays,
     }
     state.setMeta((current) => ({

@@ -13,10 +13,10 @@ function graphWith(data: GameNodeData): GameGraph {
 }
 
 function expectPerformanceFieldsHidden(): void {
-  expect(screen.queryByText('视频', { selector: 'label > span:first-child' })).toBeNull()
-  expect(screen.queryByText('播放', { selector: 'label > span:first-child' })).toBeNull()
+  expect(screen.queryByText('演出视频', { selector: 'label > span:first-child' })).toBeNull()
+  expect(screen.queryByRole('group', { name: '播放模式' })).toBeNull()
   expect(screen.queryByText('界面', { selector: 'b' })).toBeNull()
-  expect(screen.queryByText('结算', { selector: 'b' })).toBeNull()
+  expect(screen.queryByText('结算', { selector: '.ni-section-title' })).toBeNull()
   expect(screen.queryByText('响应规则', { selector: 'b' })).toBeNull()
 }
 
@@ -41,10 +41,10 @@ describe('NodeInspector · 蓝图节点角色约束', () => {
   it('普通演出节点可配置演出、界面和结算，但不再展示响应规则', () => {
     render(<NodeInspector graph={graphWith({ name: '演出' })} nodeId="node" onChange={vi.fn()} />)
 
-    expect(screen.getByText('视频', { selector: 'label > span:first-child' })).toBeTruthy()
-    expect(screen.getByText('播放', { selector: 'label > span:first-child' })).toBeTruthy()
-    expect(screen.getByText('界面', { selector: 'b' })).toBeTruthy()
-    expect(screen.getByText('结算', { selector: 'b' })).toBeTruthy()
+    expect(screen.getByText('演出视频', { selector: 'label > span:first-child' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: '播放模式' })).toBeTruthy()
+    expect(screen.getByText('界面', { selector: '.ni-section-title' })).toBeTruthy()
+    expect(screen.getByText('结算', { selector: '.ni-section-title' })).toBeTruthy()
     expect(screen.queryByText('响应规则', { selector: 'b' })).toBeNull()
     expect(screen.getByText('嵌套', { selector: 'label > span:first-child' })).toBeTruthy()
   })

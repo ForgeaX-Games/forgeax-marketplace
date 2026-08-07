@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { GameGraph, Overlay } from '../../../runtime/schema/graph-schema'
-import { bootEditorSkins } from '../../init'
+import { registerTestComponents } from '../../../runtime/__tests__/test-components'
 import {
   collectAllKeyBindingSites,
   collectCurrentNodeKeyBindingSites,
@@ -13,7 +13,7 @@ import {
 } from '../keyBindingConflicts'
 
 beforeAll(() => {
-  bootEditorSkins()
+  registerTestComponents()
 })
 
 function overlay(id: string, title: string, children: Overlay['children']): Overlay {
@@ -29,10 +29,10 @@ describe('keyBindingConflicts', () => {
   it('flags the same key used by two catalog components', () => {
     const overlays = {
       schemeA: overlay('schemeA', '新方案 1', [
-        { id: 'skill', component: 'BattleSkill', inputs: { heavyKey: 'C' } },
+        { id: 'skill', component: 'test.skill', inputs: { heavyKey: 'C' } },
       ]),
       schemeB: overlay('schemeB', '新方案 2', [
-        { id: 'opt', component: 'TextOption', inputs: { triggerKey: 'c' } },
+        { id: 'opt', component: 'test.text', inputs: { triggerKey: 'c' } },
       ]),
     }
     const conflicts = findKeyBindingConflicts(collectAllKeyBindingSites(overlays))
@@ -40,16 +40,16 @@ describe('keyBindingConflicts', () => {
     expect(conflicts.has('schemeB/opt/triggerKey')).toBe(true)
     expect(keyConflictChildIds('schemeA', conflicts)).toEqual(new Set(['skill']))
     expect(keyConflictTooltip(conflicts.get('schemeA/skill/heavyKey'))).toBe(
-      '按键C已应用于文字交互-触发',
+      '按键C已应用于测试文字交互-触发',
     )
   })
 
   it('does not compare key bindings across different schemes', () => {
     const schemeA = overlay('schemeA', '新方案 1', [
-      { id: 'opt-a', component: 'TextOption', inputs: {} },
+      { id: 'opt-a', component: 'test.text', inputs: {} },
     ])
     const schemeB = overlay('schemeB', '新方案 2', [
-      { id: 'opt-b', component: 'TextOption', inputs: {} },
+      { id: 'opt-b', component: 'test.text', inputs: {} },
     ])
     const overlays = { schemeA, schemeB }
 
@@ -61,12 +61,12 @@ describe('keyBindingConflicts', () => {
     ).size).toBe(0)
   })
 
-  it('flags two keys inside the same BattleSkill when they collide', () => {
+  it('flags two keys inside the same TEST_SKILL when they collide', () => {
     const overlays = {
       hud: overlay('hud', '战斗 HUD', [
         {
           id: 'bar',
-          component: 'BattleSkill',
+          component: 'test.skill',
           inputs: { lightKey: 'X', heavyKey: 'X', meditKey: 'S', ultKey: 'B' },
         },
       ]),
@@ -81,12 +81,12 @@ describe('keyBindingConflicts', () => {
     const current = overlay('scheme', '新方案', [
       {
         id: 'parry',
-        component: 'BattleParry',
+        component: 'test.qte',
         inputs: { firstKey: '', secondKey: 'Q' },
       },
       {
         id: 'skills',
-        component: 'BattleSkill',
+        component: 'test.skill',
         inputs: { heavyKey: 'A' },
       },
     ])
@@ -100,11 +100,11 @@ describe('keyBindingConflicts', () => {
 
   it('does not treat an unused base component template as a key owner', () => {
     const overlays = {
-      'base:TextOption': overlay('base:TextOption', '文字交互', [
-        { id: 'text-option', component: 'TextOption', inputs: {} },
+      'base:TEST_TEXT': overlay('base:TEST_TEXT', '文字交互', [
+        { id: 'text-option', component: 'test.text', inputs: {} },
       ]),
       schemeA: overlay('schemeA', '新方案 3', [
-        { id: 'opt', component: 'TextOption', inputs: {} },
+        { id: 'opt', component: 'test.text', inputs: {} },
       ]),
     }
     const conflicts = findKeyBindingConflicts(collectAllKeyBindingSites(overlays))
@@ -115,7 +115,7 @@ describe('keyBindingConflicts', () => {
   it('includes node-added children without double-counting unchanged catalog mounts', () => {
     const overlays = {
       base: overlay('base', '基础交互', [
-        { id: 'opt', component: 'TextOption', inputs: { triggerKey: 'F' } },
+        { id: 'opt', component: 'test.text', inputs: { triggerKey: 'F' } },
       ]),
     }
     const graph: GameGraph = {
@@ -129,7 +129,7 @@ describe('keyBindingConflicts', () => {
           name: '节点一',
           overlayNodes: [{
             overlay: 'base',
-            added: [{ id: 'extra', component: 'InkKou', inputs: { triggerKey: 'F' } }],
+            added: [{ id: 'extra', component: 'test.qte', inputs: { triggerKey: 'F' } }],
           }],
         },
       }],
@@ -144,7 +144,7 @@ describe('keyBindingConflicts', () => {
   it('limits blueprint conflicts to the current node mounts', () => {
     const overlays = {
       keys: overlay('keys', '按键界面', [
-        { id: 'opt', component: 'TextOption', inputs: {} },
+        { id: 'opt', component: 'test.text', inputs: {} },
       ]),
     }
     const current = collectCurrentNodeKeyBindingSites(overlays, 'node-a', [

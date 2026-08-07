@@ -6,15 +6,18 @@
 
 - 图文档权威文件是宿主绑定游戏工作区内的逻辑路径 `blueprint.json`；首次保存同时补齐
   `project.json`。物理目录布局由宿主 workspace adapter 决定。
-- 未保存草稿留在浏览器 localStorage。未初始化项目由 `GameBootstrap` 引导用户显式创建
-  Nodia seed；已初始化 package 读取失败会进入可重试错误页，不会自动写入空蓝图。
+- 未保存草稿留在浏览器 localStorage。未初始化项目由 `GameBootstrap` 引导宿主 `initialize`；
+  首次 initialize 默认写入 **empty library**（单 `entry` 节点空壳，非 Nodia demo）。Nodia 仅用于
+  用户显式 demo 重置（`createNodiaSeed`）。已初始化 package 读取失败会进入可重试错误页，不会自动
+  写入空蓝图覆盖原文件。
 - 游戏身份只来自宿主：后端读取 `WorkbenchExtensionContext.gameId`，浏览器等待 nonce-bound
-  handshake 后读取 `ExtensionClient.ready()` 返回的 `gameId`。11 个 AI 工具都不接受调用者提供的
+  handshake 后读取 `ExtensionClient.ready()` 返回的 `gameId`。12 个 AI 工具都不接受调用者提供的
   `gameSlug`。
-- `wb-game-video:save-graph` 覆盖保存整份文档，`title` 当前忽略，成功返回
-  `{ ok: true, versions: [], gameSlug }`，其中 `gameSlug` 是宿主绑定 id 的回显。
+- AI 使用 `wb-game-video:patch-graph` 原子增量改图；任一 op 或整本校验失败时不写盘。
+  `wb-game-video:save-graph` 保留给编辑器 UI 覆盖保存整份文档，不向 AI 暴露。
 - 运行时组件位于 [`src/runtime/component-host`](./src/runtime/component-host)，图中只保存组件 id 与可序列化输入。
-- 扩展同时提供 11 个 AI 工具：图读写、内置视频列表、镜头脚本/关键帧/视频生成、素材查询和角色/场景引用导入。完整调用契约见 [`SKILL.md`](./SKILL.md)。
+- 扩展提供 13 个 host 工具，其中 12 个向 AI 暴露：增量改图、图读取、内置视频列表、
+  镜头脚本/关键帧/视频生成、素材查询和角色/场景引用导入。完整调用契约见 [`SKILL.md`](./SKILL.md)。
 
 ## 本地开发
 
@@ -55,11 +58,12 @@ bun run start:standalone
 `/__workbench__/v1` 的标准 Workbench HTTP 契约；用宿主 iframe 的 nonce-bound
 handshake 注入 game id、runtime id 和端点后再打开编辑器。它不提供旧的兼容业务路由。
 本地游戏包保存在被忽略的 `.workbench-dev/games/<gameId>/`，首次 `initialize` 时由
-扩展的 Nodia seed 创建 `project.json`、`blueprint.json` 与 `assets/manifest.json`。
+扩展的 empty library seed 创建 `project.json`、`blueprint.json` 与 `assets/manifest.json`。
+Nodia demo 需显式调用 `createNodiaSeed`。
 `bun test` 是无 DOM 的 server/release-contract gate；浏览器、React 与 Vite 覆盖使用
 完整的 `bun run test`（Vitest）。
 
-`/workbench-host.2.3` 通过 registry 安装。开发和 CI 使用
+`@forgeax/workbench-host@0.2.6` 通过 registry 安装。开发和 CI 使用
 `bun install --frozen-lockfile`，以 `bun.lock` 固定已发布的 Host 契约；不需要也不应配置本地
 tarball、路径 override 或 vendored provenance。
 
@@ -67,18 +71,49 @@ tarball、路径 override 或 vendored provenance。
 
 浏览器素材库使用 Host 的 `/games/:gameId/media` 可恢复上传和元数据 API；扩展不再提供
 `assets/wb-game-video-media.json` 或 `media/resources` 生命周期。该契约由
-`/workbench-host.2.3` 发布并以 registry tarball + integrity pin 固定。
+`@forgeax/workbench-host@0.2.6` 发布并以 registry tarball + integrity pin 固定。
 
 ## 宿主集成
 
-发布包要求精确 peer：`@forgeax/extension-platform@0.0.2` 与
-`/workbench-host.2.3`。包导出：
+发布包要求精确 peer：`@forgeax/extension-platform@0.0.3` 与
+`@forgeax/workbench-host@0.2.6`。包导出：
 
 - `@forgeax-extension/wb-game-video` / `./host` — Workbench 扩展 host（seed、工具、router）
 - `@forgeax-extension/wb-game-video/standalone` — standalone 播放页 HTML（`dist/standalone/wb-game-video.html`）
 - `@forgeax-extension/wb-game-video/styles.css` — 编辑器样式
 
-其中的 `host` 提供游戏包 seed、11 个工具和扩展 HTTP router。生产宿主负责加载它，并为每个已解析的游戏
+### 游戏组件模块契约
+
+游戏专属组件由 `gameComponents.moduleUrl('index.js')` 提供的模块注册。模块导出
+`register(host)`（也接受默认导出的函数或带 `register` 的对象），其中 `host` 只提供：
+
+- 共享的 `React` 实例；
+- `registerComponent(id, manifest)`；
+- `registerOverlayRenderer(id, component, manifest?)`。
+
+```ts
+export function register(host) {
+  host.registerComponent(manifest.id, manifest)
+  host.registerOverlayRenderer(manifest.id, Component, manifest)
+}
+```
+
+组件目录 [`src/runtime/component-host/components`](./src/runtime/component-host/components) 使用
+[`LocalComponentManifest`](./src/runtime/component-host/components/manifest.ts) 描述包内契约；转为平台
+`ComponentDef` / `ComponentManifest` 的类型边界只位于
+[`component-host/index.ts`](./src/runtime/component-host/index.ts)。叶子组件不应直接依赖 editor、engine
+或平台 schema 来解释作者输入。
+
+PR #141 后不再存在 `registerInteractionSkin`、`registerHpBar`，也不再提供
+`interactionSkins()`、`hpBarComponents()`、`skinPositioning()`、`skinDefaultAnchor()` 这类并行元数据
+访问器；组件发现以 manifest 与 renderer 注册为唯一入口。源码级 runtime barrel 仍导出
+`registerCoreSkins`、`createCoreSkinRegistry`、`createDefaultComponentRegistry`，但不再导出
+`newComponents`、`installNewComponents` 或各内建 manifest。
+
+该组件目录是仓内内建 catalog，不是受支持的 npm 子路径。公开包入口仅以上述根入口、`./host`、
+`./styles.css`、`./standalone` 为准。
+
+其中的 `host` 提供游戏包 seed、13 个工具和扩展 HTTP router。生产宿主负责加载它，并为每个已解析的游戏
 创建唯一的 `WorkbenchExtensionContext`：
 
 ```ts
@@ -136,10 +171,10 @@ location 或默认 slug 推导这些值。包读写和扩展请求分别使用 `
 
 发布必须按以下顺序：
 
-1. 先发布已经过评审的 `/workbench-host.2.3`；
+1. 先发布已经过评审的 `@forgeax/workbench-host@0.2.6`；
 2. 从 registry 验证其类型与能力契约，并更新 `bun.lock`；
 3. 完成 frozen install、测试、构建和 pack 检查后，最后发布
-   `@forgeax-extension/wb-game-video@0.3.2`。
+   `@forgeax-extension/wb-game-video@0.4.0`。
 
 ## 代码导航
 

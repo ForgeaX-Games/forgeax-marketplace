@@ -90,6 +90,15 @@ describe('useAssetLibrary', () => {
     })
   })
 
+  it('does not query capabilities or media with an empty game id', async () => {
+    const api = client()
+    const { result } = renderHook(() => useAssetLibrary('', api))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(api.capabilities).not.toHaveBeenCalled()
+    expect(api.list).not.toHaveBeenCalled()
+  })
+
   it('shows font capability and broader formats for Local provider', async () => {
     const api = client(LOCAL_CAPABILITIES)
     const { result } = renderHook(() => useAssetLibrary('demo', api))

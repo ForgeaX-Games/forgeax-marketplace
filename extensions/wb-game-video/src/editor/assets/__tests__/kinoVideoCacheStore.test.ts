@@ -1,6 +1,10 @@
 import { renderHook, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useKinoVideoCache, useKinoVideoResources } from '../kinoVideoCacheStore'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  installKinoVideoCacheSync,
+  useKinoVideoCache,
+  useKinoVideoResources,
+} from '../kinoVideoCacheStore'
 import type { KinoResourceDTO, KinoVideoClient } from '../kino-api'
 
 const defaultList = vi.hoisted(() => vi.fn())
@@ -44,6 +48,8 @@ describe('kinoVideoCacheStore', () => {
     defaultList.mockReset()
   })
 
+  afterEach(() => vi.unstubAllGlobals())
+
   it('loads every Kino page into only the requested project cache', async () => {
     const list = vi.fn()
       .mockResolvedValueOnce({ items: [resource('one')], total: 2, page: 1, page_size: 100 })
@@ -76,6 +82,37 @@ describe('kinoVideoCacheStore', () => {
     useKinoVideoCache.getState().remove('project-a', 'one')
 
     expect(useKinoVideoCache.getState().byGame['project-a']?.items).toEqual([])
+  })
+
+  it('synchronizes upserts and removals between Workbench panes', () => {
+    class FakeBroadcastChannel {
+      static instance: FakeBroadcastChannel | undefined
+      onmessage: ((event: MessageEvent) => void) | null = null
+      postMessage = vi.fn()
+      close = vi.fn()
+
+      constructor(readonly name: string) {
+        FakeBroadcastChannel.instance = this
+      }
+    }
+    vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel)
+    const dispose = installKinoVideoCacheSync()
+    const channel = FakeBroadcastChannel.instance!
+
+    useKinoVideoCache.getState().upsert('demo', resource('one'))
+    expect(channel.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'upsert',
+      gameId: 'demo',
+    }))
+
+    channel.onmessage?.({
+      data: { type: 'remove', gameId: 'demo', resourceId: 'one' },
+    } as MessageEvent)
+    expect(useKinoVideoCache.getState().byGame.demo?.items).toEqual([])
+    expect(channel.postMessage).toHaveBeenCalledTimes(1)
+
+    dispose()
+    expect(channel.close).toHaveBeenCalledOnce()
   })
 
   it('shares one cache hydration between resource consumers', async () => {

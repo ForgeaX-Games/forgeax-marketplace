@@ -1,21 +1,28 @@
 /**
- * NewSidebar —— 新版左侧栏（按 Figma 15195_75500 视觉稿）。
+ * NewSidebar —— 新版左侧栏（按 Figma 15738:86794 视觉稿）。
  *
  * 「蓝图」子树接真实 `blueprints`（扁平：主入口置顶 + 子蓝图排序），资产和规则
- * 同样从项目数据派生；视频仍为 mock。
+ * 同样从项目数据派生；视频按本地一级标签分组真实媒体资源。
  */
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useT } from '../../i18n'
+import assetLibraryIcon from '../../assets/sidebar-asset-library.svg?url'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { countOverlayReferences } from '../../graph/edit/overlay-edit'
 import { useGraphScenario } from '../persist/graphScenarioStore'
-import { BASIC_UI_FOLDER_ID, ensureUiTree, findUiTreeNode } from '../persist/ui-tree'
+import { BASIC_UI_FOLDER_ID, ensureUiTree } from '../persist/ui-tree'
 import { sendUiNavCommand, useUiNavMirror } from '../persist/uiNavSync'
 import { useUiSelection } from '../persist/uiSelectionStore'
 import { useGraphView, type GraphView } from '../persist/graphViewStore'
 import { useAssetNav } from '../persist/assetNavStore'
-import { useRuleSelection } from '../persist/ruleSelectionStore'
-import { ASSET_DIRECTORY_ROOTS, childrenOf, type AssetDirectoryController } from '../assets/asset-directory'
+import { useRuleSelection, type RuleSection } from '../persist/ruleSelectionStore'
+import { useDocumentNav } from '../persist/documentNavStore'
+import {
+  useVideoLibraryNav,
+  type VideoLibraryFolderTarget,
+} from '../persist/videoLibraryNavStore'
+import { childrenOf, type AssetDirectoryController } from '../assets/asset-directory'
 import {
   assetEntryKey,
   assetEntryName,
@@ -24,7 +31,17 @@ import {
   type AssetListEntry,
 } from '../assets/asset-entries'
 import { useAssetBrowser } from '../assets/use-asset-browser'
-import type { AssetLibraryRootKind } from '../assets/registry-types'
+import { useVideoAssets, type VideoAssetListItem } from '../assets/useVideoAssets'
+import {
+  listVideoLibraryFolderNames,
+  normalizeVideoLibraryFolderName,
+  readVideoLibraryMetadata,
+  resolveVideoLibraryEntryTag,
+  subscribeVideoLibraryMetadata,
+  writeVideoLibraryFolderName,
+  type VideoLibraryMetadata,
+} from '../assets/video-library-metadata'
+import type { AssetLibraryRootKind, DocumentType } from '../assets/registry-types'
 import { blueprintListItems } from './blueprintNav'
 import { useBlueprintNavActions, type BlueprintNavActions } from './useBlueprintNavActions'
 import { UiTreeView, type UiTreeViewNode } from './UiTreeView'
@@ -43,44 +60,27 @@ export interface NavNode {
   blueprint?: boolean
   /** 是否为入口蓝图。 */
   isEntry?: boolean
+  leadingIcon?: 'asset-library' | 'add-folder'
   assetLocation?: { root: AssetLibraryRootKind, folderId?: string, entryKey?: string }
-  ruleTarget?: { section: 'entities' | 'variables' | 'formulas', itemId?: string }
+  ruleTarget?: { section: RuleSection, itemId?: string }
+  documentType?: DocumentType
+  videoLocation?: { folder: VideoLibraryFolderTarget, entryId?: string }
   children?: NavNode[]
 }
 
-/** 非蓝图顶层 mock（视频/界面/试玩）。 */
-const MOCK_ENTRIES: readonly NavNode[] = [
-  {
-    id: 'video',
-    label: '视频',
-    kind: 'entry',
-    view: 'video',
-    canAddChild: true,
-    children: [
-      {
-        id: 'vid-generated',
-        label: '生成视频',
-        kind: 'branch',
-        view: 'video-generate',
-        children: [
-          { id: 'vid-gen-door', label: 'narr-door.mp4', kind: 'leaf' },
-          { id: 'vid-gen-land', label: 'narr-land.mp4', kind: 'leaf' },
-        ],
-      },
-      { id: 'vid-uploaded', label: '上传视频', kind: 'leaf' },
-    ],
-  },
-  {
-    id: 'ui',
-    label: '界面',
-    kind: 'entry',
-    view: 'ui',
-    canAddChild: true,
-    externallyExpandable: true,
-    // 子树由真实 UiTreeView 渲染（main #115），不再用 mock children。
-    // 行内加号在「自定义界面(ui-folder:custom)」下新建界面方案。
-  },
-  { id: 'play', label: '试玩', kind: 'entry', view: 'play' },
+const EMPTY_VIDEO_LIBRARY_METADATA: VideoLibraryMetadata = { tagsByEntryId: {}, folderNames: [] }
+
+const SIDEBAR_ASSET_ROOTS: ReadonlyArray<{
+  kind: AssetLibraryRootKind
+  label: string
+  placeholder?: boolean
+}> = [
+  { kind: 'image', label: '图标' },
+  { kind: 'control', label: '控件' },
+  { kind: 'video', label: '视频' },
+  { kind: 'audio', label: '音频' },
+  { kind: 'settings', label: '设定', placeholder: true },
+  { kind: 'font', label: '字体' },
 ]
 
 function buildNavTree(
@@ -97,6 +97,7 @@ function buildNavTree(
     isEntry: it.isEntry,
   }))
   return [
+    buildDocumentNavNode(),
     {
       id: 'graph',
       label: '蓝图',
@@ -105,13 +106,95 @@ function buildNavTree(
       canAddChild: true,
       children: bpChildren,
     },
-    ...MOCK_ENTRIES,
+    {
+      id: 'ui',
+      label: '界面',
+      kind: 'entry',
+      view: 'ui',
+      canAddChild: true,
+      externallyExpandable: true,
+      // 子树由真实 UiTreeView 渲染；行内加号沿用既有界面新建逻辑。
+    },
+    { id: 'play', label: '试玩', kind: 'entry', view: 'play' },
     assets,
     rules,
+    {
+      id: 'new-folder',
+      label: '新增文件夹',
+      kind: 'entry',
+      leadingIcon: 'add-folder',
+    },
   ]
 }
 
-function buildAssetNavNode(directory: AssetDirectoryController, entries: readonly AssetListEntry[]): NavNode {
+function buildDocumentNavNode(): NavNode {
+  return {
+    id: 'documents',
+    label: '文档',
+    kind: 'entry',
+    view: 'documents',
+    children: [
+      { id: 'document:proposal', label: '策划案', kind: 'leaf', documentType: 'proposal' },
+      { id: 'document:outline', label: '大纲', kind: 'leaf', documentType: 'outline' },
+      { id: 'document:script', label: '剧本', kind: 'leaf', documentType: 'script' },
+    ],
+  }
+}
+
+function videoFolderId(folderName: string): string {
+  return `video-folder:${encodeURIComponent(folderName)}`
+}
+
+function videoEntryId(entryId: string): string {
+  return `video-entry:${entryId}`
+}
+
+function buildVideoNavNode(
+  videos: readonly VideoAssetListItem[],
+  metadata: VideoLibraryMetadata,
+): NavNode {
+  const allVideos = [...videos].sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'))
+  const leaf = (video: { id: string, label: string }, folder: VideoLibraryFolderTarget): NavNode => ({
+    id: videoEntryId(video.id),
+    label: video.label,
+    kind: 'leaf',
+    videoLocation: { folder, entryId: video.id },
+  })
+  const folders = listVideoLibraryFolderNames(metadata).map((folderName): NavNode => {
+    const folder: VideoLibraryFolderTarget = { kind: 'tag', name: folderName }
+    return {
+      id: videoFolderId(folderName),
+      label: folderName,
+      kind: 'branch',
+      externallyExpandable: true,
+      videoLocation: { folder },
+      children: allVideos
+        .filter((video) => resolveVideoLibraryEntryTag(video.id, metadata) === folderName)
+        .map((video) => leaf(video, folder)),
+    }
+  })
+  const untagged: VideoLibraryFolderTarget = { kind: 'untagged' }
+  return {
+    id: 'asset-root:video',
+    label: '视频',
+    kind: 'branch',
+    view: 'video',
+    externallyExpandable: true,
+    videoLocation: { folder: { kind: 'all' } },
+    children: [
+      ...folders,
+      ...allVideos
+        .filter((video) => resolveVideoLibraryEntryTag(video.id, metadata) === null)
+        .map((video) => leaf(video, untagged)),
+    ],
+  }
+}
+
+function buildAssetNavNode(
+  directory: AssetDirectoryController,
+  entries: readonly AssetListEntry[],
+  videoNode: NavNode,
+): NavNode {
   const buildFolder = (folderId: string, root: AssetLibraryRootKind): NavNode[] => [
     ...childrenOf(directory.assetLibrary, folderId, root).map((folder) => ({
       id: `asset-folder:${folder.id}`,
@@ -128,7 +211,11 @@ function buildAssetNavNode(directory: AssetDirectoryController, entries: readonl
         id: `asset-entry:${assetEntryKey(entry)}`,
         label: assetEntryName(entry),
         kind: 'leaf' as const,
-        assetLocation: { root, folderId: folderId.startsWith('root:') ? undefined : folderId, entryKey: assetEntryKey(entry) },
+        assetLocation: {
+          root,
+          folderId: folderId.startsWith('root:') ? undefined : folderId,
+          entryKey: assetEntryKey(entry),
+        },
       })),
   ]
   return {
@@ -136,13 +223,18 @@ function buildAssetNavNode(directory: AssetDirectoryController, entries: readonl
     label: '资产库',
     kind: 'entry',
     view: 'assets',
-    children: ASSET_DIRECTORY_ROOTS.map((root) => ({
-      id: `asset-root:${root.kind}`,
-      label: root.name,
-      kind: 'branch',
-      assetLocation: { root: root.kind },
-      children: buildFolder(root.id, root.kind),
-    })),
+    leadingIcon: 'asset-library',
+    children: SIDEBAR_ASSET_ROOTS.map((root) => {
+      if (root.kind === 'video') return videoNode
+      return {
+        id: `asset-root:${root.kind}`,
+        label: root.label,
+        kind: 'branch',
+        externallyExpandable: true,
+        assetLocation: root.placeholder ? undefined : { root: root.kind },
+        children: root.placeholder ? [] : buildFolder(`root:${root.kind}`, root.kind),
+      }
+    }),
   }
 }
 
@@ -185,8 +277,8 @@ const NEW_SIDEBAR_CSS = `
   --ns-text-60: rgba(255, 255, 255, 0.60);
   --ns-text-80: rgba(255, 255, 255, 0.80);
   --ns-row-h: 42px;
-  width: 240px;
-  min-width: 220px;
+  width: 196px;
+  min-width: 196px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -222,7 +314,14 @@ const NEW_SIDEBAR_CSS = `
 }
 .ns-row:hover { background: rgba(255, 255, 255, 0.04); }
 .ns-row.is-active { background: rgba(255, 255, 255, 0.10); }
-.ns-row.is-editing { background: rgba(255, 255, 255, 0.10); }
+.ns-row.is-editing {
+  min-height: var(--ns-row-h);
+  height: auto;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  flex-wrap: wrap;
+  background: rgba(255, 255, 255, 0.10);
+}
 .ns-row:focus-visible { outline: 1px solid rgba(255,255,255,0.45); outline-offset: -1px; }
 .ns-chev {
   flex: none;
@@ -240,7 +339,30 @@ const NEW_SIDEBAR_CSS = `
   transition: transform .18s ease;
 }
 .ns-chev svg { width: 20px; height: 20px; display: block; }
-.ns-chev.is-collapsed { transform: rotate(-90deg); }
+.ns-chev.is-collapsed { color: var(--ns-text-40); transform: rotate(-90deg); }
+.ns-chev-spacer {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+}
+.ns-leading {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ns-text-80);
+}
+button.ns-leading { cursor: pointer; }
+.ns-leading img { display: block; width: 12px; height: 12px; }
+.ns-leading.is-add { width: 18px; height: 18px; }
+.ns-leading.is-add svg { display: block; width: 14px; height: 14px; }
 .ns-label {
   flex: 1;
   min-width: 0;
@@ -420,11 +542,36 @@ const NEW_SIDEBAR_CSS = `
 }
 .ns-inline-edit:focus { outline-color: rgba(255,255,255,0.80); }
 .ns-inline-edit[aria-invalid="true"] { outline-color: #ff8e8e; }
+.ns-inline-error {
+  flex-basis: 100%;
+  padding: 4px 4px 0;
+  color: #ff8e8e;
+  font-size: 12px;
+  line-height: 16px;
+}
 .ns-ui-tree {
   width: 100%;
   min-width: 0;
 }
 `
+
+function videoMetadataSnapshot(gameId: string): VideoLibraryMetadata {
+  if (!gameId) return EMPTY_VIDEO_LIBRARY_METADATA
+  const result = readVideoLibraryMetadata(gameId)
+  return result.status === 'ready'
+    ? { tagsByEntryId: result.tagsByEntryId, folderNames: result.folderNames }
+    : EMPTY_VIDEO_LIBRARY_METADATA
+}
+
+function useVideoMetadataSnapshot(gameId: string): VideoLibraryMetadata {
+  const [metadata, setMetadata] = useState<VideoLibraryMetadata>(() => videoMetadataSnapshot(gameId))
+  useEffect(() => {
+    setMetadata(videoMetadataSnapshot(gameId))
+    if (!gameId) return
+    return subscribeVideoLibraryMetadata(gameId, () => setMetadata(videoMetadataSnapshot(gameId)))
+  }, [gameId])
+  return metadata
+}
 
 function toViewNodes(nodes: readonly UiTreeViewNode[]): UiTreeViewNode[] {
   return nodes.map((node) => {
@@ -439,9 +586,10 @@ function toViewNodes(nodes: readonly UiTreeViewNode[]): UiTreeViewNode[] {
   })
 }
 
+// 默认朝下（展开）；.is-collapsed 旋 -90° → 朝右（收起），对齐 IDE 文件夹箭头。
 const ChevronIcon = (
   <svg viewBox="0 0 20 20" fill="none" aria-hidden>
-    <path d="M15 12.5L10 7.5L5 12.5" stroke="currentColor" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
 const PlusIcon = (
@@ -472,7 +620,9 @@ interface NsRowProps {
   activeId: string | null
   mainId: string
   bp: BlueprintNavActions
+  uiGroupComposing: boolean
   onToggle: (id: string) => void
+  onExpand: (id: string) => void
   onSelect: (node: NavNode) => void
   onMockAddChild: (node: NavNode) => void
   onMockRename: (node: NavNode) => void
@@ -481,7 +631,8 @@ interface NsRowProps {
 
 function NsRow({
   node, depth, expanded, activeId, mainId, bp,
-  onToggle, onSelect, onMockAddChild, onMockRename, onMockDelete,
+  uiGroupComposing,
+  onToggle, onExpand, onSelect, onMockAddChild, onMockRename, onMockDelete,
 }: NsRowProps): JSX.Element {
   const hasChildren = !!(node.children && node.children.length > 0)
   const isExpandable = hasChildren || !!node.externallyExpandable
@@ -544,7 +695,7 @@ function NsRow({
         )}
       </>
     )
-  } else if (!isBlueprintLeaf && node.kind !== 'entry') {
+  } else if (!isBlueprintLeaf && node.kind !== 'entry' && !node.videoLocation) {
     rowActions = (
       <>
         <button type="button" className="ns-act" aria-label={`重命名 ${node.label}`} title="重命名" onClick={() => onMockRename(node)}>
@@ -567,8 +718,13 @@ function NsRow({
         aria-expanded={bp.composing}
         onClick={(e) => {
           e.stopPropagation()
-          if (bp.composing) bp.cancelCompose()
-          else bp.openCompose()
+          if (bp.composing) {
+            bp.cancelCompose()
+            return
+          }
+          // IDE 式：文件夹收起时点「+」也会展开并出现新建行。
+          onExpand(node.id)
+          bp.openCompose()
         }}
       >
         {PlusIcon}
@@ -578,9 +734,10 @@ function NsRow({
       ? (
         <button
           type="button"
-          className="ns-add"
+          className={`ns-add${node.id === 'ui' && uiGroupComposing ? ' is-on' : ''}`}
           aria-label={`新增 ${node.label} 子项`}
           title="新增子项"
+          aria-expanded={node.id === 'ui' ? uiGroupComposing : undefined}
           onClick={(e) => {
             e.stopPropagation()
             onMockAddChild(node)
@@ -591,6 +748,16 @@ function NsRow({
       )
       : null
 
+  const activateRow = (): void => {
+    // 文件夹行：只展开/收起展示子项，不切换当前选中视图。
+    if (isExpandable) {
+      onToggle(node.id)
+      // 视频根和一级标签既是目录也是素材页筛选项：点击行时同步进入对应列表。
+      if (!node.videoLocation) return
+    }
+    onSelect(node)
+  }
+
   return (
     <>
       <div
@@ -600,15 +767,15 @@ function NsRow({
         aria-selected={isActive}
         tabIndex={0}
         style={{ paddingLeft: indent }}
-        onClick={() => onSelect(node)}
+        onClick={activateRow}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
-            onSelect(node)
+            activateRow()
           }
         }}
       >
-        {isExpandable && (
+        {isExpandable && node.leadingIcon !== 'asset-library' && (
           <button
             type="button"
             className={`ns-chev${isExpanded ? '' : ' is-collapsed'}`}
@@ -621,6 +788,25 @@ function NsRow({
             {ChevronIcon}
           </button>
         )}
+        {!isExpandable && node.leadingIcon == null ? (
+          <span className="ns-chev-spacer" aria-hidden />
+        ) : null}
+        {node.leadingIcon === 'asset-library' ? (
+          <button
+            type="button"
+            className="ns-leading"
+            aria-label={`${isExpanded ? '折叠' : '展开'} ${node.label}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggle(node.id)
+            }}
+          >
+            <img src={assetLibraryIcon} alt="" />
+          </button>
+        ) : null}
+        {node.leadingIcon === 'add-folder' ? (
+          <span className="ns-leading is-add" aria-hidden>{PlusIcon}</span>
+        ) : null}
         {isEditing ? (
           <input
             ref={inlineRenameRef}
@@ -664,53 +850,55 @@ function NsRow({
         )}
         {addChild}
       </div>
+      {/* 新建行不挂在子循环里：空库 / 收起态也能出输入框（点 + 会先 expand）。 */}
+      {node.id === 'graph' && bp.composing && (
+        <div
+          className="ns-row is-editing"
+          style={{ paddingLeft: (depth + 1) * 8 }}
+        >
+          <input
+            ref={bp.composeInputRef}
+            className="ns-inline-edit"
+            aria-label="新建蓝图名称"
+            aria-invalid={!!bp.composeError}
+            value={bp.draftName ?? ''}
+            placeholder="新建蓝图名称"
+            onChange={(e) => {
+              bp.setDraftName(e.target.value)
+              if (bp.composeError) bp.clearComposeError()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); bp.confirmCompose() }
+              else if (e.key === 'Escape') { e.preventDefault(); bp.cancelCompose() }
+            }}
+            onBlur={() => {
+              setTimeout(() => {
+                if (bp.composing) bp.cancelCompose()
+              }, 0)
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
       {hasChildren && isExpanded && (
         <>
-          {node.children!.map((child, i) => (
-            <Fragment key={child.id}>
-              {node.id === 'graph' && bp.composing && i === 0 && (
-                <div
-                  className="ns-row is-editing"
-                  style={{ paddingLeft: (depth + 1) * 8 }}
-                >
-                  <input
-                    ref={bp.composeInputRef}
-                    className="ns-inline-edit"
-                    aria-label="新建蓝图名称"
-                    aria-invalid={!!bp.composeError}
-                    value={bp.draftName ?? ''}
-                    placeholder="新建蓝图名称"
-                    onChange={(e) => {
-                      bp.setDraftName(e.target.value)
-                      if (bp.composeError) bp.clearComposeError()
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); bp.confirmCompose() }
-                      else if (e.key === 'Escape') { e.preventDefault(); bp.cancelCompose() }
-                    }}
-                    onBlur={() => {
-                      setTimeout(() => {
-                        if (bp.composing) bp.cancelCompose()
-                      }, 0)
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                </div>
-              )}
-              <NsRow
-                node={child}
-                depth={depth + 1}
-                expanded={expanded}
-                activeId={activeId}
-                mainId={mainId}
-                bp={bp}
-                onToggle={onToggle}
-                onSelect={onSelect}
-                onMockAddChild={onMockAddChild}
-                onMockRename={onMockRename}
-                onMockDelete={onMockDelete}
-              />
-            </Fragment>
+          {node.children!.map((child) => (
+            <NsRow
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              expanded={expanded}
+              activeId={activeId}
+              mainId={mainId}
+              bp={bp}
+              uiGroupComposing={uiGroupComposing}
+              onToggle={onToggle}
+              onExpand={onExpand}
+              onSelect={onSelect}
+              onMockAddChild={onMockAddChild}
+              onMockRename={onMockRename}
+              onMockDelete={onMockDelete}
+            />
           ))}
         </>
       )}
@@ -718,14 +906,28 @@ function NsRow({
   )
 }
 
-export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 'standalone' }): JSX.Element {
+interface NewSidebarContentProps {
+  uiNavMode: 'left' | 'standalone'
+  videoItems: readonly VideoAssetListItem[]
+}
+
+function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): JSX.Element {
   injectStyleOnce('new-sidebar', NEW_SIDEBAR_CSS)
+  const t = useT()
   const view = useGraphView((s) => s.view)
   const setView = useGraphView((s) => s.setView)
   const setAssetLocation = useAssetNav((s) => s.setLocation)
+  const ruleSection = useRuleSelection((s) => s.section)
+  const ruleItemId = useRuleSelection((s) => s.itemId)
+  const videoFolder = useVideoLibraryNav((s) => s.folder)
+  const videoEntry = useVideoLibraryNav((s) => s.entryId)
+  const setVideoLocation = useVideoLibraryNav((s) => s.setLocation)
   const selectRule = useRuleSelection((s) => s.select)
+  const selectDocumentType = useDocumentNav((s) => s.setDocumentType)
+  const selectedDocumentType = useDocumentNav((s) => s.documentType)
   const gameId = useGraphScenario((s) => s.game)
   const { entries: assetEntries, directory: assetDirectory } = useAssetBrowser(gameId)
+  const videoMetadata = useVideoMetadataSnapshot(gameId)
   const blueprints = useGraphScenario((s) => s.blueprints)
   const mainId = useGraphScenario((s) => s.mainBlueprintId)
   const activeBlueprintId = useGraphScenario((s) => s.activeBlueprintId)
@@ -753,21 +955,59 @@ export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 
     : countOverlayReferences(Object.values(blueprints ?? {}).map((doc) => doc.graph))
 
   const navTree = useMemo(
-    () => buildNavTree(blueprints, mainId, buildAssetNavNode(assetDirectory, assetEntries), buildRuleNavNode({
-      entities: ruleMeta.entities,
-      variables: ruleMeta.variables,
-      formulas: ruleMeta.formulas as Record<string, { id: string, name?: string }> | undefined,
-    })),
-    [assetDirectory, assetEntries, blueprints, mainId, ruleMeta.entities, ruleMeta.formulas, ruleMeta.variables],
+    () => buildNavTree(
+      blueprints,
+      mainId,
+      buildAssetNavNode(
+        assetDirectory,
+        assetEntries,
+        buildVideoNavNode(videoItems, videoMetadata),
+      ),
+      buildRuleNavNode({
+        entities: ruleMeta.entities,
+        variables: ruleMeta.variables,
+        formulas: ruleMeta.formulas as Record<string, { id: string, name?: string }> | undefined,
+      }),
+    ),
+    [
+      assetDirectory,
+      assetEntries,
+      blueprints,
+      mainId,
+      ruleMeta.entities,
+      ruleMeta.formulas,
+      ruleMeta.variables,
+      videoItems,
+      videoMetadata,
+    ],
   )
 
-  // 目录默认全部收起。展开状态只由用户点箭头（或明确的新建操作）改变；
-  // 不能在资产/规则数据刷新时把已收起的分支重新打开。
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  // Figma 默认展开资产库与视频；之后只由用户操作改变，数据刷新不重置展开状态。
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () => new Set(['assets', 'asset-root:video']),
+  )
+  const [uiGroupComposing, setUiGroupComposing] = useState(false)
+  const [uiGroupDraft, setUiGroupDraft] = useState('')
+  const [videoFolderComposing, setVideoFolderComposing] = useState(false)
+  const [videoFolderDraft, setVideoFolderDraft] = useState('')
+  const [videoFolderError, setVideoFolderError] = useState<string | null>(null)
 
+  const activeRuleId = ruleItemId
+    ? `rule-${ruleSection}:${ruleItemId}`
+    : `rule-${ruleSection}`
   const activeId = view === 'graph'
     ? (activeBlueprintId || 'graph')
-    : (navTree.find((n) => n.view === view)?.id ?? null)
+    : view === 'documents'
+      ? `document:${selectedDocumentType}`
+      : view === 'rule'
+        ? activeRuleId
+        : view === 'video'
+          ? videoEntry
+            ? videoEntryId(videoEntry)
+            : videoFolder.kind === 'tag'
+              ? videoFolderId(videoFolder.name)
+              : 'asset-root:video'
+          : (navTree.find((n) => n.view === view)?.id ?? null)
 
   const onToggle = (id: string): void => {
     setExpanded((cur) => {
@@ -778,7 +1018,34 @@ export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 
     })
   }
 
+  const onExpand = (id: string): void => {
+    setExpanded((cur) => (cur.has(id) ? cur : new Set(cur).add(id)))
+  }
+
   const onSelect = (node: NavNode): void => {
+    if (node.id === 'new-folder') {
+      setVideoFolderDraft('')
+      setVideoFolderError(null)
+      setVideoFolderComposing(true)
+      return
+    }
+    if (node.videoLocation) {
+      setExpanded((current) => {
+        const next = new Set(current)
+        next.add('assets')
+        next.add('asset-root:video')
+        if (node.videoLocation?.folder.kind === 'tag') {
+          next.add(videoFolderId(node.videoLocation.folder.name))
+        }
+        return next
+      })
+      setVideoLocation({
+        folder: node.videoLocation.folder,
+        entryId: node.videoLocation.entryId ?? null,
+      })
+      setView('video')
+      return
+    }
     if (node.id === 'assets') {
       // “资产库”是浏览器根入口，不是上一次选中的分类或文件夹。
       setAssetLocation({ root: null })
@@ -793,6 +1060,11 @@ export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 
     if (node.ruleTarget) {
       selectRule(node.ruleTarget.section, node.ruleTarget.itemId)
       setView('rule')
+      return
+    }
+    if (node.documentType) {
+      selectDocumentType(node.documentType)
+      setView('documents')
       return
     }
     if (node.blueprint) {
@@ -812,30 +1084,9 @@ export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 
   const onMockAddChild = (node: NavNode): void => {
     setExpanded((cur) => new Set(cur).add(node.id))
     if (node.id === 'ui') {
-      // 未进入文件夹时先创建根文件夹；选中可编辑文件夹后，顶层加号新建方案；
-      // 选中方案时则在其父文件夹继续新建方案。
-      // 文件夹行尾只保留重命名 / 删除，与其它导航树分支一致。
       setView('ui')
-      const selectedNode = selectedTreeNodeId ? findUiTreeNode(uiTree, selectedTreeNodeId) : undefined
-      let targetFolderId = selectedNode?.kind === 'folder' ? selectedNode.id : null
-      if (selectedNode?.kind === 'scheme') {
-        const findParentFolderId = (nodes: readonly UiTreeViewNode[], targetId: string, parentId: string | null = null): string | null => {
-          for (const item of nodes) {
-            if (item.id === targetId) return parentId
-            if (item.kind === 'folder') {
-              const found = findParentFolderId(item.children ?? [], targetId, item.id)
-              if (found) return found
-            }
-          }
-          return null
-        }
-        targetFolderId = findParentFolderId(uiNodes, selectedNode.id)
-      }
-      if (targetFolderId && targetFolderId !== BASIC_UI_FOLDER_ID) {
-        sendUiNavCommand({ type: 'add-scheme', parentId: targetFolderId }, uiNavMode)
-      } else {
-        sendUiNavCommand({ type: 'add-root-folder' }, uiNavMode)
-      }
+      setUiGroupDraft('')
+      setUiGroupComposing((current) => !current)
       return
     }
     // eslint-disable-next-line no-console
@@ -850,6 +1101,24 @@ export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 
     console.log('[NewSidebar] delete', node.id)
   }
 
+  const confirmVideoFolder = (): void => {
+    const folderName = normalizeVideoLibraryFolderName(videoFolderDraft)
+    if (!folderName) {
+      setVideoFolderError(t('videoAssets.folder.emptyName'))
+      return
+    }
+    const result = writeVideoLibraryFolderName(gameId, folderName)
+    if (result.status !== 'written') {
+      setVideoFolderError(t('videoAssets.folder.writeFailed'))
+      return
+    }
+    setExpanded((current) => new Set(current).add('asset-root:video'))
+    setVideoLocation({ folder: { kind: 'tag', name: folderName }, entryId: null })
+    setView('video')
+    setVideoFolderError(null)
+    setVideoFolderComposing(false)
+  }
+
   return (
     <aside className="ns-sidebar" aria-label="视频游戏工坊（新版侧栏）">
       <div className="ns-scroll" role="tree" aria-label="工坊导航树">
@@ -862,13 +1131,84 @@ export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 
               activeId={activeId}
               mainId={mainId}
               bp={bp}
+              uiGroupComposing={uiGroupComposing}
               onToggle={onToggle}
+              onExpand={onExpand}
               onSelect={onSelect}
               onMockAddChild={onMockAddChild}
               onMockRename={onMockRename}
               onMockDelete={onMockDelete}
             />
-            {node.id === 'ui' && view === 'ui' && expanded.has(node.id) ? (
+            {node.id === 'new-folder' && videoFolderComposing ? (
+              <div
+                className="ns-row is-editing"
+                style={{ paddingLeft: 8 }}
+              >
+                <input
+                  autoFocus
+                  className="ns-inline-edit"
+                  aria-label={t('videoAssets.folder.name')}
+                  aria-invalid={videoFolderError != null}
+                  aria-describedby={videoFolderError ? 'ns-video-folder-error' : undefined}
+                  value={videoFolderDraft}
+                  maxLength={32}
+                  onChange={(event) => {
+                    setVideoFolderDraft(event.target.value)
+                    if (videoFolderError) setVideoFolderError(null)
+                  }}
+                  onBlur={confirmVideoFolder}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      confirmVideoFolder()
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setVideoFolderDraft('')
+                      setVideoFolderError(null)
+                      setVideoFolderComposing(false)
+                    }
+                  }}
+                />
+                {videoFolderError ? (
+                  <span id="ns-video-folder-error" className="ns-inline-error" role="alert">
+                    {videoFolderError}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            {node.id === 'ui' && uiGroupComposing ? (
+              <div className="ns-row is-editing" style={{ paddingLeft: 8 }}>
+                <input
+                  autoFocus
+                  className="ns-inline-edit"
+                  aria-label="新建界面组名称"
+                  placeholder="新建界面组名称"
+                  value={uiGroupDraft}
+                  onChange={(event) => setUiGroupDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      const name = uiGroupDraft.trim()
+                      if (!name) return
+                      sendUiNavCommand({ type: 'add-root-folder', name }, uiNavMode)
+                      setUiGroupDraft('')
+                      setUiGroupComposing(false)
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setUiGroupDraft('')
+                      setUiGroupComposing(false)
+                    }
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => {
+                      setUiGroupDraft('')
+                      setUiGroupComposing(false)
+                    }, 0)
+                  }}
+                />
+              </div>
+            ) : null}
+            {node.id === 'ui' && expanded.has(node.id) ? (
               <div className="ns-ui-tree" role="group" aria-label="界面子项">
                 <UiTreeView
                   nodes={uiNodes}
@@ -879,7 +1219,11 @@ export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 
                   onSelect={(treeNode) => {
                     const overlayId = treeNode.kind === 'scheme' ? (treeNode.overlayId ?? null) : null
                     selectUiNode(treeNode.id, overlayId)
+                    setView('ui')
                     sendUiNavCommand({ type: 'select', treeNodeId: treeNode.id, overlayId }, uiNavMode)
+                  }}
+                  onAddScheme={(parentId, name) => {
+                    sendUiNavCommand({ type: 'add-scheme', parentId, name }, uiNavMode)
                   }}
                   onRename={(nodeId, name) => sendUiNavCommand({ type: 'rename', nodeId, name }, uiNavMode)}
                   onDelete={(treeNode) => {
@@ -915,4 +1259,24 @@ export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 
         : null}
     </aside>
   )
+}
+
+export interface NewSidebarProps {
+  uiNavMode?: 'left' | 'standalone'
+  /** Use the workspace controller's exact list when sidebar and workspace share a React root. */
+  videoItems?: readonly VideoAssetListItem[]
+}
+
+function NewSidebarWithOwnedVideoList({
+  uiNavMode,
+}: Pick<NewSidebarProps, 'uiNavMode'>): JSX.Element {
+  const gameId = useGraphScenario((state) => state.game)
+  const controller = useVideoAssets(gameId)
+  return <NewSidebarContent uiNavMode={uiNavMode ?? 'standalone'} videoItems={controller.items} />
+}
+
+export function NewSidebar({ uiNavMode, videoItems }: NewSidebarProps = {}): JSX.Element {
+  return videoItems === undefined
+    ? <NewSidebarWithOwnedVideoList uiNavMode={uiNavMode} />
+    : <NewSidebarContent uiNavMode={uiNavMode ?? 'standalone'} videoItems={videoItems} />
 }

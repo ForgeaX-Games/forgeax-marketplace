@@ -381,6 +381,7 @@ describe('createWbGameVideoService', () => {
       project: { version: 'wb-game-video.graph.v1' },
       gameSlug: '游戏一',
     })
+    const manifestBefore = files.entries.get('assets/manifest.json')
     expect(await service.saveGraph({ project: blueprint, title: 'ignored' })).toEqual({
       ok: true,
       versions: [],
@@ -389,8 +390,110 @@ describe('createWbGameVideoService', () => {
     expect(JSON.parse(decoder.decode(files.entries.get('blueprint.json')))).toMatchObject({
       version: 'wb-game-video.graph.v1',
     })
+    expect(files.entries.get('assets/manifest.json')).toEqual(manifestBefore)
     expect(files.calls).toContain('locks:wb-game-video-graph-save')
     expect(cwd).not.toHaveBeenCalled()
+  })
+
+  test('patchGraph renames a node without rewriting the full project arg', async () => {
+    const { context, files } = createContext()
+    const service = createWbGameVideoService(context)
+    const before = await service.getGraph({}) as {
+      project: { graph: { nodes: Array<{ id: string }> } }
+    }
+    const nodeId = before.project.graph.nodes[0]!.id
+    const result = await service.patchGraph({
+      ops: [{ op: 'set-node-field', nodeId, field: 'name', value: '过桥' }],
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      applied: 1,
+      versions: [],
+      gameSlug: '游戏一',
+    })
+    const after = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    expect(after.graph.nodes.find((n: { id: string }) => n.id === nodeId).data.name).toBe('过桥')
+    expect(files.calls).toContain('locks:wb-game-video-graph-save')
+  })
+
+  test('patchGraph does not write when an op fails', async () => {
+    const { context, files } = createContext()
+    const service = createWbGameVideoService(context)
+    const snap = decoder.decode(files.entries.get('blueprint.json')!)
+    const result = await service.patchGraph({
+      ops: [{ op: 'set-node-field', nodeId: 'nope', field: 'name', value: 'x' }],
+    }) as { ok: boolean }
+
+    expect(result.ok).toBe(false)
+    expect(decoder.decode(files.entries.get('blueprint.json')!)).toBe(snap)
+  })
+
+  test('patchGraph reads inside the lock so concurrent batches both land', async () => {
+    const { context, files } = createContext()
+    const service = createWbGameVideoService(context)
+    const before = await service.getGraph({}) as {
+      project: { graph: { nodes: Array<{ id: string }> } }
+    }
+    const [first, second] = before.project.graph.nodes
+
+    const results = await Promise.all([
+      service.patchGraph({ ops: [{ op: 'set-node-field', nodeId: first!.id, field: 'name', value: '甲' }] }),
+      service.patchGraph({ ops: [{ op: 'set-node-field', nodeId: second!.id, field: 'name', value: '乙' }] }),
+    ]) as Array<{ ok: boolean }>
+
+    expect(results.every((result) => result.ok)).toBe(true)
+    const after = JSON.parse(decoder.decode(files.entries.get('blueprint.json')!))
+    const nameOf = (id: string) => after.graph.nodes.find((n: { id: string }) => n.id === id).data.name
+    expect(nameOf(first!.id)).toBe('甲')
+    expect(nameOf(second!.id)).toBe('乙')
+  })
+
+  test('back-fills all package files when saving into an empty workspace', async () => {
+    const files = new MemoryFiles({})
+    const media = new MemoryMedia()
+    const models = new MemoryModels(media)
+    const context: WorkbenchExtensionContext = {
+      gameId: '游戏一',
+      gameRoot: '/host/injected/game-root',
+      files,
+      media,
+      models,
+      videoGeneration: unavailableVideoGeneration,
+      services: unavailableServices,
+      capabilities: { async invoke() { throw new Error('Capabilities are unavailable in this test context') } },
+    }
+    const service = createWbGameVideoService(context)
+
+    expect(await service.saveGraph({ project: blueprint })).toEqual({
+      ok: true,
+      versions: [],
+      gameSlug: '游戏一',
+    })
+    expect(files.entries.has('blueprint.json')).toBe(true)
+    expect(files.entries.has('project.json')).toBe(true)
+    expect(files.entries.has('assets/manifest.json')).toBe(true)
+    expect(JSON.parse(decoder.decode(files.entries.get('assets/manifest.json')))).toEqual({
+      version: 2,
+      assets: [],
+    })
+
+    // Never overwrite an existing manifest: mutate it directly, then save
+    // again, and confirm the back-fill did not clobber the marker.
+    files.entries.set(
+      'assets/manifest.json',
+      encoder.encode(JSON.stringify({ version: 2, assets: [], marker: true })),
+    )
+    expect(await service.saveGraph({ project: blueprint })).toEqual({
+      ok: true,
+      versions: [],
+      gameSlug: '游戏一',
+    })
+    expect(JSON.parse(decoder.decode(files.entries.get('assets/manifest.json')))).toEqual({
+      version: 2,
+      assets: [],
+      marker: true,
+    })
   })
 
   test('keeps an authoritative blueprint readable when project metadata is corrupt', async () => {

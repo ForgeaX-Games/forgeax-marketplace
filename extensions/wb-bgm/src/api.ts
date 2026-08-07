@@ -1,4 +1,4 @@
-import { S, assetCache } from './state.ts';
+import { assetCache } from './state.ts';
 import type { AssetMeta } from './state.ts';
 import { ASSET_TYPES } from './config.ts';
 
@@ -17,7 +17,7 @@ export async function apiBackend(endpoint: string, payload: Record<string, unkno
 }
 
 export async function fetchPage(assetType: number, page: number, pageSize: number, searchText = ''): Promise<Record<string, unknown>> {
-  const query: Record<string, unknown> = { depot_name: S.depotName, asset_type: assetType };
+  const query: Record<string, unknown> = { asset_type: assetType };
   if (searchText) query.tag = searchText;
   return apiBackend('FindAssetMeta', {
     query,
@@ -25,13 +25,13 @@ export async function fetchPage(assetType: number, page: number, pageSize: numbe
   });
 }
 
-async function fetchAllOfType(assetType: number): Promise<AssetMeta[]> {
+export async function fetchAllAssetsOfType(assetType: number): Promise<AssetMeta[]> {
   const all: AssetMeta[] = [];
   const pageSize = 500;
   let page = 1;
   for (;;) {
     const d = await apiBackend('FindAssetMeta', {
-      query: { depot_name: S.depotName, asset_type: assetType },
+      query: { asset_type: assetType },
       pagination: { page_num: page, page_size: pageSize, is_need_total_num: true },
     });
     const items = (d.asset_meta_info_list || []) as AssetMeta[];
@@ -66,7 +66,7 @@ export function fetchAllAssetsStream({ forceRefresh = false, onChunk, onDone, on
   let hasError = false;
 
   for (const type of typeNums) {
-    fetchAllOfType(type).then(assets => {
+    fetchAllAssetsOfType(type).then(assets => {
       if (aborted) return;
       collected.push(...assets);
       completed++;

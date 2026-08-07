@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-bgm/delete-custom-audio.args",
+  "title": "delete-custom-audio args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "assetId": { "type": "string", "pattern": "^custom:(bgm|sfx):sha256:[a-f0-9]{64}$" }
+  },
+  "required": ["assetId"]
+}

@@ -1,5 +1,5 @@
 export { bootEditorSkins } from './init'
-export { NODIA_DEMO, makeNodiaDemo } from './demo/demo'
+export { NODIA_DEMO_PROJECT } from './demo/demo'
 export { GraphStudio } from './shell/GraphStudio'
 export { GraphPlaySurface } from './shell/GraphPlaySurface'
 export { GraphPlayer } from './shell/GraphPlayer'

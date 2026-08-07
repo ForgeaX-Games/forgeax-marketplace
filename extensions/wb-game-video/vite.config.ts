@@ -11,7 +11,9 @@ export default defineConfig(({ command }: ConfigEnv) => ({
     ?? (process.env.WB_GAME_VIDEO_PLUGIN_BUILD === '1' ? '/extensions/wb-game-video/' : './'),
   plugins: [
     react(),
-    ...(command === 'serve'
+    // Vitest loads this config with command=serve; skip the local games-root
+    // mkdir (can resolve outside the checkout, e.g. /Users/you/games).
+    ...(command === 'serve' && !process.env.VITEST
       ? [createViteWorkbenchPlugin(createDevWorkbenchHost())]
       : []),
   ],

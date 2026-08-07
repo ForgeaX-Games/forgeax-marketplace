@@ -5,7 +5,7 @@
  * 再回这里选它、填空。
  */
 import { useState, type CSSProperties } from 'react'
-import { isNumericScalar, type Entity, type NumOrExpr, type Variable } from '../../runtime/schema/graph-schema'
+import type { Entity, NumOrExpr, Variable } from '../../runtime/schema/graph-schema'
 import type { Formula } from '../persist/formula-authoring'
 import { CascadingPicker, type CascadingPickerOption } from './CascadingPicker'
 import {
@@ -248,15 +248,11 @@ export function ValueExprEditor({
   const entityChoicesByEntity = orderedEntities.map((entity) => {
     const source = findEntity(entities, entity.id)
     const entityName = entityDisplayName(source, entity.id)
-    const choices: ContentChoice[] = listAttrOptions(source)
+    const choices: ContentChoice[] = listAttrOptions(
+      source,
+      numericOnly ? { numbersOnly: true } : undefined,
+    )
       .filter((attr) => !allowAttribute || allowAttribute(source, attr.id))
-      .filter((attr) => {
-        if (!numericOnly) return true
-        const current = source?.attrs?.[attr.id]
-        return current === undefined
-          ? source?.attrMeta?.[attr.id] !== undefined
-          : isNumericScalar(current)
-      })
       .sort((a, b) => {
         const rankA = attrRank.get(a.id) ?? Number.MAX_SAFE_INTEGER
         const rankB = attrRank.get(b.id) ?? Number.MAX_SAFE_INTEGER

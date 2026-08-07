@@ -24,6 +24,10 @@ export function useAssetBrowser(gameId: string, client: AssetLibraryClient = kin
   const [projectComponents, setProjectComponents] = useState<ProjectComponentAsset[]>([])
 
   useEffect(() => {
+    if (!gameId.trim()) {
+      setVideoAssets([])
+      return
+    }
     let active = true
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let attempts = 0
@@ -54,6 +58,10 @@ export function useAssetBrowser(gameId: string, client: AssetLibraryClient = kin
   }, [gameId])
 
   useEffect(() => {
+    if (!gameId.trim()) {
+      setProjectComponents([])
+      return
+    }
     let active = true
     let retryTimer: ReturnType<typeof setTimeout> | undefined
     let attempts = 0

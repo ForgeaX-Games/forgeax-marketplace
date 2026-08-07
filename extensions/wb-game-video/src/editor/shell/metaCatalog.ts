@@ -209,13 +209,25 @@ export function listEntityOptions(
   })
 }
 
-export function listAttrOptions(ent: Entity | undefined): Array<{ id: string; label: string }> {
+export function listAttrOptions(
+  ent: Entity | undefined,
+  opts?: { numbersOnly?: boolean },
+): Array<{ id: string; label: string }> {
   if (!ent) return []
   const keys = new Set<string>([
     ...Object.keys(ent.attrs ?? {}),
     ...Object.keys(ent.attrMeta ?? {}),
   ])
-  return [...keys].sort().map((id) => {
+  const ids = [...keys]
+  const filtered = opts?.numbersOnly
+    ? ids.filter((id) => {
+      const current = ent.attrs?.[id]
+      return current === undefined
+        ? ent.attrMeta?.[id] !== undefined
+        : isNumericScalar(current)
+    })
+    : ids
+  return filtered.sort().map((id) => {
     const label = ent.attrMeta?.[id]?.label?.trim()
     return { id, label: authoringOptionLabel(label, id) }
   })

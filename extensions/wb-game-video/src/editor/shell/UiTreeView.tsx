@@ -17,6 +17,7 @@ export interface UiTreeViewProps {
   usageByOverlay?: Record<string, number>
   selectedTreeNodeId: string | null
   onSelect: (node: UiTreeViewNode) => void
+  onAddScheme: (parentId: string, name: string) => void
   onRename: (nodeId: string, name: string) => void
   onDelete: (node: UiTreeViewNode) => void
   /** 起始层级：子树挂在左栏「界面」行下时传 1，使缩进与主树 depth*8 连续。 */
@@ -85,6 +86,17 @@ const UI_TREE_CSS = `
   background:#242424; color:#fff; padding:4px 6px;
 }
 .uit-edit button { flex:none; border:0; border-radius:2px; padding:4px 6px; cursor:pointer; }
+.uit-compose-row {
+  box-sizing:border-box; width:100%; height:42px; display:flex; align-items:center;
+  border-bottom:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.10);
+}
+.uit-compose-input {
+  flex:1; min-width:0; box-sizing:border-box; height:22px; padding:0 4px;
+  border:0; border-radius:3px; outline:.4px solid rgba(255,255,255,.6);
+  outline-offset:-.4px; background:rgba(44,44,44,.2); color:rgba(255,255,255,.6);
+  font-family:inherit; font-size:16px; line-height:22px;
+}
+.uit-compose-input:focus { outline-color:rgba(255,255,255,.8); }
 .uit-confirm { display:flex; flex-direction:column; gap:6px; width:100%; font-size:12px; line-height:1.4; }
 .uit-confirm-actions { display:flex; justify-content:flex-end; gap:5px; }
 .ns-empty {
@@ -107,6 +119,12 @@ const PencilIcon = (
   </svg>
 )
 
+const PlusIcon = (
+  <svg viewBox="0 0 14 14" fill="none" aria-hidden>
+    <path d="M0 5.85059L0 7.72559L5.91943 7.6875V13.5H7.79443V7.6875H13.5V5.8125H7.79443V0H5.91943V5.8125L0 5.85059Z" fill="currentColor" />
+  </svg>
+)
+
 const TrashIcon = (
   <svg viewBox="0 0 14 14" fill="none" aria-hidden>
     <path d="M12.25 2.91602H1.75M2.91667 2.91602H11.0833L10.7917 12.8327H3.20833L2.91667 2.91602ZM4.95833 1.16602H9.04167V2.91602H4.95833V1.16602Z" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" />
@@ -121,13 +139,16 @@ function UiTreeRow({
   usageByOverlay,
   selectedTreeNodeId,
   onSelect,
+  onAddScheme,
   onRename,
   onDelete,
 }: UiTreeViewProps & { node: UiTreeViewNode; depth: number }): JSX.Element {
   const isFolder = node.kind === 'folder'
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const [mode, setMode] = useState<RowMode>(null)
   const [draft, setDraft] = useState(node.name ?? '')
+  const [composingScheme, setComposingScheme] = useState(false)
+  const [schemeDraft, setSchemeDraft] = useState('')
   const overlay = node.overlayId ? overlays[node.overlayId] : undefined
   const label = isFolder ? (node.name?.trim() || '未命名文件夹') : (overlay?.title?.trim() || node.overlayId || '缺失方案')
   const usage = node.overlayId ? (usageByOverlay?.[node.overlayId] ?? 0) : 0
@@ -140,6 +161,14 @@ function UiTreeRow({
     const next = draft.trim()
     if (next) onRename(node.id, next)
     setMode(null)
+  }
+  const confirmScheme = (): void => {
+    const name = schemeDraft.trim()
+    if (!name) return
+    onAddScheme(node.id, name)
+    setSchemeDraft('')
+    setComposingScheme(false)
+    setExpanded(true)
   }
 
   return (
@@ -165,19 +194,19 @@ function UiTreeRow({
             if (isFolder) setExpanded(true)
           }}
         >
-          <button
-            type="button"
-            className={`uit-toggle${isFolder && !expanded ? ' is-collapsed' : ''}`}
-            aria-label={isFolder ? `${expanded ? '收起' : '展开'}${label}` : undefined}
-            tabIndex={isFolder ? 0 : -1}
-            onClick={(event) => {
-              if (!isFolder) return
-              event.stopPropagation()
-              setExpanded((value) => !value)
-            }}
-          >
-            {isFolder ? ChevronIcon : null}
-          </button>
+          {isFolder ? (
+            <button
+              type="button"
+              className={`uit-toggle${!expanded ? ' is-collapsed' : ''}`}
+              aria-label={`${expanded ? '收起' : '展开'}${label}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                setExpanded((value) => !value)
+              }}
+            >
+              {ChevronIcon}
+            </button>
+          ) : null}
           {mode === 'rename' ? (
             <span className="uit-edit" onClick={(event) => event.stopPropagation()}>
               <input
@@ -199,6 +228,22 @@ function UiTreeRow({
         </div>
         {!node.readOnly && mode !== 'rename' && (
           <span className="uit-row-actions" onClick={(event) => event.stopPropagation()}>
+            {isFolder ? (
+              <button
+                type="button"
+                className={`uit-icon-btn${composingScheme ? ' is-open' : ''}`}
+                aria-label={`新增界面 ${label}`}
+                title="新建界面"
+                aria-expanded={composingScheme}
+                onClick={() => {
+                  setComposingScheme((current) => !current)
+                  setSchemeDraft('')
+                  setExpanded(true)
+                }}
+              >
+                {PlusIcon}
+              </button>
+            ) : null}
             <button
               type="button"
               className="uit-icon-btn"
@@ -221,6 +266,34 @@ function UiTreeRow({
           </span>
         )}
       </div>
+      {isFolder && composingScheme ? (
+        <div className="uit-compose-row" style={{ paddingLeft: (depth + 1) * 8 }}>
+          <input
+            autoFocus
+            className="uit-compose-input"
+            aria-label={`在${label}中新建界面`}
+            placeholder="新建界面名称"
+            value={schemeDraft}
+            onChange={(event) => setSchemeDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                confirmScheme()
+              } else if (event.key === 'Escape') {
+                event.preventDefault()
+                setSchemeDraft('')
+                setComposingScheme(false)
+              }
+            }}
+            onBlur={() => {
+              setTimeout(() => {
+                setSchemeDraft('')
+                setComposingScheme(false)
+              }, 0)
+            }}
+          />
+        </div>
+      ) : null}
       {mode === 'delete' && (
         <div className="uit-menu" role="dialog" aria-label={`删除${label}`}>
           <div className="uit-confirm">
@@ -247,6 +320,7 @@ function UiTreeRow({
               usageByOverlay={usageByOverlay}
               selectedTreeNodeId={selectedTreeNodeId}
               onSelect={onSelect}
+              onAddScheme={onAddScheme}
               onRename={onRename}
               onDelete={onDelete}
             />

@@ -29,8 +29,8 @@ import { isBlueprintTitleTaken } from './blueprint-title'
 import { resolveGraphEntry } from '../../runtime/schema/graph-schema'
 import { blueprintsReferencing, findReferenceCycle } from '../../graph/edit/blueprint-refs'
 import { resolveEntryAfterGraphChange } from '../../graph/edit/graph-scope'
-import { loadGameComponents } from '../../runtime/component-host'
-import { NODIA_DEMO } from '../demo/demo'
+import { bootComponents } from '../../runtime/component-host'
+import { NODIA_DEMO_PROJECT } from '../demo/demo'
 import {
   addUiTreeFolder as addTreeFolder,
   addUiTreeScheme as addTreeScheme,
@@ -46,6 +46,7 @@ export type BlueprintTitleActionOk = { ok: true; id?: string }
 export type BlueprintTitleActionErr = { ok: false; reason: 'duplicate_title' | 'not_found' }
 export type BlueprintTitleActionResult = BlueprintTitleActionOk | BlueprintTitleActionErr
 export type ScenarioIdRenameActionResult = { ok: true } | { ok: false; reason: 'empty_id' | 'duplicate_id' | 'not_found' }
+export type TipSyncResult = 'applied' | 'skipped' | 'unchanged' | 'error'
 
 /** 载入 demo / 文档时保证基础覆盖物存在——用于 reset()/首次落座。 */
 function withBuiltinSchemes<T extends GameScenario>(s: T): T {
@@ -207,6 +208,8 @@ interface GraphScenarioStore {
   reset: () => void
   applyLayout: () => void
   bumpRun: () => void
+  /** Reload Host tip into the store when clean and revision changed (agent patch_graph). */
+  syncTipIfClean: () => Promise<TipSyncResult>
 }
 
 let draftTimer: ReturnType<typeof setTimeout> | null = null
@@ -250,6 +253,15 @@ export function resetCleanFingerprintForTests(): void {
   cleanFingerprint = null
   tipRevision = null
   tipWriteTail = null
+}
+
+/** Test hook: set Host tip revision without a save round-trip. */
+export function setTipRevisionForTests(revision: string | null): void {
+  tipRevision = revision
+}
+
+function tipWriteInFlight(): boolean {
+  return tipWriteTail !== null
 }
 
 // ── 撤销/重做（zundo）─────────────────────────────────────────────────────────
@@ -401,7 +413,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
       return toRuntimeScenario(playDocument(st.authoringProject(), rootId))
     },
 
-    ensureBoot: (game, demo = NODIA_DEMO) => {
+    ensureBoot: (game, demo = NODIA_DEMO_PROJECT) => {
       const st = get()
       if (st.booted && st.game === game) {
         // 已 boot：补 demo 引用；旧草稿曾把 entities 抹成 undefined 的，从 demo 填回 meta。
@@ -451,7 +463,7 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
           set({ isDraft: false, booted: true })
           void currentVersion(game).then((cv) => set({ currentTag: cv.tag }))
           void listVersions(game).then((vs) => set({ gameVersions: vs }))
-          void loadGameComponents(game)
+          void bootComponents(game)
         } catch (cause) {
           if (get().game === game) set({ booted: false })
           throw cause
@@ -788,6 +800,55 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
     },
 
     bumpRun: () => set((st) => ({ runKey: st.runKey + 1, savedTip: st.savedTip })),
+
+    syncTipIfClean: async (): Promise<TipSyncResult> => {
+      const st = get()
+      if (!st.booted || !st.game) return 'skipped'
+      if (tipWriteInFlight()) return 'skipped'
+      if (st.isDraft) return 'skipped'
+
+      let loaded: Awaited<ReturnType<typeof loadStore>>
+      try {
+        loaded = await loadStore(st.game)
+      } catch {
+        return 'error'
+      }
+      if (!isLibraryDocument(loaded.project)) return 'error'
+      if (loaded.revision === tipRevision) return 'unchanged'
+
+      const now = get()
+      if (!now.booted || now.game !== st.game) return 'skipped'
+      if (tipWriteInFlight() || now.isDraft) return 'skipped'
+
+      const demo = now.demo
+      const norm = demo
+        ? normalizeLoadedDocument(loaded.project, demo)
+        : normalizeDocument(loaded.project)
+      const mainId = norm.manifest.mainPackId
+      const packs = norm.manifest.packs
+      const keepActive = packs[now.activeBlueprintId] ? now.activeBlueprintId : mainId
+      const nextGraph = packs[keepActive]?.graph ?? EMPTY_GRAPH
+      const keepSelected =
+        now.selectedNodeId && nextGraph.nodes.some((n) => n.id === now.selectedNodeId)
+          ? now.selectedNodeId
+          : null
+
+      tipRevision = loaded.revision
+      set((cur) => ({
+        blueprints: packs,
+        mainBlueprintId: mainId,
+        activeBlueprintId: keepActive,
+        meta: metaFromDocument(norm),
+        graph: nextGraph,
+        selectedNodeId: keepSelected,
+        isDraft: false,
+        loadEpoch: cur.loadEpoch + 1,
+        fitSignal: cur.fitSignal + 1,
+      }))
+      cleanFingerprint = projectFingerprint(get().authoringProject())
+      graphHistoryClear()
+      return 'applied'
+    },
   }
 }, HISTORY_OPTIONS))
 

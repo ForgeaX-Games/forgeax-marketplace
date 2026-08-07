@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "default": {
+      "preferredStyles": [],
+      "forbiddenStyles": [],
+      "defaultExclude": ["voice", "music"]
+    }
+  }
+}

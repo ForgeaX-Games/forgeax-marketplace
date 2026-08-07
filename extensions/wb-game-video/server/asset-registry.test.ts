@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { deleteAsset, listAssets, setStyleAxes, upsertAsset } from './asset-registry'
+import { deleteAsset, isDocumentRecord, listAssets, setStyleAxes, upsertAsset } from './asset-registry'
 
 let dir: string
 
@@ -105,5 +105,43 @@ describe('shared asset manifest coexistence', () => {
     expect(readFileSync(join(dir, 'manifest.json'), 'utf-8')).toBe(
       '{"version":2,"assets":{}}',
     )
+  })
+})
+
+describe('project document records', () => {
+  test('accepts a local Markdown document record outside the media domain', () => {
+    expect(isDocumentRecord({
+      id: 'doc-outline',
+      kind: 'document',
+      name: '游戏大纲',
+      status: 'ready',
+      mimeType: 'text/markdown',
+      provider: { kind: 'local', ref: 'documents/outline.md' },
+      createdAt: 1,
+      updatedAt: 1,
+      meta: { documentType: 'outline' },
+    })).toBe(true)
+  })
+
+  test('rejects non-Markdown and unbounded document paths', () => {
+    const base = {
+      id: 'doc-outline',
+      kind: 'document',
+      name: '游戏大纲',
+      status: 'ready',
+      mimeType: 'text/markdown',
+      createdAt: 1,
+      updatedAt: 1,
+      meta: { documentType: 'outline' },
+    }
+    expect(isDocumentRecord({
+      ...base,
+      provider: { kind: 'local', ref: '../blueprint.json' },
+    })).toBe(false)
+    expect(isDocumentRecord({
+      ...base,
+      mimeType: 'text/plain',
+      provider: { kind: 'local', ref: 'documents/outline.md' },
+    })).toBe(false)
   })
 })

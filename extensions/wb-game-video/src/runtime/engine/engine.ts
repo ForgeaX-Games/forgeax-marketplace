@@ -167,7 +167,7 @@ export class GraphRuntime {
   /** 固定时间结算只执行一次；到点后才发生的延迟选择按立即跳转处理。 */
   private routingSettled = false
 
-  /** 本局组件 / Plugin 表（多局隔离；缺省用模块默认表以兼容旧单测）。 */
+  /** 组件契约表（缺省与 bootComponents 共享默认表）。 */
   readonly components: ComponentRegistry
 
   /** 节点类型注册表：按 GameNode.type 派发 execute/next（perf/subflow/subflowPack 内置）。 */

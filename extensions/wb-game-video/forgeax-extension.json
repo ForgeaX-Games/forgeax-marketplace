@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "@forgeax-extension/wb-game-video",
-  "version": "0.3.2",
+  "version": "0.6.3",
   "kind": "workbench",
   "displayName": {
     "zh": "视频游戏",
@@ -71,10 +71,20 @@
         "id": "wb-game-video:save-graph",
         "args": "./schemas/save-graph.args.json",
         "returns": "./schemas/save-graph.returns.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "仅供编辑器 UI 整本覆盖写宿主绑定游戏的 GraphLibraryDocument 到 blueprint.json；AI 改图请使用 patch-graph。首次写入时补 project.json。title 当前忽略。",
+          "en": "UI-only full-document overwrite of the host-bound game's GraphLibraryDocument in blueprint.json; AI graph edits must use patch-graph. Creates project.json on the first write. title is currently ignored."
+        }
+      },
+      {
+        "id": "wb-game-video:patch-graph",
+        "args": "./schemas/patch-graph.args.json",
+        "returns": "./schemas/patch-graph.returns.json",
         "exposedToAI": true,
         "description": {
-          "zh": "整本覆盖写宿主绑定游戏的 GraphLibraryDocument 到 blueprint.json；首次写入时补 project.json。游戏身份不由工具参数选择。title 当前忽略，成功固定返回 {ok:true, versions:[], gameSlug}；缺 project 时返回 {ok:false, errors}。",
-          "en": "Overwrite the host-bound game's GraphLibraryDocument in blueprint.json and create project.json on the first write. Tool arguments cannot select game identity. title is currently ignored. Success returns {ok:true, versions:[], gameSlug}; a missing project returns {ok:false, errors}."
+          "zh": "对宿主绑定游戏的蓝图执行原子增量修改。可选 blueprintId 指定蓝图，ops 按顺序应用；任一步失败或整本校验失败均不写盘。成功返回 applied、空 versions 和宿主 gameSlug。",
+          "en": "Atomically patch a blueprint in the host-bound game. Optionally select a blueprintId; ops run in order, and any operation or full-document validation failure prevents all writes. Success returns applied, empty versions, and the host gameSlug."
         }
       },
       {
@@ -137,6 +147,16 @@
         "description": {
           "zh": "在素材库直接生成一段视频素材（不绑定节点，提示词直传 kino provider）",
           "en": "Generate a standalone video clip into the asset library (node-free, prompt passed through to the kino provider)"
+        }
+      },
+      {
+        "id": "wb-game-video:list-video-visual-styles",
+        "args": "./schemas/list-video-visual-styles.args.json",
+        "returns": "./schemas/list-video-visual-styles.returns.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "读取 Kino 当前可用的视频视觉风格预设。",
+          "en": "List the video visual-style presets currently available from Kino."
         }
       },
       {

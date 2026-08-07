@@ -1,15 +1,19 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BattleSkillManifest } from '../../../runtime/component-host/components/new/BattleSkill'
-import { TextOptionManifest } from '../../../runtime/component-host/components/new/TextOption'
 import { registerComponent, unregisterComponent } from '../../../runtime/registry/component-registry'
+import {
+  TEST_SKILL,
+  TEST_TEXT,
+  TestSkillManifest,
+  TestTextManifest,
+} from '../../../runtime/__tests__/test-components'
 import { ComponentPropertyPanel } from '../ComponentPropertyPanel'
 
 afterEach(() => {
   cleanup()
-  unregisterComponent('BattleSkill')
-  unregisterComponent('TextOption')
+  unregisterComponent(TEST_SKILL)
+  unregisterComponent(TEST_TEXT)
 })
 
 const baseProps = {
@@ -71,11 +75,11 @@ describe('ComponentPropertyPanel', () => {
   })
 
   it('lays out new manifest fields without changing their value semantics', () => {
-    registerComponent('BattleSkill', BattleSkillManifest)
+    registerComponent(TEST_SKILL, TestSkillManifest)
     const onPatchChild = vi.fn()
     const selectedChild = {
       id: 'skills',
-      component: 'BattleSkill',
+      component: TEST_SKILL,
       inputs: {
         lightResource: { expr: 'max(floor(entity.hero.attr.attack * 2), 0)' },
         lightCost: 100,
@@ -172,10 +176,10 @@ describe('ComponentPropertyPanel', () => {
   })
 
   it('uses the property layout for effect actions', () => {
-    registerComponent('BattleSkill', BattleSkillManifest)
+    registerComponent(TEST_SKILL, TestSkillManifest)
     const selectedChild = {
       id: 'skills',
-      component: 'BattleSkill',
+      component: TEST_SKILL,
       inputs: {},
     }
 
@@ -212,7 +216,8 @@ describe('ComponentPropertyPanel', () => {
     expect(screen.getByText('效果一')).toBeTruthy()
     expect(screen.getByText('效果主体')).toBeTruthy()
     expect(screen.getByText('赋值')).toBeTruthy()
-    expect(screen.queryByText('施加效果')).toBeNull()
+    // 右栏用「效果一」这套自己的卡片头，不走动作卡片通用的那一只。
+    expect(container.querySelector('.ni-na-card-head')).toBeNull()
     expect(screen.queryByText('操作')).toBeNull()
     expect(screen.queryByText('数值')).toBeNull()
     expect(container.querySelector<HTMLElement>("[data-property-effect-action='true']")?.style.borderBottom).toBe('0px')
@@ -301,10 +306,10 @@ describe('ComponentPropertyPanel', () => {
   })
 
   it('numbers property effects and keeps a divider between them', () => {
-    registerComponent('BattleSkill', BattleSkillManifest)
+    registerComponent(TEST_SKILL, TestSkillManifest)
     const selectedChild = {
       id: 'skills',
-      component: 'BattleSkill',
+      component: TEST_SKILL,
       inputs: {},
     }
     const { container } = render(
@@ -363,10 +368,10 @@ describe('ComponentPropertyPanel', () => {
   })
 
   it('marks duplicate interaction keys in the 交互按键 section', () => {
-    registerComponent('BattleSkill', BattleSkillManifest)
+    registerComponent(TEST_SKILL, TestSkillManifest)
     const selectedChild = {
       id: 'skills',
-      component: 'BattleSkill',
+      component: TEST_SKILL,
       inputs: { heavyKey: 'C' },
     }
     const conflicts = new Map([
@@ -376,7 +381,7 @@ describe('ComponentPropertyPanel', () => {
           overlayId: 'hud',
           overlayTitle: '战斗 HUD',
           childId: 'skills',
-          componentId: 'BattleSkill',
+          componentId: TEST_SKILL,
           componentName: '战斗技能条',
           inputKey: 'heavyKey',
           inputLabel: '重攻击按键',
@@ -389,7 +394,7 @@ describe('ComponentPropertyPanel', () => {
           overlayId: 'other',
           overlayTitle: '新方案 3',
           childId: 'opt',
-          componentId: 'TextOption',
+          componentId: TEST_TEXT,
           componentName: '文字交互',
           inputKey: 'triggerKey',
           inputLabel: '触发按键',
@@ -431,10 +436,10 @@ describe('ComponentPropertyPanel', () => {
   })
 
   it('does not focus or activate controls when field labels are clicked', () => {
-    registerComponent('TextOption', TextOptionManifest)
+    registerComponent(TEST_TEXT, TestTextManifest)
     const selectedChild = {
       id: 'option',
-      component: 'TextOption',
+      component: TEST_TEXT,
       inputs: {},
     }
     const { container } = render(

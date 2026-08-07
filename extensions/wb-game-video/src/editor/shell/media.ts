@@ -155,8 +155,12 @@ export async function getKinoVideoResource(game: string, resourceId: string) {
 }
 
 /** Lists the shared registry assets for graph views and placeholder cards. */
-export async function listRegistryAssets(game?: string, kind?: MediaKind): Promise<MediaAsset[]> {
-  return fetchRegistryAssets(game, kind)
+export async function listRegistryAssets(
+  game?: string,
+  kind?: MediaKind,
+  options: { signal?: AbortSignal } = {},
+): Promise<MediaAsset[]> {
+  return fetchRegistryAssets(game, kind, options)
 }
 
 /** 取单条 registry 资产（轮询生成状态用）。 */

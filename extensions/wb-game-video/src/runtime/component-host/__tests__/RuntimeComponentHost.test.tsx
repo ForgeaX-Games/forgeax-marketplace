@@ -8,7 +8,7 @@ import type { SkinCtx } from '../rendererRegistry'
 afterEach(cleanup)
 
 const manifest: ComponentManifest = {
-  id: 'BattleEnemyHpBar',
+  id: 'test.hud',
   inputs: [
     { key: 'current', valueType: 'number', component: 'numberExpr' },
     { key: 'max', valueType: 'number', component: 'numberExpr' },
@@ -56,7 +56,7 @@ describe('RuntimeComponentHost', () => {
         registration={registration}
         overlay={{
           elementId: 'boss-hp',
-          component: 'BattleEnemyHpBar',
+          component: 'test.hud',
           inputs: {
             current: { expr: 'entity.ent-boss.attr.hp' },
             max: 700,
@@ -76,7 +76,7 @@ describe('RuntimeComponentHost', () => {
     }
     const overlay = {
       elementId: 'boss-hp',
-      component: 'BattleEnemyHpBar',
+      component: 'test.hud',
       inputs: { current: { expr: 'entity.ent-boss.attr.hp' }, max: 700 },
     }
     const view = render(

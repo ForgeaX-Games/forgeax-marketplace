@@ -3,7 +3,6 @@ import type { Entity, Overlay, OverlayReaction, Variable } from '../../runtime/s
 import type { ComponentInput } from '../../runtime/schema/node-config-schema'
 import { aggregateOverlayEvents } from '../../runtime/schema/overlay-events'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
-import newComponents from '../../runtime/component-host/components/new'
 import type { Formula } from '../persist/formula-authoring'
 import { authoringOptionLabel } from '../authoring-option-label'
 import { ComponentEventsEditor } from './ComponentEventsEditor'
@@ -16,8 +15,6 @@ import {
   type VariableCreateHandler,
 } from './component-form-fields'
 import { componentTypeLabel } from './editors'
-
-const NEW_COMPONENT_IDS = new Set(newComponents.map(({ manifest }) => manifest.id))
 
 interface ParameterSection {
   title: '文本信息' | '血量' | '交互按键' | '战斗参数' | '基础信息'
@@ -36,7 +33,7 @@ function parameterSectionTitle(componentId: string, input: ComponentInput): Para
   const key = input.key
   const label = input.label ?? key
   if (/key$/i.test(key) || /按键/.test(label)) return '交互按键'
-  if (componentId === 'BattleSkill') return '战斗参数'
+  if (/(Resource|Cost)$/i.test(key)) return '战斗参数'
   if (componentId === 'BattleEnemyHpBar') return '血量'
   if (componentId === 'BattlePlayerHpBar') {
     return /^(label|current|max)$/.test(key) ? '血量' : '战斗参数'
@@ -775,7 +772,7 @@ export function ComponentPropertyPanel({
     }))
   const selectedLabel = selectedChild ? componentTypeLabel(selectedChild.component) : '组件'
   const selectedIsNewComponent = selectedChild
-    ? NEW_COMPONENT_IDS.has(selectedChild.component)
+    ? !!getComponentManifest(selectedChild.component)
     : false
   const selectedParameterSections = selectedChild && selectedIsNewComponent
     ? parameterSections(selectedChild.component)

@@ -9,7 +9,14 @@ import type {
   WorkbenchExtensionRouterRequest,
   WorkbenchExtensionRouterResponse,
 } from '@forgeax/workbench-host/node'
-import { createHostAssetRegistry, getHostStyleAxes } from '../asset-registry'
+import {
+  createHostAssetRegistry,
+  getHostStyleAxes,
+  getHostDocumentSelection,
+  listHostDocuments,
+  readHostDocument,
+  selectHostProposal,
+} from '../asset-registry'
 import { bundledMediaResponse, type BundledMediaResolver } from './media-routes'
 import {
   createWbGameVideoService,
@@ -104,6 +111,20 @@ function notFound(): WorkbenchExtensionRouterResponse {
       retryable: false,
     },
   })
+}
+
+function documentSummary(document: {
+  id: string
+  name: string
+  updatedAt: number
+  meta: { documentType: string }
+}) {
+  return {
+    id: document.id,
+    name: document.name,
+    documentType: document.meta.documentType,
+    updatedAt: document.updatedAt,
+  }
 }
 
 function header(
@@ -362,7 +383,10 @@ async function handleHostMedia(
         ? { idempotencyKey: `replace:${input.client_resource_id}` }
         : {}),
     })
-    const chunkSize = Math.min(5 * 1024 * 1024, upload.sizeBytes)
+    // Workbench Host bounds every extension HTTP request body to 1 MiB.
+    // Keep resumable chunks within that transport contract; a larger chunk is
+    // cancelled by the Hono adapter before it reaches writeUploadChunk.
+    const chunkSize = Math.min(1024 * 1024, upload.sizeBytes)
     return mediaResponse({
       upload: {
         method: 'PUT',
@@ -482,6 +506,50 @@ export function createWbGameVideoRouter(
             'kind', 'productionType', 'sceneNodeId',
           ])
           return jsonResponse(200, await service.listAssets(query))
+        }
+        if (method === 'GET' && path === 'documents') {
+          exactQuery(request.query, [])
+          return jsonResponse(200, {
+            documents: (await listHostDocuments(context)).map(documentSummary),
+            selection: await getHostDocumentSelection(context),
+          })
+        }
+        if (
+          method === 'GET'
+          && parts.length === 2
+          && parts[0] === 'documents'
+        ) {
+          exactQuery(request.query, [])
+          const document = await readHostDocument(context, parts[1]!)
+          if (!document) return notFound()
+          return jsonResponse(200, {
+            document: documentSummary(document.document),
+            content: document.content,
+            selection: await getHostDocumentSelection(context),
+          })
+        }
+        if (method === 'POST' && path === 'documents/selection') {
+          exactQuery(request.query, [])
+          const body = jsonBody(request)
+          if (
+            !body
+            || typeof body !== 'object'
+            || Array.isArray(body)
+            || typeof (body as { proposalId?: unknown }).proposalId !== 'string'
+          ) {
+            throw new WbServiceInputError('proposalId is required')
+          }
+          try {
+            const selection = await selectHostProposal(
+              context,
+              (body as { proposalId: string }).proposalId,
+            )
+            return jsonResponse(200, { selection })
+          } catch (error) {
+            throw new WbServiceInputError(
+              error instanceof Error ? error.message : 'Unable to select proposal',
+            )
+          }
         }
         if (method === 'GET' && path === 'asset-library') {
           exactQuery(request.query, [])

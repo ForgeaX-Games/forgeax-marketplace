@@ -8,17 +8,19 @@ import { useT } from '../../i18n'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { useGraphView } from '../persist/graphViewStore'
 import {
+  useVideoLibraryNav,
+  type VideoLibraryFolderTarget,
+} from '../persist/videoLibraryNavStore'
+import {
   VideoAssetLibrary,
   type VideoLibraryEntry,
 } from '../assets/VideoAssetLibrary'
 import { useVideoAssets } from '../assets/useVideoAssets'
+import type { VideoAssetsController } from '../assets/useVideoAssets'
 import { createKinoVideoClient } from '../assets/kino-api'
 import { VideoExternalImportDialog } from '../assets/VideoExternalImportDialog'
-import { useVideoGenerationWorkspace } from '../assets/generation/useVideoGenerationWorkspace'
 import { consumeVideoAssetSelection } from '../assets/generation/videoGenerationNavigation'
-import {
-  VideoGenSheet,
-} from '../assets/generation/VideoGenSheet'
+import { useVideoGenerationStore } from '../assets/generation/videoGenerationStore'
 import {
   resolveMediaSrc,
   registryMediaUrl,
@@ -42,18 +44,39 @@ injectStyleOnce('graph-video-view', GRAPH_VIDEO_VIEW_CSS)
 
 interface VideoEntry extends VideoLibraryEntry {}
 
-export function GraphVideoView(): JSX.Element {
+const EMPTY_GENERATION_TASKS: readonly never[] = []
+
+function activeFolderFor(target: VideoLibraryFolderTarget): string {
+  return target.kind === 'all' ? 'all' : target.kind === 'untagged' ? 'untagged' : target.name
+}
+
+function folderTargetFor(activeFolder: string): VideoLibraryFolderTarget {
+  return activeFolder === 'all'
+    ? { kind: 'all' }
+    : activeFolder === 'untagged'
+      ? { kind: 'untagged' }
+      : { kind: 'tag', name: activeFolder }
+}
+
+function GraphVideoViewContent({ videoController }: { videoController: VideoAssetsController }): JSX.Element {
   const t = useT()
   const generatedGroup = t('videoAssets.group.generated')
   const uploadGroup = t('videoAssets.group.upload')
   const game = useGraphScenario((s) => s.game)
-  const videoController = useVideoAssets(game)
   const kinoClient = useMemo(() => createKinoVideoClient(), [])
   const setView = useGraphView((state) => state.setView)
-  const { regAssets, imageAssets, recentClips, clipGeneration } = useVideoGenerationWorkspace(game, videoController)
+  const requestedFolder = useVideoLibraryNav((state) => state.folder)
+  const requestedEntryId = useVideoLibraryNav((state) => state.entryId)
+  const setVideoLocation = useVideoLibraryNav((state) => state.setLocation)
+  const generationEntry = useVideoGenerationStore((state) => state.byGame[game])
+  const generationTasks = generationEntry?.tasks ?? EMPTY_GENERATION_TASKS
+  const selectGeneration = useVideoGenerationStore((state) => state.select)
   const listBodyRef = useRef<HTMLDivElement | null>(null)
-  const [selectedId, setSelectedId] = useState<string>(() => consumeVideoAssetSelection() ?? '')
-  const [genSheetOpen, setGenSheetOpen] = useState(false)
+  const [pendingSelection] = useState(() => consumeVideoAssetSelection())
+  const pendingSelectionApplied = useRef(false)
+  const [selectedId, setSelectedId] = useState<string>(
+    () => pendingSelection ?? requestedEntryId ?? '',
+  )
   const [externalImportOpen, setExternalImportOpen] = useState(false)
   const [videoDurationMs, setVideoDurationMs] = useState<number | null>(null)
   const [fullscreenRequest, setFullscreenRequest] = useState<{ id: string, nonce: number } | null>(null)
@@ -64,21 +87,17 @@ export function GraphVideoView(): JSX.Element {
     [graph],
   )
 
-  // 共享素材层轮询、生成参考图与最近任务由 generation workspace 统一维护。
-
   const supplementalEntries = useMemo<VideoLibraryEntry[]>(() => {
-    return regAssets
-      .filter((a) => a.kind === 'video' && a.productionType === 'video_clip')
-      .map((v) => ({
-        id: v.id,
-        label: v.label ?? v.id,
-        url: v.status === 'ready' ? registryMediaUrl(v.id, game) : '',
+    return generationTasks.map((task) => ({
+        id: `generation:${task.generationId}`,
+        generationId: task.generationId,
+        label: task.prompt?.trim() || t('videoAssets.status.generating'),
+        url: '',
         group: generatedGroup,
-        status: v.status,
-        fromRegistry: true,
-        durMs: v.durationMs,
+        status: 'generating' as const,
+        updatedAt: task.createdAt,
       }))
-  }, [regAssets, game, generatedGroup])
+  }, [generatedGroup, generationTasks, t])
 
   const entries = useMemo<VideoEntry[]>(() => {
     const seen = new Set<string>()
@@ -114,9 +133,26 @@ export function GraphVideoView(): JSX.Element {
     setVideoDurationMs(null)
   }, [timelineEntry?.id])
 
+  useEffect(() => {
+    if (!pendingSelectionApplied.current && pendingSelection) {
+      pendingSelectionApplied.current = true
+      if (requestedEntryId !== pendingSelection) {
+        setVideoLocation({ entryId: pendingSelection })
+        return
+      }
+    }
+    setSelectedId(requestedEntryId ?? '')
+  }, [pendingSelection, requestedEntryId, setVideoLocation])
+
+  function selectVideo(id: string): void {
+    setSelectedId(id)
+    setVideoLocation({ entryId: id })
+  }
+
   function handleVideoDeleted(id: string): void {
     if (selectedId === id) {
       setSelectedId('')
+      setVideoLocation({ entryId: null })
     }
   }
 
@@ -127,10 +163,16 @@ export function GraphVideoView(): JSX.Element {
         scenario={scenario}
         supplementalEntries={supplementalEntries}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        requestedFolder={activeFolderFor(requestedFolder)}
+        onFolderChange={(folder) => setVideoLocation({ folder: folderTargetFor(folder), entryId: null })}
+        onSelect={selectVideo}
         onOpenPreview={(id) => setFullscreenRequest((current) => ({ id, nonce: (current?.nonce ?? 0) + 1 }))}
         onOpenGenerate={() => {
-          setGenSheetOpen(true)
+          selectGeneration(game, undefined)
+          setView('video-generate')
+        }}
+        onOpenGeneration={(generationId) => {
+          selectGeneration(game, generationId)
           setView('video-generate')
         }}
         onOpenExternalImport={() => setExternalImportOpen(true)}
@@ -151,21 +193,6 @@ export function GraphVideoView(): JSX.Element {
           onDurationChange={setVideoDurationMs}
         />
       ) : null}
-      <VideoGenSheet
-        open={genSheetOpen}
-        gameSlug={game}
-        imageAssets={imageAssets}
-        recentClips={recentClips}
-        genState={clipGeneration.state}
-        onSubmit={clipGeneration.submit}
-        onCancel={clipGeneration.cancel}
-        onTrack={clipGeneration.track}
-        onClose={() => setGenSheetOpen(false)}
-        onLocateAsset={(assetId) => {
-          setSelectedId(assetId)
-          setGenSheetOpen(false)
-        }}
-      />
       <VideoExternalImportDialog
         open={externalImportOpen}
         targetGameId={game}
@@ -173,7 +200,7 @@ export function GraphVideoView(): JSX.Element {
         onImport={async (source, name) => {
           const imported = await videoController.importExternal(source, name)
           if (imported) {
-            setSelectedId(imported.resource_id)
+            selectVideo(imported.resource_id)
           }
           return imported
         }}
@@ -181,4 +208,20 @@ export function GraphVideoView(): JSX.Element {
       />
     </div>
   )
+}
+
+function GraphVideoViewWithOwnedController(): JSX.Element {
+  const game = useGraphScenario((state) => state.game)
+  const videoController = useVideoAssets(game)
+  return <GraphVideoViewContent videoController={videoController} />
+}
+
+export function GraphVideoView({
+  controller,
+}: {
+  controller?: VideoAssetsController
+} = {}): JSX.Element {
+  return controller
+    ? <GraphVideoViewContent videoController={controller} />
+    : <GraphVideoViewWithOwnedController />
 }

@@ -1,4 +1,5 @@
 import { showToast } from './utils.ts';
+import type { AudioShapingParams } from './audioShaping.ts';
 
 /** A BGM/SFX selection ready to be written into the current game. */
 export interface AudioSelection {
@@ -8,26 +9,37 @@ export interface AudioSelection {
   version: string;
   resUrl: string;
   filename: string;
+  shaping?: AudioShapingParams;
+}
+
+export interface AttachedAudioResult {
+  slug?: string;
+  path?: string;
+  file?: string;
 }
 
 /**
  * POST the selection to the host attach endpoint. The server downloads the
- * COS blob into <game>/audio/ and upserts audio/manifest.json. `slug` is the
+ * selected packaged blob into <game>/audio/ and upserts audio/manifest.json. `slug` is the
  * required target game (no auto-detect). `btn` (when given) is disabled with a
  * transient label during the request.
  */
-export async function attachToGame(sel: AudioSelection | null, btn: HTMLButtonElement | undefined, slug: string): Promise<void> {
+export async function attachToGame(
+  sel: AudioSelection | null,
+  btn: HTMLButtonElement | undefined,
+  slug: string,
+): Promise<AttachedAudioResult | false> {
   if (!sel) {
     showToast('请先选择一个 BGM/音效', 'warning');
-    return;
+    return false;
   }
   if (!sel.assetId || !sel.resUrl) {
     showToast('该资产缺少 ID 或下载链接，无法配入游戏', 'error');
-    return;
+    return false;
   }
   if (!slug || !slug.trim()) {
     showToast('请先选择目标游戏', 'warning');
-    return;
+    return false;
   }
   const original = btn?.textContent ?? '';
   if (btn) {
@@ -43,12 +55,14 @@ export async function attachToGame(sel: AudioSelection | null, btn: HTMLButtonEl
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ toolId: 'attach-audio', args: { ...sel, slug: slug.trim() }, caller: { kind: 'user' } }),
     });
-    const env = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; result?: { slug?: string; path?: string } };
+    const env = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; result?: AttachedAudioResult };
     if (!env.ok) throw new Error(env.error || `HTTP ${r.status}`);
     const data = env.result ?? {};
     showToast(`已配入游戏「${data.slug}」：${data.path}`, 'success');
+    return data;
   } catch (e) {
     showToast(`配入失败：${e instanceof Error ? e.message : String(e)}`, 'error');
+    return false;
   } finally {
     if (btn) {
       btn.disabled = false;

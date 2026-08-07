@@ -1,19 +1,19 @@
 /**
  * GraphConfigView —— 新引擎场景级配置中间页（界面 / 规则）。
- * 与蓝图共用 graphScenario store。规则页保留顶部版本/保存条；界面画布不再显示该条。
+ * 与蓝图共用 graphScenario store。规则页由 Workbench 主导航切换分类。
  *
  * 两种形态：
  *  - **界面**（overlays）：目录只在应用左栏，主区直接渲染单个 OverlaySchemeEditor；
  *    选中态来自 uiSelection，方案内容仍写回 scenario.ui.overlays。
- *  - **规则**（实体/变量/公式）：左栏多行扁平切换，右栏渲染 ScenarioInspector。
+ *  - **规则**（实体/变量/公式）：主区直接渲染 ScenarioInspector。
  */
 import { useEffect, useMemo } from 'react'
 import type { GameScenario, Layout, Overlay, OverlayChild, UiTreeNode } from '../../runtime/schema/graph-schema'
-import { CatalogShell } from './CatalogShell'
 import { ScenarioInspector, type ScenarioSection } from './ScenarioInspector'
 import { OverlaySchemeEditor } from './OverlaySchemeEditor'
-import { VersionPicker } from './VersionPicker'
 import { useGraphScenario, graphUndo, graphRedo } from '../persist/graphScenarioStore'
+import { injectStyleOnce } from '../../styles/injectStyle'
+import { CATALOG_CSS } from './catalogCss'
 import {
   NEW_COMPONENT_PRESETS,
   BASE_HUD_PREFIX,
@@ -57,15 +57,12 @@ function findSchemeNodeId(nodes: readonly UiTreeNode[], overlayId: string): stri
   return undefined
 }
 
-export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario: _scenario }: { tabs: ConfigTab[]; title?: string; icon?: string; scenario: GameScenario }): JSX.Element {
+export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = '⚙', scenario: _scenario }: { tabs: ConfigTab[]; title?: string; icon?: string; scenario: GameScenario }): JSX.Element {
+  injectStyleOnce('graph-catalog', CATALOG_CSS)
   const meta = useGraphScenario((s) => s.meta)
   const blueprints = useGraphScenario((s) => s.blueprints)
-  const isDraft = useGraphScenario((s) => s.isDraft)
-  const savedTip = useGraphScenario((s) => s.savedTip)
   const setMeta = useGraphScenario((s) => s.setMeta)
   const renameScenarioId = useGraphScenario((s) => s.renameScenarioId)
-  const doCommit = useGraphScenario((s) => s.commit) // 保存 = 打版本
-  const reset = useGraphScenario((s) => s.reset)
 
   // 键盘撤销/重做：Ctrl/⌘+Z 撤销，Ctrl/⌘+Shift+Z 或 Ctrl+Y 重做；输入框内不拦截（留给原生文本撤销）。
   useEffect(() => {
@@ -84,7 +81,6 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   const overlaysMode = tabs.length === 1 && tabs[0]?.section === 'overlays'
   const activeRuleSection = useRuleSelection((state) => state.section)
   const activeRuleItemId = useRuleSelection((state) => state.itemId)
-  const selectRule = useRuleSelection((state) => state.select)
   const active = overlaysMode
     ? (tabs[0]?.section ?? 'entities')
     : (tabs.some((tab) => tab.section === activeRuleSection) ? activeRuleSection : tabs[0]?.section ?? 'entities')
@@ -106,9 +102,11 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   // 界面 tab 保持新建方案置顶；其它方案选择器继续沿用通用排序。
   const schemeIds = useMemo(() => listInterfaceCustomSchemeIds(allOverlays), [allOverlays])
   const baseIds = useMemo(() => listBaseHudIds(allOverlays), [allOverlays])
+  const selectedTreeNodeId = useUiSelection((state) => state.selectedTreeNodeId)
   const selectedOverlayId = useUiSelection((state) => state.selectedOverlayId)
   const selectUiNode = useUiSelection((state) => state.selectUiNode)
-  // 选中项自愈：不在当前方案集（全局 + 基础）里（删除/首次）就落到第一个全局方案。
+  // 主区展示用的方案：选中项不在当前方案集（全局 + 基础）里（删除/首次/选中了文件夹）
+  // 时回落到第一个全局方案，保证 OverlaySchemeEditor 始终有内容可渲染。
   const selectable = [...schemeIds, ...baseIds]
   const selOverlay = selectedOverlayId && selectable.includes(selectedOverlayId)
     ? selectedOverlayId
@@ -116,13 +114,17 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   const uiTree = ensureUiTree(meta.uiTree, allOverlays)
   useEffect(() => {
     if (!overlaysMode) return
+    // 仅在「确实没有任何树节点选中」（首次进入 / 删除后）时自愈到第一个方案。
+    // 用户主动选中文件夹时 selectedTreeNodeId 非 null、selectedOverlayId 为 null，
+    // 此时不应把选中抢回 scheme——否则 is-selected 会在文件夹与方案行间反复跳变。
+    if (selectedTreeNodeId !== null) return
     if (!selOverlay) {
       if (selectedOverlayId !== null) selectUiNode(null, null)
       return
     }
     if (selectedOverlayId === selOverlay) return
     selectUiNode(findSchemeNodeId(uiTree.root, selOverlay) ?? null, selOverlay)
-  }, [overlaysMode, selOverlay, selectUiNode, selectedOverlayId, uiTree])
+  }, [overlaysMode, selOverlay, selectUiNode, selectedTreeNodeId, selectedOverlayId, uiTree])
   // 基础覆盖物方案只锁结构：单组件不可增删；inputs/layout 可编辑。
   const selLocked = selOverlay.startsWith(BASE_HUD_PREFIX)
 
@@ -237,18 +239,7 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--work, #0e0c09)' }}>
-      {!overlaysMode ? (
-        <div style={{ padding: 8, borderBottom: '1px solid var(--line-soft, #2e2924)', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', color: 'var(--txt, #f6f1e9)' }}>
-          <VersionPicker />
-          <button onClick={() => void doCommit()} title="保存当前内容并打一个新版本（vN）">💾 保存</button>
-          <button onClick={() => { if (confirm('重置为内置 demo 数据？当前未保存的编辑将丢失。')) reset() }}>↺ 重置</button>
-          {isDraft ? (
-            <span style={{ opacity: 0.85, fontSize: 12, color: '#ffc53d' }}>⚠ 未保存草稿</span>
-          ) : null}
-          {savedTip ? <span style={{ opacity: 0.6, fontSize: 11 }}>{savedTip}</span> : null}
-        </div>
-      ) : null}
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--color-background-base, #333333)' }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         {overlaysMode ? (
           (() => {
@@ -287,26 +278,16 @@ export function GraphConfigView({ tabs, title = '配置', icon = '⚙', scenario
             )
           })()
         ) : (
-          <CatalogShell
-            icon={icon}
-            title={title}
-            items={tabs.map((t) => ({ id: t.section, label: t.label }))}
-            selectedId={active}
-            onSelect={(id) => selectRule(id as typeof activeRuleSection)}
-            renderPreview={() => (
-              <div style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-                {/* meta.formulas 在 schema 里存为 `Record<string, unknown>`（runtime ↛ editor）；这里窄化回 Formula 给 ScenarioInspector。 */}
-                <ScenarioInspector
-                  value={{ ...meta, formulas: meta.formulas as Record<string, Formula> | undefined }}
-                  section={active}
-                  focusItemId={activeRuleItemId}
-                  overlayUsage={overlayUsage}
-                  onChange={setMeta}
-                  onRenameId={(rename: ScenarioIdRename) => renameScenarioId(rename)}
-                />
-              </div>
-            )}
-          />
+          <div className="gc-rule-stage">
+            <ScenarioInspector
+              value={{ ...meta, formulas: meta.formulas as Record<string, Formula> | undefined }}
+              section={active}
+              focusItemId={activeRuleItemId}
+              overlayUsage={overlayUsage}
+              onChange={setMeta}
+              onRenameId={(rename: ScenarioIdRename) => renameScenarioId(rename)}
+            />
+          </div>
         )}
       </div>
     </div>

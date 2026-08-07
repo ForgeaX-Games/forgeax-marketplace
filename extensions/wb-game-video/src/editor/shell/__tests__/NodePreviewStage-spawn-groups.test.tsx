@@ -3,12 +3,12 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import type { JSX } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { registerCoreSkins } from '../../../runtime/component-host/components'
+import { registerTestComponents } from '../../../runtime/__tests__/test-components'
 import type { GameScenario } from '../../../runtime/schema/graph-schema'
 import { node, scnOf } from '../../../runtime/__tests__/test-fixtures'
 import { NodePreviewStage } from '../NodePreviewStage'
 
-beforeAll(registerCoreSkins)
+beforeAll(registerTestComponents)
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
@@ -35,7 +35,7 @@ function seedScenario(second = false): GameScenario {
           title: '伤害飘字',
           children: [{
             id: 'value',
-            component: 'DamageFloatText',
+            component: 'test.float',
             trigger: { when: 'enter' },
             inputs: {},
             layout: { left: 0.1, top: 0.1, width: 0.2, height: 0.2 },
@@ -46,7 +46,7 @@ function seedScenario(second = false): GameScenario {
           title: '状态提示',
           children: [{
             id: 'line',
-            component: 'DamageFloatText',
+            component: 'test.float',
             trigger: { when: 'enter' },
             inputs: {},
             layout: { left: 0.6, top: 0.6, width: 0.2, height: 0.2 },

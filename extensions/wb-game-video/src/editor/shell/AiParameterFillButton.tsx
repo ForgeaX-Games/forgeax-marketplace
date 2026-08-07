@@ -1,14 +1,22 @@
 import type { JSX } from 'react'
 import aiParameterFillIcon from './assets/ai-parameter-fill.png'
 
-export function AiParameterFillButton({ className }: { className?: string }): JSX.Element {
+export function AiParameterFillButton({
+  className,
+  ariaLabel = 'AI 补全参数',
+  title = 'AI 补全暂不可用',
+}: {
+  className?: string
+  ariaLabel?: string
+  title?: string
+}): JSX.Element {
   return (
     <button
       type="button"
       className={className}
       disabled
-      aria-label="AI 补全参数"
-      title="AI 补全暂不可用"
+      aria-label={ariaLabel}
+      title={title}
       style={{
         flex: 'none',
         display: 'block',

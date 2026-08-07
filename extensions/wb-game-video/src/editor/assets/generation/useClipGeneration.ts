@@ -23,6 +23,8 @@ export interface ClipGenState {
   resultUrl?: string
   resourceId?: string
   error?: string
+  /** Restored from Kino's durable generation task after navigation/reload. */
+  prompt?: string
   /** Kept empty: durable progress is represented by Host registry assets. */
   activeTasks?: readonly VideoGenerationTask[]
 }
@@ -39,6 +41,8 @@ export interface UseClipGenerationOptions {
   submitClip?: (request: ClipGenerationWireRequest) => Promise<ClipGenerationSubmission>
   createRequestId?: () => string
   onTerminal?: () => void | Promise<void>
+  restoredTask?: VideoGenerationTask
+  activeTasks?: readonly VideoGenerationTask[]
 }
 
 export interface ClipGenerationController {
@@ -73,6 +77,21 @@ export function useClipGeneration(
   const mountedRef = useRef(true)
   const trackedRef = useRef<TrackedSubmission | null>(null)
   const notifiedAssetRef = useRef<string | null>(null)
+  const restoredTask = options.restoredTask
+  const restoredTaskKey = restoredTask
+    ? JSON.stringify([
+        restoredTask.generationId,
+        restoredTask.status,
+        restoredTask.prompt,
+        restoredTask.resultUrl,
+        restoredTask.resourceId,
+        restoredTask.errorMessage,
+      ])
+    : ''
+  const activeTasks = options.activeTasks ?? []
+  const activeTasksKey = JSON.stringify(
+    activeTasks.map((task) => [task.generationId, task.status]),
+  )
 
   useEffect(() => {
     mountedRef.current = true
@@ -81,6 +100,33 @@ export function useClipGeneration(
       epochRef.current += 1
     }
   }, [])
+
+  useEffect(() => {
+    const task = restoredTask
+    if (!task) return
+    trackedRef.current = null
+    setState({
+      phase: task.status === 'succeeded'
+        ? 'succeeded'
+        : task.status === 'failed' || task.status === 'cancelled'
+          ? 'failed'
+          : 'generating',
+      transport: 'tool',
+      generationId: task.generationId,
+      resultUrl: task.resultUrl,
+      resourceId: task.resourceId,
+      error: task.errorMessage,
+      activeTasks,
+      prompt: task.prompt,
+    })
+  }, [restoredTaskKey])
+
+  useEffect(() => {
+    setState((current) => {
+      if (!current.generationId || tasksEqual(current.activeTasks ?? [], activeTasks)) return current
+      return { ...current, activeTasks }
+    })
+  }, [activeTasksKey])
 
   useEffect(() => {
     const tracked = trackedRef.current
@@ -166,6 +212,7 @@ function toHostWireRequest(
     ...(request.referenceImageAssetIds
       ? { referenceImageAssetIds: request.referenceImageAssetIds }
       : {}),
+    ...(request.visualStyleKey ? { visualStyleKey: request.visualStyleKey } : {}),
     ...(request.label ? { label: request.label } : {}),
     requestId,
   }
@@ -248,4 +295,14 @@ function statesEqual(left: ClipGenState, right: ClipGenState): boolean {
     && left.transport === right.transport
     && left.assetId === right.assetId
     && left.error === right.error
+}
+
+function tasksEqual(
+  left: readonly VideoGenerationTask[],
+  right: readonly VideoGenerationTask[],
+): boolean {
+  return left.length === right.length && left.every((task, index) => {
+    const candidate = right[index]
+    return candidate?.generationId === task.generationId && candidate.status === task.status
+  })
 }

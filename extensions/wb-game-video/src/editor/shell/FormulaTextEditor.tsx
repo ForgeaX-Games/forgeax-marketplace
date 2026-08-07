@@ -6,23 +6,25 @@
  *  · 文本框下方一行**结构摘要**：引用了哪些实体/变量、含几个参数、无参数时 `≈ 样例值`
  *    ——不再逐字复述公式串（那与输入框重复）；
  *  · **试算面板**（默认折叠）：含 `?参数` 时给每个参数填样例值，实时算出结果，让用户直观看懂产出；
- *  · 插入工具条：往光标处插入 实体属性 / 变量 / 函数 / ?参数（复用 scenario-pickers）。
+ *  · 插入工具条：往光标处插入 实体属性 / 变量 / 函数 / ?参数（复用编辑器通用下拉）。
  *
  * 与旧 FormulaAstEditor 的可编辑节点嵌套树不同——文本 ↔ AST 双向经 formula-authoring 的
  * parseFormulaText / previewFormula，runtime expr.ts 不认 hole，故 hole 语法只活在编辑器层。
  */
-import { Fragment, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from 'react'
 import { isNumericScalar, type Entity, type Variable } from '../../runtime/schema/graph-schema'
 import { tryEvalExpr, type EvalCtx } from '../../runtime/engine/expr'
 import { createRng } from '../../runtime/engine/rng'
-import type { FormulaAstNode, FormulaHoleBinding } from '../persist/formula-authoring'
+import type { FormulaAstNode, FormulaHoleBinding, FormulaParseFailureSnapshot } from '../persist/formula-authoring'
 import {
   parseFormulaAuthoringText,
   previewFormula,
   serializeFormula,
 } from '../persist/formula-authoring'
 import { formulaHoles, type FormulaHole } from './formulaApply'
-import { AttrPicker, EntityPicker, VariablePicker } from './scenario-pickers'
+import { CascadingPicker, type CascadingPickerOpenChangeDetail, type CascadingPickerOption } from './CascadingPicker'
+import { SelectDropdown } from './SelectDropdown'
+import { findEntity, listAttrOptions, listEntityOptions, listVarOptions } from './metaCatalog'
 import { LooseNumberInput } from './TermChainEditor'
 
 const box: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }
@@ -52,6 +54,7 @@ function sampleCtx(entities?: Record<string, Entity>, variables?: Record<string,
 
 // expr.ts eval 支持的函数名（插入用）。
 const FUNCTIONS = ['floor', 'round', 'abs', 'min', 'max', 'chance', 'rand', 'randInt']
+const FUNCTION_OPTIONS = FUNCTIONS.map((fn) => ({ value: fn, label: `${fn}()` }))
 
 /** 一条公式引用了哪些实体 / 变量（去重、按出现顺序）——供结构摘要展示。 */
 function collectRefs(ast: FormulaAstNode): { entities: Set<string>; vars: Set<string>; usesScore: boolean } {
@@ -92,7 +95,7 @@ function varName(id: string, variables?: Record<string, Variable>): string {
 }
 
 /** 把参数和状态引用渲染成不同 token，短横线因此明确属于整段引用。 */
-function FormulaSyntax({ text }: { text: string }): JSX.Element {
+export function FormulaSyntax({ text }: { text: string }): JSX.Element {
   const parts: JSX.Element[] = []
   let cursor = 0
   for (const match of text.matchAll(FORMULA_TOKEN_RE)) {
@@ -116,12 +119,38 @@ function FormulaSyntax({ text }: { text: string }): JSX.Element {
   return <>{parts}</>
 }
 
+export function FormulaHelpContent(): JSX.Element {
+  return (
+    <ul className="sir-formula-help-list">
+      <li>
+        <strong>添加公式</strong>
+        <p>在输入框中直接组合数字、运算符和表达式；按 <code>⌘/Ctrl+Enter</code> 提交。</p>
+      </li>
+      <li>
+        <strong>添加实体 / 变量 / 函数</strong>
+        <p>使用输入框下方的控件插入到当前光标或选区；选择实体后还需继续选择属性。</p>
+      </li>
+      <li>
+        <strong>参数留空</strong>
+        <p>插入 <code className="gc-fx-hole-tag">?参数</code> 作为留空位，应用公式时再绑定具体值，也可改成 <code>?攻击力</code> 等业务名称。</p>
+      </li>
+      <li>
+        <strong>公式示例</strong>
+        <code className="sir-formula-help-example"><FormulaSyntax text={FORMULA_EXAMPLE} /></code>
+        <p><strong>示例目标：</strong>计算一个不会低于 0 的最终伤害值。</p>
+        <p><strong>示例原理：</strong>攻击力乘以技能倍率，再减去防御力；最外层 <code>max(..., 0)</code> 用来避免出现负伤害。</p>
+      </li>
+    </ul>
+  )
+}
+
 export function FormulaTextEditor({
   ast,
   empty = false,
   entities,
   variables,
   onEmpty,
+  onParseFailureChange,
   onChange,
 }: {
   ast: FormulaAstNode
@@ -129,16 +158,26 @@ export function FormulaTextEditor({
   entities?: Record<string, Entity>
   variables?: Record<string, Variable>
   onEmpty?: () => void
+  onParseFailureChange?: (failure: FormulaParseFailureSnapshot | null) => void
   onChange: (ast: FormulaAstNode) => void
 }): JSX.Element {
   const canonical = empty ? '' : previewFormula(ast)
   const [draft, setDraft] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<FormulaParseFailureSnapshot | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const highlightRef = useRef<HTMLPreElement | null>(null)
+  const editorRef = useRef<HTMLDivElement | null>(null)
+  const pickerOpenRef = useRef(false)
+  const latestTextRef = useRef(canonical)
+  const committedTextRef = useRef<string | null>(null)
   const lastSelectionRef = useRef({ start: canonical.length, end: canonical.length })
 
   const text = draft ?? canonical
+  latestTextRef.current = text
+  useEffect(() => {
+    onParseFailureChange?.(failure)
+  }, [failure, onParseFailureChange])
+  useEffect(() => () => onParseFailureChange?.(null), [onParseFailureChange])
   const ctx = useMemo(() => sampleCtx(entities, variables), [entities, variables])
   const authoringCatalog = { entities, variables }
 
@@ -164,27 +203,43 @@ export function FormulaTextEditor({
   const refs = useMemo(() => (liveAst ? collectRefs(liveAst) : null), [liveAst])
   const hasHole = holes.length > 0
   const sampleExpr = liveAst && !hasHole ? serializeFormula(liveAst, {}) : null
-  const sampleValue = sampleExpr && !error
+  const sampleValue = sampleExpr && !failure
     ? tryEvalExpr(sampleExpr, { ...ctx, rng: createRng(0) })
     : null
+  const showSummary = !failure && refs != null && (
+    refs.entities.size > 0
+    || refs.vars.size > 0
+    || (refs.entities.size === 0 && refs.vars.size === 0 && !refs.usesScore && !hasHole)
+    || sampleValue != null
+  )
+
+  function parseFailure(invalidDraft: string, error: unknown): FormulaParseFailureSnapshot {
+    return {
+      kind: 'wb-game-video.formula-parse-failure.v1',
+      invalidDraft,
+      parserDiagnostic: error instanceof Error ? error.message : String(error),
+    }
+  }
 
   /** 校验并（成功时）回写 AST。 */
   function commit(next: string): void {
+    if (committedTextRef.current === next) return
+    committedTextRef.current = next
     const src = next.trim()
     if (!src) {
       if (onEmpty) onEmpty()
       else onChange({ t: 'num', id: 'n0', v: 0 })
       setDraft(null)
-      setError(null)
+      setFailure(null)
       return
     }
     try {
       const nextAst = parseFormulaAuthoringText(src, authoringCatalog)
-      setError(null)
+      setFailure(null)
       onChange(nextAst)
       setDraft(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+    } catch (error) {
+      setFailure(parseFailure(next, error))
     }
   }
 
@@ -192,14 +247,15 @@ export function FormulaTextEditor({
   function revalidate(next: string): void {
     try {
       parseFormulaAuthoringText(next.trim() || '0', authoringCatalog)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setFailure(null)
+    } catch (error) {
+      setFailure(parseFailure(next, error))
     }
   }
 
   /** 往光标处插入片段（无选区时追加到末尾）；插入后聚焦并把光标移到片段末。 */
   function insert(frag: string): void {
+    committedTextRef.current = null
     const ta = taRef.current
     const base = draft ?? canonical
     if (!ta) {
@@ -221,26 +277,44 @@ export function FormulaTextEditor({
     })
   }
 
-  const entOpts = Object.values(entities ?? {})
-  const varOpts = Object.values(variables ?? {})
+  const entityOptions = useMemo<CascadingPickerOption[]>(() => listEntityOptions(entities)
+    .map((entity) => {
+      const attrs = listAttrOptions(findEntity(entities, entity.id), { numbersOnly: true })
+      return {
+        key: `entity:${entity.id}`,
+        label: entity.label,
+        children: attrs.map((attr) => ({
+          key: `attr:${entity.id}:${attr.id}`,
+          label: attr.label,
+          value: `entity.${entity.id}.attr.${attr.id}`,
+        })),
+      }
+    })
+    .filter((entity) => entity.children.length > 0), [entities])
+  const variableOptions = useMemo(() => listVarOptions(variables, { numbersOnly: true })
+    .map((variable) => ({ value: variable.id, label: variable.label })), [variables])
+
+  function handlePickerOpenChange(open: boolean, detail: CascadingPickerOpenChangeDetail): void {
+    pickerOpenRef.current = open
+    if (
+      !open
+      && detail.reason === 'outside-pointer'
+      && detail.target instanceof Node
+      && !editorRef.current?.contains(detail.target)
+    ) {
+      commit(latestTextRef.current)
+    }
+  }
 
   return (
-    <div className="gc-fx" style={box}>
-      <section className="gc-fx-example" aria-label="公式示例">
-        <div className="gc-fx-example-formula">
-          <span>示例</span>
-          <code><FormulaSyntax text={FORMULA_EXAMPLE} /></code>
-        </div>
-        <p><b>目标：</b>计算一个不会低于 0 的最终伤害值。</p>
-        <p><b>原理：</b>攻击力乘以技能倍率，再减去防御力；最外层 <code>max(..., 0)</code> 用来避免出现负伤害。每个同色 <code>?参数</code> 都是应用公式时再绑定的 hole。</p>
-      </section>
-
+    <div ref={editorRef} className="gc-fx" style={box}>
       <div className="gc-fx-editor">
         <pre ref={highlightRef} className="gc-fx-highlight" aria-hidden="true"><FormulaSyntax text={text} />{text.endsWith('\n') ? '\n' : null}</pre>
         <textarea
           ref={taRef}
-          className={error ? 'gc-fx-input is-err' : 'gc-fx-input'}
+          className={failure ? 'gc-fx-input is-err' : 'gc-fx-input'}
           aria-label="公式表达式"
+          aria-invalid={Boolean(failure)}
           spellCheck={false}
           rows={2}
           value={text}
@@ -255,6 +329,7 @@ export function FormulaTextEditor({
           }}
           onChange={(e) => {
             const next = e.target.value
+            committedTextRef.current = null
             setDraft(next)
             revalidate(next)
             rememberSelection(e.currentTarget)
@@ -270,42 +345,37 @@ export function FormulaTextEditor({
           onBlur={(e) => {
             rememberSelection(e.currentTarget)
             const nextFocus = e.relatedTarget as HTMLElement | null
-            if (nextFocus?.closest('.gc-fx-tools')) return
-            commit(draft ?? canonical)
+            if (nextFocus?.closest('.gc-fx-tools') || pickerOpenRef.current) return
+            commit(latestTextRef.current)
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(draft ?? canonical) }
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(latestTextRef.current) }
           }}
         />
       </div>
 
-      {/* 结构摘要行（不复述公式串；给引用/参数/样例值的概览） */}
-      <div className="gc-fx-summary" aria-label="公式结构摘要">
-        {error ? (
-          <span className="gc-fx-summary-item gc-fx-summary-item--err">无法解析</span>
-        ) : refs ? (
-          <>
-            {refs.entities.size > 0 && (
-              <span className="gc-fx-summary-item">
-                实体 {[...refs.entities].map((id) => entName(id, entities)).join('、')}
-              </span>
-            )}
-            {refs.vars.size > 0 && (
-              <span className="gc-fx-summary-item">
-                变量 {[...refs.vars].map((id) => varName(id, variables)).join('、')}
-              </span>
-            )}
-            {hasHole && <span className="gc-fx-summary-item gc-fx-summary-item--hole">参数 {holes.length}</span>}
-            {refs.entities.size === 0 && refs.vars.size === 0 && !refs.usesScore && !hasHole && (
-              <span className="gc-fx-summary-item gc-fx-summary-item--muted">常量表达式</span>
-            )}
-          </>
-        ) : null}
-        {sampleValue != null && <span className="gc-fx-eq">≈ {sampleValue}</span>}
-      </div>
+      {/* 结构摘要行（不复述公式串；给引用和样例值的概览） */}
+      {showSummary ? (
+        <div className="gc-fx-summary" aria-label="公式结构摘要">
+          {refs.entities.size > 0 && (
+            <span className="gc-fx-summary-item">
+              实体 {[...refs.entities].map((id) => entName(id, entities)).join('、')}
+            </span>
+          )}
+          {refs.vars.size > 0 && (
+            <span className="gc-fx-summary-item">
+              变量 {[...refs.vars].map((id) => varName(id, variables)).join('、')}
+            </span>
+          )}
+          {refs.entities.size === 0 && refs.vars.size === 0 && !refs.usesScore && !hasHole && (
+            <span className="gc-fx-summary-item gc-fx-summary-item--muted">常量表达式</span>
+          )}
+          {sampleValue != null && <span className="gc-fx-eq">≈ {sampleValue}</span>}
+        </div>
+      ) : null}
 
       {/* 试算面板（默认折叠）：给每个 ?参数 填样例值、实时算出结果 */}
-      {hasHole && liveAst && !error && (
+      {hasHole && liveAst && !failure && (
         <TrialPanel ast={liveAst} holes={holes} ctx={ctx} entities={entities} />
       )}
 
@@ -314,40 +384,59 @@ export function FormulaTextEditor({
         className="gc-fx-tools"
         onBlur={(e) => {
           const nextFocus = e.relatedTarget as Node | null
-          if (nextFocus && (e.currentTarget.contains(nextFocus) || nextFocus === taRef.current)) return
-          commit(draft ?? canonical)
+          if (
+            pickerOpenRef.current
+            || (nextFocus && (e.currentTarget.contains(nextFocus) || nextFocus === taRef.current))
+          ) return
+          commit(latestTextRef.current)
         }}
       >
-        {entOpts.length > 0 && (
-          <label>实体
-            <EntitySelectInsert entities={entities} onPick={(id, attr) => insert(`entity.${id}.attr.${attr}`)} />
-          </label>
-        )}
-        {varOpts.length > 0 && (
-          <label>变量
-            <VariablePicker value="" variables={variables} allowEmpty onChange={(id) => id && insert(`var.${id}`)} />
-          </label>
-        )}
-        <select
-          className="gc-fx-chip"
+        <CascadingPicker
+          ariaLabel="插入实体属性"
           value=""
-          aria-label="插入函数"
-          onChange={(e) => { const fn = e.target.value; if (fn) insert(`${fn}()`); e.currentTarget.value = '' }}
+          displayValue="实体属性"
+          options={entityOptions}
+          onSelect={insert}
+          narrowSafe
+          variant="toolbar"
+          disabled={entityOptions.length === 0}
+          onOpenChange={handlePickerOpenChange}
+        />
+        <SelectDropdown
+          ariaLabel="插入变量"
+          value=""
+          placeholder="变量"
+          options={variableOptions}
+          onChange={(id) => insert(`var.${id}`)}
+          variant="toolbar"
+          disabled={variableOptions.length === 0}
+          onOpenChange={handlePickerOpenChange}
+        />
+        <SelectDropdown
+          ariaLabel="插入函数"
+          value=""
+          placeholder="函数"
+          options={FUNCTION_OPTIONS}
+          onChange={(fn) => insert(`${fn}()`)}
+          variant="toolbar"
+          onOpenChange={handlePickerOpenChange}
+        />
+        <button
+          type="button"
+          className="gc-fx-tool-button"
+          aria-label="插入参数"
+          onClick={() => insert('?参数')}
+          title="插入留空位——应用公式时再绑定具体值"
         >
-          <option value="">＋函数</option>
-          {FUNCTIONS.map((f) => <option key={f} value={f}>{f}()</option>)}
-        </select>
-        <button type="button" className="gc-fx-chip" onClick={() => insert('?参数')} title="插入留空位——应用公式时再绑定具体值">?参数</button>
+          <span className="gc-fx-tool-add" aria-hidden="true">+</span>
+          <span className="gc-fx-tool-label">参数</span>
+        </button>
       </div>
 
-      {error ? (
-        <p className="gc-fx-err">解析失败：{error}</p>
-      ) : (
-        <p className="gc-fx-hint">
-          可用：数字 / 变量 / 实体属性 / floor·min·max·chance 等函数。
-          <code> ?参数 </code>= 留空位（应用公式时绑定具体值）。⌘/Ctrl+Enter 提交。
-        </p>
-      )}
+      <p className="gc-fx-hint">
+        可用：数字 / 变量 / 实体属性 / floor·min·max·chance 等函数。
+        <code> ?参数 </code>= 留空位（应用公式时绑定具体值）。⌘/Ctrl+Enter 提交。
+      </p>
     </div>
   )
 }
@@ -408,24 +497,5 @@ function TrialPanel({
         <p className="gc-fx-hint">样例值仅用于试算预览，不写入公式定义。</p>
       </div>
     </details>
-  )
-}
-
-/** 实体+属性两级选择，选定后把 `entity.id.attr.attr` 交给 onPick 插入。 */
-function EntitySelectInsert({
-  entities,
-  onPick,
-}: {
-  entities?: Record<string, Entity>
-  onPick: (entityId: string, attr: string) => void
-}): JSX.Element {
-  const [ent, setEnt] = useState('')
-  return (
-    <span style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
-      <EntityPicker value={ent} entities={entities} allowEmpty onChange={setEnt} />
-      {ent ? (
-        <AttrPicker entityId={ent} value="" entities={entities} onChange={(attr) => { if (attr) { onPick(ent, attr); setEnt('') } }} />
-      ) : null}
-    </span>
   )
 }

@@ -2,19 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { collectProjectComponentAssets } from '../project-component-assets'
 
 describe('collectProjectComponentAssets', () => {
-  it('collects project controls from a default register module', () => {
+  it('collects project controls from a default catalog module', () => {
     const assets = collectProjectComponentAssets({
-      default(host) {
-        host.registerComponent('battle-hp', {
-          label: '战斗血条',
-          inputs: [{ key: 'value', valueType: 'number', default: 100 }],
-        })
-        host.registerOverlayRenderer(
-          'battle-hp',
-          () => null,
-          { id: 'battle-hp', label: '战斗血条', events: [] },
-        )
-      },
+      default: [
+        {
+          component: () => null,
+          manifest: {
+            id: 'battle-hp',
+            label: '战斗血条',
+            inputs: [{ key: 'value', valueType: 'number', default: 100 }],
+            events: [],
+          },
+        },
+      ],
     })
 
     expect(assets).toHaveLength(1)
@@ -25,11 +25,9 @@ describe('collectProjectComponentAssets', () => {
     })
   })
 
-  it('omits declarations without a renderer because controls must be previewable', () => {
+  it('returns empty when module is not a catalog', () => {
     const assets = collectProjectComponentAssets({
-      register(host) {
-        host.registerComponent('metadata-only', { label: '仅元数据' })
-      },
+      register() {},
     })
 
     expect(assets).toEqual([])

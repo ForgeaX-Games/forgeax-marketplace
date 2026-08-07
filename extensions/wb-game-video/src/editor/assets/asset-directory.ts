@@ -135,14 +135,14 @@ export function removeDirectoryFolder(
 export function moveDirectoryFolder(
   assetLibrary: AssetLibraryState,
   folderId: string,
-  parentId: string,
+  parentId?: string,
   now = Date.now(),
 ): AssetLibraryState {
   const folder = assetLibrary.folders.find((candidate) => candidate.id === folderId)
-  const parent = assetLibrary.folders.find((candidate) => candidate.id === parentId)
-  if (!folder || !parent) throw new Error('目标文件夹不存在')
-  if (folder.id === parent.id) throw new Error('文件夹不能移动到自身')
-  if (folder.rootKind !== parent.rootKind) throw new Error('文件夹不能跨资产类型移动')
+  const parent = parentId ? assetLibrary.folders.find((candidate) => candidate.id === parentId) : undefined
+  if (!folder || (parentId && !parent)) throw new Error('目标文件夹不存在')
+  if (parent && folder.id === parent.id) throw new Error('文件夹不能移动到自身')
+  if (parent && folder.rootKind !== parent.rootKind) throw new Error('文件夹不能跨资产类型移动')
 
   let ancestor: AssetLibraryFolder | undefined = parent
   while (ancestor) {

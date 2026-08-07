@@ -11,7 +11,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { isNumericScalar, type Entity, type Layout, type Overlay, type OverlayChild, type Variable } from '../../runtime/schema/graph-schema'
 import { bootEditorSkins } from '../init'
-import { createCoreSkinRegistry } from '../../runtime/component-host/components'
+import { createCoreSkinRegistry } from '../../runtime/component-host'
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { renderOverlayChildPreview } from './overlayChildPreview'

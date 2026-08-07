@@ -119,7 +119,10 @@ function createContext() {
       models,
       videoGeneration: unavailableVideoGeneration,
       services: unavailableServices,
-      capabilities: { async invoke() { throw new Error('Capabilities are unavailable in this test context') } },
+      capabilities: { async invoke(id: string) {
+        if (id === 'media.video.visual-styles.list') return { items: [] }
+        throw new Error('Capabilities are unavailable in this test context')
+      } },
     } satisfies WorkbenchExtensionContext,
     media,
     models,
@@ -129,6 +132,14 @@ function createContext() {
 const manifestTools = [
   ['wb-game-video:get-graph', 'getGraph', {}],
   ['wb-game-video:save-graph', 'saveGraph', { project: blueprint }],
+  ['wb-game-video:patch-graph', 'patchGraph', {
+    ops: [{
+      op: 'set-node-field',
+      nodeId: blueprint.graph.nodes[0]!.id,
+      field: 'name',
+      value: 'Patched opening',
+    }],
+  }],
   ['wb-game-video:list-videos', 'listVideos', {}],
   ['wb-game-video:generate-shot-script', 'generateShotScript', {
     nodeName: 'Opening', storyText: 'Hero enters',
@@ -143,6 +154,7 @@ const manifestTools = [
   ['wb-game-video:generate-video-clip', 'generateVideoClip', {
     prompt: 'A rainy alley',
   }],
+  ['wb-game-video:list-video-visual-styles', 'listVideoVisualStyles', {}],
   ['wb-game-video:generate-node-video', 'generateNodeVideo', {
     sceneNodeId: 'node-1', nodeName: 'Opening',
     characterRefIds: ['character-ref'], sceneRefIds: ['scene-ref'],
@@ -159,7 +171,7 @@ describe('wb-game-video host module', () => {
     expect(host.tools).toBe(tools)
     expect(host.gamePackage).toMatchObject({ platform: 'wb-game-video' })
     expect(await host.gamePackage!.createSeed(createContext().context))
-      .toMatchObject({ project: { id: 'nodia' } })
+      .toMatchObject({ project: { id: 'parity-game' } })
     await expect(host.gamePackage!.validateSeed({})).rejects.toThrow()
     expect(host.createRouter).toBeTypeOf('function')
   })

@@ -7,8 +7,8 @@
     "en": "BGM & SFX"
   },
   "description": {
-    "zh": "BGM / 音效工作台 · 搜索 + 试听音频素材库,一键配入游戏:下载到 .forgeax/games/<slug>/audio/ 并写入 audio/manifest.json,供引擎按 manifest 播放。",
-    "en": "BGM & SFX workbench — search and preview an audio asset library, then attach to a game in one click: downloads into .forgeax/games/<slug>/audio/ and upserts audio/manifest.json for the engine to play."
+    "zh": "BGM / 音效工作台 · 搜索 + 试听打包的本地音频素材库,一键复制到 .forgeax/games/<slug>/audio/ 并写入 audio/manifest.json,供引擎按 manifest 播放。",
+    "en": "BGM & SFX workbench — search and preview the packaged local library, then copy audio into .forgeax/games/<slug>/audio/ and upsert audio/manifest.json for the engine to play."
   },
   "author": {
     "name": "forgeax",
@@ -42,9 +42,6 @@
     "emit:bgm.*"
   ],
   "requestedEnv": [
-    "WB_BGM_BACKEND_BASE",
-    "WB_BGM_SANDBOX_KEY",
-    "WB_BGM_DEPOT",
     "FORGEAX_PROJECT_ROOT"
   ],
   "experimental": true,
@@ -120,26 +117,154 @@
         "args": "./schemas/search-audio.args.json",
         "exposedToAI": true,
         "description": {
-          "zh": "在 Local 库搜索 BGM(kind=bgm)/音效(kind=sfx),按 tag 匹配。返回 { assetId, name, kind, version, resUrl } 列表,供 attach-audio 使用。",
-          "en": "Search the Local depot for BGM (kind=bgm) / SFX (kind=sfx) by tag. Returns { assetId, name, kind, version, resUrl } for attach-audio."
+          "zh": "旧版单标签搜索，仅保留用于兼容和回归对比；新BGM任务使用search-bgm，SFX统一使用resolve-audio-plan。",
+          "en": "Legacy single-tag search retained only for compatibility and regression comparison. Use search-bgm for new BGM tasks and resolve-audio-plan for SFX."
+        }
+      },
+      {
+        "id": "search-bgm",
+        "args": "./schemas/search-bgm.args.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "BGM结构化标签检索：按场景、情绪、能量、世界观联合召回，并纳入文件名明确匹配的已登记自定义BGM；不扫描未登记文件，也不推断自定义标签。",
+          "en": "Structured BGM retrieval across scene, mood, energy, and world, plus registered custom BGM with an explicit filename match. Unregistered files are never scanned and custom tags are not inferred."
+        }
+      },
+      {
+        "id": "resolve-audio-plan",
+        "args": "./schemas/resolve-audio-plan.args.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "批量解析SFX Audio Plan：检索打包本地库和文件名明确匹配的已登记自定义音效；不扫描未登记文件，不自动猜测自定义类别。",
+          "en": "Resolve a batch SFX Audio Plan from the packaged library and registered custom SFX with explicit filename matches. Unregistered files are never scanned and custom categories are never guessed."
+        }
+      },
+      {
+        "id": "apply-audio-plan",
+        "args": "./schemas/apply-audio-plan.args.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "批量应用resolve-audio-plan结果：复用已挂载资产，从打包库或已登记自定义库复制缺失变体，再幂等更新manifest与audio/cues.json；复制后不依赖用户资产库副本。",
+          "en": "Apply resolved audio items by reusing attached assets, copying missing variants from the packaged or registered custom library, and updating manifest plus audio/cues.json idempotently. Copied game assets no longer depend on the user's library copy."
+        }
+      },
+      {
+        "id": "inspect-audio-events",
+        "args": "./schemas/inspect-audio-events.args.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "只读扫描游戏源码中的语义事件、已有 gameAudio 调用和直接音效调用，返回可定位的候选事件。",
+          "en": "Read-only scan for semantic events, existing gameAudio calls, and direct sound calls with source anchors."
+        }
+      },
+      {
+        "id": "get-audio-project",
+        "args": "./schemas/get-audio-project.args.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取用户与 Agent 共用的修订版音频绑定草稿。",
+          "en": "Read the revisioned audio binding draft shared by the user and Agent."
+        }
+      },
+      {
+        "id": "patch-audio-project",
+        "args": "./schemas/patch-audio-project.args.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "按 expectedRevision 增删或更新事件声音规则，包括默认声音、跟随游戏值变化和事件级EQ；冲突时拒绝覆盖。",
+          "en": "Add, update, or remove event sound rules, including default sounds, game-value following, and event EQ, with revision protection."
+        }
+      },
+      {
+        "id": "apply-audio-project",
+        "args": "./schemas/apply-audio-project.args.json",
+        "exposedToAI": true,
+        "requireConfirm": "always",
+        "confirmMessage": "将把当前音频绑定草稿应用到游戏，并更新 src/forgeax-audio 运行时文件。",
+        "description": {
+          "zh": "校验并应用用户确认的草稿，生成不修改引擎底层的游戏侧音频运行时。",
+          "en": "Validate and apply the confirmed draft, generating an additive game-side audio runtime."
+        }
+      },
+      {
+        "id": "verify-audio-project",
+        "args": "./schemas/verify-audio-project.args.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "验证资产、生成运行时和真实游戏事件插桩，返回结构化修复项。",
+          "en": "Verify assets, generated runtime files, and real game-event instrumentation."
+        }
+      },
+      {
+        "id": "search-audio-v2",
+        "args": "./schemas/search-audio-v2.args.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "SFX结构化检索旁路：按cue/source/targetMaterial/intensity/projectId/exclude过滤与评分，按familyId去重，返回Top K、分数、命中理由和降级项。dryRun=true时只测试索引。",
+          "en": "Structured SFX search shadow path: filters and ranks by cue/source/targetMaterial/intensity/projectId/exclude, deduplicates by familyId, and returns scores, reasons, and relaxations. dryRun=true tests the index only."
         }
       },
       {
         "id": "attach-audio",
         "args": "./schemas/attach-audio.args.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "按本地库 assetId 把 BGM/音效复制到 .forgeax/games/<slug>/audio/ 并幂等更新 audio/manifest.json；slug 必填。",
+          "en": "Copy packaged BGM/SFX by assetId into .forgeax/games/<slug>/audio/ and upsert audio/manifest.json; slug required."
+        }
+      },
+      {
+        "id": "save-generated-audio",
+        "args": "./schemas/save-generated-audio.args.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "把玩家在生成工作台选中的真实API音频保存到目标游戏的audio/generated目录，并幂等写入manifest。",
+          "en": "Save a user-selected API-generated audio version into a game's audio/generated directory and upsert its manifest entry."
+        }
+      },
+      {
+        "id": "import-custom-audio",
+        "args": "./schemas/import-custom-audio.args.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "按用户明确选择的 BGM 或音效类别导入 OGG、MP3、WAV；导入后立即登记，无额外授权步骤。",
+          "en": "Import OGG, MP3, or WAV under the user-selected BGM or SFX category. Registration is immediate with no extra authorization step."
+        }
+      },
+      {
+        "id": "list-custom-audio",
+        "args": "./schemas/list-custom-audio.args.json",
         "exposedToAI": true,
         "description": {
-          "zh": "把一条 BGM/音效下载到 .forgeax/games/<slug>/audio/ 并 upsert 到 audio/manifest.json(按 assetId 幂等)。assetId/resUrl/name/version 取自 search-audio,勿编造。slug 必填。",
-          "en": "Download a BGM/SFX into .forgeax/games/<slug>/audio/ and upsert audio/manifest.json (idempotent by assetId). Fields from search-audio; slug required."
+          "zh": "列出已登记的玩家自定义 BGM/音效资产；Agent 只能使用这里返回的 assetId。",
+          "en": "List registered player-provided BGM/SFX assets. Agent may only use assetIds returned here."
+        }
+      },
+      {
+        "id": "delete-custom-audio",
+        "args": "./schemas/delete-custom-audio.args.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "删除玩家自定义音频登记及其受控副本。",
+          "en": "Delete a registered custom-audio asset and its controlled copy."
+        }
+      },
+      {
+        "id": "change-custom-audio-kind",
+        "args": "./schemas/change-custom-audio-kind.args.json",
+        "exposedToAI": false,
+        "description": {
+          "zh": "按用户明确选择把自定义音频改为 BGM 或音效，不进行自动分类。",
+          "en": "Change a custom asset to the user-selected BGM or SFX category without automatic classification."
         }
       },
       {
         "id": "list-audio",
         "args": "./schemas/list-audio.args.json",
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": {
-          "zh": "读取 .forgeax/games/<slug>/audio/manifest.json,返回已配入的 BGM/音效清单。slug 必填。配 audio 前先调它,避免重复附加。",
-          "en": "Read .forgeax/games/<slug>/audio/manifest.json — the attached BGM/SFX list. slug required. Call before attaching to avoid duplicates."
+          "zh": "兼容用人工诊断工具：读取指定游戏的audio/manifest.json。AI流程不调用；apply-audio-plan已内置读取、校验和复用。",
+          "en": "Compatibility tool for human diagnostics. AI must not call it; apply-audio-plan already performs manifest read, validation, and reuse internally."
         }
       },
       {
@@ -147,8 +272,36 @@
         "args": "./schemas/bgm-backend.args.json",
         "exposedToAI": false,
         "description": {
-          "zh": "(SPA 专用)Local 音频库原始只读透传:FindAssetMeta/HybridSearch/Search。仅人用面板调用。",
-          "en": "(SPA only) raw read-only passthrough to the Local audio library (FindAssetMeta/HybridSearch/Search)."
+          "zh": "供 SPA 使用的打包本地音频库 FindAssetMeta 只读兼容查询。",
+          "en": "Read-only packaged audio library FindAssetMeta compatibility query for the SPA."
+        }
+      }
+    ],
+    "skills": [
+      {
+        "id": "forgeax:game-audio",
+        "entry": "./skills/forgeax-game-audio/SKILL.md",
+        "trigger": "/game-audio",
+        "displayName": {
+          "zh": "游戏音频接入",
+          "en": "Game Audio Integration"
+        },
+        "description": {
+          "zh": "玩家需求→Audio Plan→精准检索→批量挂载→游戏事件接入→自动审计。",
+          "en": "Player need to Audio Plan, precise retrieval, batch attach, game-event binding, and automated audit."
+        }
+      },
+      {
+        "id": "forgeax:game-audio-prompt",
+        "entry": "./skills/forgeax-game-audio-prompt/SKILL.md",
+        "trigger": "/generate-game-audio",
+        "displayName": {
+          "zh": "游戏音频生成提示词",
+          "en": "Game Audio Prompt Compiler"
+        },
+        "description": {
+          "zh": "统一处理 BGM、SFX、VO 生成需求；生成工作台自动压缩为专业短提示词后调用供应商 API。",
+          "en": "Compile BGM, SFX, and VO needs into compact professional prompts before the generation workbench calls provider APIs."
         }
       }
     ]

@@ -1,6 +1,6 @@
-import { render, waitFor } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { VideoGenSheetProps } from '../../assets/generation/VideoGenSheet'
+import type { VideoAssetLibraryProps } from '../../assets/VideoAssetLibrary'
 
 const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   submit: vi.fn(),
   track: vi.fn(),
   useClipGeneration: vi.fn(),
-  sheetProps: undefined as VideoGenSheetProps | undefined,
+  libraryProps: undefined as VideoAssetLibraryProps | undefined,
 }))
 
 vi.mock('../../persist/graphScenarioStore', () => ({
@@ -64,15 +64,11 @@ vi.mock('../../assets/generation/useClipGeneration', () => ({
   },
 }))
 
-vi.mock('../../assets/generation/VideoGenSheet', () => ({
-  VideoGenSheet: (props: VideoGenSheetProps) => {
-    mocks.sheetProps = props
-    return <div data-testid="generation-sheet" />
-  },
-}))
-
 vi.mock('../../assets/VideoAssetLibrary', () => ({
-  VideoAssetLibrary: () => <div data-testid="video-library" />,
+  VideoAssetLibrary: (props: VideoAssetLibraryProps) => {
+    mocks.libraryProps = props
+    return <div data-testid="video-library" />
+  },
 }))
 
 vi.mock('../GraphVideoPreviewPanel', () => ({
@@ -106,16 +102,31 @@ vi.mock('../media', () => ({
       createdAt: 1,
       updatedAt: 2,
     },
+    {
+      id: 'registry-generated-video',
+      kind: 'video',
+      productionType: 'video_clip',
+      status: 'ready',
+      label: 'Registry generated video',
+      durationMs: 3200,
+      createdAt: 3,
+      updatedAt: 4,
+    },
   ])),
   resolveAssetSrc: () => '/reference.png',
   resolveMediaSrc: () => undefined,
   registryMediaUrl: () => '/registry-video.mp4',
 }))
 
-vi.mock('../../init', () => ({ bootEditorSkins: vi.fn() }))
+vi.mock('../../init', () => ({
+  ['boot' + 'EditorSkins']: vi.fn(),
+}))
 vi.mock('../../../styles/injectStyle', () => ({ injectStyleOnce: vi.fn() }))
 
 import { GraphVideoView } from '../GraphVideoView'
+import { useVideoLibraryNav } from '../../persist/videoLibraryNavStore'
+import { useGraphView } from '../../persist/graphViewStore'
+import { useVideoGenerationStore } from '../../assets/generation/videoGenerationStore'
 
 describe('GraphVideoView generation assembly', () => {
   beforeEach(() => {
@@ -124,32 +135,57 @@ describe('GraphVideoView generation assembly', () => {
     mocks.submit.mockClear()
     mocks.track.mockClear()
     mocks.useClipGeneration.mockClear()
-    mocks.sheetProps = undefined
+    mocks.libraryProps = undefined
+    useVideoLibraryNav.setState({ folder: { kind: 'all' }, entryId: null })
+    useGraphView.setState({ view: 'video' })
+    useVideoGenerationStore.setState({ byGame: {} })
   })
 
-  it('keeps registry and Kino identities distinct and wires recovery, refresh, cancel, and track', async () => {
+  it('feeds globally active Kino tasks to the real library and reopens the selected generation', async () => {
+    useVideoGenerationStore.setState({
+      byGame: {
+        demo: {
+          tasks: [{
+            generationId: 'generation-1',
+            status: 'polling',
+            prompt: '雨夜追逐镜头',
+            createdAt: 123,
+          }],
+          loading: false,
+          error: null,
+          revision: 1,
+          completionRevision: 0,
+        },
+      },
+    })
     render(<GraphVideoView />)
 
-    await waitFor(() => expect(mocks.sheetProps?.imageAssets).toHaveLength(2))
-    expect(mocks.sheetProps?.imageAssets).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'registry-kino-image', resourceId: 'kino-image-resource' }),
-      expect.objectContaining({ id: 'registry-legacy-image', resourceId: undefined }),
-    ]))
-    expect(mocks.sheetProps?.recentClips).toEqual(expect.arrayContaining([
+    await waitFor(() => expect(mocks.libraryProps?.supplementalEntries).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        id: 'kino-generated-video',
-        playbackUrl: '/kino-generated-video.mp4',
+        id: 'generation:generation-1',
+        generationId: 'generation-1',
+        label: '雨夜追逐镜头',
+        status: 'generating',
       }),
-    ]))
-    expect(mocks.sheetProps?.onCancel).toBe(mocks.cancel)
-    expect(mocks.sheetProps?.onTrack).toBe(mocks.track)
+    ])))
 
-    const [, options] = mocks.useClipGeneration.mock.calls.at(-1) as [unknown, {
-      gameSlug: string
-      onTerminal: () => Promise<void>
-    }]
-    expect(options.gameSlug).toBe('demo')
-    await options.onTerminal()
-    expect(mocks.refresh).toHaveBeenCalledOnce()
+    act(() => mocks.libraryProps?.onOpenGeneration?.('generation-1'))
+    expect(useGraphView.getState().view).toBe('video-generate')
+    expect(useVideoGenerationStore.getState().byGame.demo?.selectedGenerationId).toBe('generation-1')
+  })
+
+  it('applies sidebar folder and entry navigation to the real video library surface', async () => {
+    useVideoLibraryNav.setState({ folder: { kind: 'tag', name: '户外' }, entryId: null })
+    render(<GraphVideoView />)
+
+    await waitFor(() => expect(mocks.libraryProps?.requestedFolder).toBe('户外'))
+    act(() => mocks.libraryProps?.onSelect('kino-generated-video'))
+    expect(useVideoLibraryNav.getState().entryId).toBe('kino-generated-video')
+
+    act(() => mocks.libraryProps?.onFolderChange?.('untagged'))
+    expect(useVideoLibraryNav.getState()).toMatchObject({
+      folder: { kind: 'untagged' },
+      entryId: null,
+    })
   })
 })

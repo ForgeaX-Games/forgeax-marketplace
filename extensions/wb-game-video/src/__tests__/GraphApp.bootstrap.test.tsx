@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { GraphApp } from '../GraphApp'
+import { installTipSyncPolling } from '../editor/persist/tipSyncPolling'
 
 const { ensureBoot, bootstrapProps } = vi.hoisted(() => ({
   ensureBoot: vi.fn(),
@@ -28,6 +29,8 @@ const mockScenarioState = vi.hoisted(() => {
     meta: { ui: { overlays: {} }, uiTree: { root: [] } },
     scn: () => ({ graph: { nodes: [] as never[] } }),
     loadEpoch: 0,
+    booted: true,
+    syncTipIfClean: vi.fn(async () => 'unchanged' as const),
   }
 })
 
@@ -41,6 +44,22 @@ vi.mock('../editor/bootstrap/GameBootstrap', () => ({
 vi.mock('../editor/assets/catalog', () => ({
   ZHANDOU_VIDEOS: {},
   zhandouUrl: () => '',
+}))
+vi.mock('../editor/assets/useVideoAssets', () => ({
+  useVideoAssets: () => ({ items: [] }),
+}))
+vi.mock('../editor/assets/use-asset-browser', () => ({
+  useAssetBrowser: () => ({
+    entries: [],
+    directory: {
+      assetLibrary: { version: 1, folders: [], placements: {} },
+      loading: false,
+      saving: false,
+      error: null,
+      refresh: vi.fn(),
+      save: vi.fn(),
+    },
+  }),
 }))
 vi.mock('../editor/shell/GraphStudio', () => ({ GraphStudio: () => <div>blueprint</div> }))
 vi.mock('../editor/shell/GraphVideoView', () => ({ GraphVideoView: () => <div>video</div> }))
@@ -70,10 +89,14 @@ vi.mock('../editor/persist/graphBlueprintSync', () => ({
 }))
 vi.mock('../editor/persist/gameScope', () => ({ getGameSlug: () => 'demo' }))
 vi.mock('../styles/injectStyle', () => ({ injectStyleOnce: vi.fn() }))
+vi.mock('../editor/persist/tipSyncPolling', () => ({
+  installTipSyncPolling: vi.fn(() => () => {}),
+}))
 
 afterEach(() => {
   ensureBoot.mockClear()
   bootstrapProps.mockClear()
+  vi.mocked(installTipSyncPolling).mockClear()
   window.history.replaceState({}, '', '/')
 })
 
@@ -83,11 +106,12 @@ test('boots the left pane without GameBootstrap chrome and lists real blueprints
   expect(screen.getByRole('complementary')).toBeTruthy()
   expect(screen.queryByTestId('bootstrap')).toBeNull()
   expect(ensureBoot).toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '展开 蓝图' }))
   expect(screen.getByText('主蓝图')).toBeTruthy()
   expect(screen.getByText('子蓝图')).toBeTruthy()
   expect(screen.getByRole('button', { name: '新增 蓝图 子项' })).toBeTruthy()
-  expect(screen.getByText('生成视频')).toBeTruthy()
-  expect(screen.getByText('上传视频')).toBeTruthy()
+  expect(screen.getByText('文档')).toBeTruthy()
+  expect(screen.getByText('视频')).toBeTruthy()
   // 行操作仅 hover 显示（display:none），用 hidden:true 断言存在。
   expect(screen.getByRole('button', { name: '重命名 主蓝图', hidden: true })).toBeTruthy()
   expect(screen.queryByRole('button', { name: '删除 主蓝图', hidden: true })).toBeNull()
@@ -102,6 +126,7 @@ test('wraps the center pane with bootstrap before rendering the main surface', (
   render(<GraphApp />)
   expect(screen.getByTestId('bootstrap')).toBeTruthy()
   expect(screen.getByText('blueprint')).toBeTruthy()
+  expect(installTipSyncPolling).toHaveBeenCalled()
 })
 
 test('passes the handshake game id to the single boot owner', () => {

@@ -26,6 +26,7 @@ export interface ClipGenerationRequest {
   size?: KinoVideoSize
   resolution?: KinoVideoResolution
   model?: string
+  visualStyleKey?: string
   label?: string
 }
 
@@ -41,6 +42,7 @@ export interface ClipGenerationWireRequest {
   firstFrameAssetId?: string
   lastFrameAssetId?: string
   referenceImageAssetIds?: string[]
+  visualStyleKey?: string
   label?: string
   requestId: string
 }
@@ -55,6 +57,7 @@ export interface ClipGenerationSubmission {
 export interface VideoGenerationTask {
   generationId: string
   status: VideoGenerationStatus
+  prompt?: string
   model?: string
   providerTaskId?: string
   resultUrl?: string

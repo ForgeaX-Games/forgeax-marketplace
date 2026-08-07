@@ -2,115 +2,93 @@
  * component-host —— 「组件基建」SSOT（注册表宿主 + 每游戏组件加载器 + 宿主 API）。
  * 归属 runtime：来源/依赖/使用都在 runtime 层（只消费 registry / skins；被 editor+runtime 消费）。
  *
- * 分层（对齐 2026-07-22 game-package-storage-design D2/D5/D6/D10）：
- *   · **平台内建集**（`runtime/component-host/components` 的默认表现/交互/overlay 组件）——
- *     作为 built-in / fallback，永远先注册，保证运行时可用。
- *   · **公共组件** `runtime/component-host/components/`（真正跨游戏共享；现可空）。
- *   · **游戏专属组件** 住各游戏仓 `components/` → 构建产物 `dist/components/index.js`，
- *     运行时经 `loadGameComponents(slug)` 动态加载并注册（失败静默回落内建集）。
+ * 启动入口（唯一）：`bootComponents(slug?)`
+ *   · 同步注册平台内建集（必成）→ 进程内共享默认表
+ *   · 有 slug 时再尽力加载游戏专属组件（可失败，fail-soft）
  *
- * 游戏组件包契约：`dist/components/index.js` 导出 `register(host)`，用宿主注入的
- * `ComponentHostApi`（含共享 React / 注册函数）挂组件与渲染器——游戏产物不自带 React
- * 副本，也不重复实现注册表。
+ * Session / 预览 / 引擎一律读同一份默认表（`defaultComponentRegistry` + `defaultSkinRegistry`）；
+ * `createDefaultComponentRegistry` / `createCoreSkinRegistry` 只是「确保已 boot 后返回该共享表」。
+ *
+ * 组件包契约（内建与游戏远程包同一形状）：
+ *   `export default [{ component, manifest }, ...]`
+ *   宿主统一遍历注册；游戏产物不自带注册表逻辑。
  */
-import * as React from 'react'
-import { registerComponent, type ComponentDef } from '../registry/component-registry'
-import { registerOverlayRenderer } from './rendererRegistry'
-import { registerCoreSkins, INTERACTION_SKINS, HP_BAR_COMPONENTS, type SkinPositioning } from './components'
+import type { ComponentType } from 'react'
+import {
+  defaultComponentRegistry,
+  registerComponent,
+  type ComponentDef,
+  type ComponentRegistry,
+} from '../registry/component-registry'
+import type { ComponentManifest } from '../schema/node-config-schema'
+import {
+  defaultSkinRegistry,
+  registerOverlayRenderer,
+  type SkinRegistry,
+} from './rendererRegistry'
+import components from './components'
 import { getWorkbenchHost } from '../../lib/workbench-host'
 
-/** 交互皮肤登记项（编辑器下拉/定位查询用）。commons 内建 + 游戏仓贡献合并。 */
-export interface InteractionSkinEntry {
-  id: string
-  label: string
-  positioning: SkinPositioning
-  defaultAnchor?: { x: number; y: number }
-  defaultEvents: Array<{ id: string; label?: string; condition?: unknown }>
+/** 组件包 catalog 条目（与 `components/index.ts` / 游戏仓 dist 同源）。 */
+export type ComponentCatalogEntry = {
+  component: ComponentType<Record<string, unknown>>
+  manifest: { id: string } & Record<string, unknown>
 }
 
-/** 血条类 overlay 登记项。 */
-export interface HpBarEntry {
-  id: string
-  label: string
+/** 从 ESM 模块取出 catalog 数组（`export default [...]`）。 */
+export function pickComponentCatalog(mod: unknown): readonly ComponentCatalogEntry[] | null {
+  if (!mod || typeof mod !== 'object') return null
+  const candidate = 'default' in mod ? (mod as { default: unknown }).default : mod
+  if (!Array.isArray(candidate)) return null
+  for (const entry of candidate) {
+    if (!entry || typeof entry !== 'object') return null
+    const { component, manifest } = entry as Partial<ComponentCatalogEntry>
+    if (typeof component !== 'function' && (typeof component !== 'object' || component == null)) return null
+    if (!manifest || typeof manifest !== 'object' || typeof manifest.id !== 'string') return null
+  }
+  return candidate as ComponentCatalogEntry[]
 }
 
-export interface ComponentHostApi {
-  /** 共享 React（游戏产物 externalize react → 用这份，避免双实例）。 */
-  React: typeof React
-  registerComponent: (id: string, def: ComponentDef) => void
-  registerOverlayRenderer: typeof registerOverlayRenderer
-  /** 游戏可贡献交互皮肤元信息（进编辑器下拉/定位）。同 id 幂等。 */
-  registerInteractionSkin: (entry: InteractionSkinEntry) => void
-  /** 游戏可贡献血条组件元信息（进编辑器下拉）。同 id 幂等。 */
-  registerHpBar: (entry: HpBarEntry) => void
-}
-
-// 游戏仓贡献的元信息（loadGameComponents 时经 register(host) 累积）；合并在 commons 内建之上。
-const gameInteractionSkins: InteractionSkinEntry[] = []
-const gameHpBars: HpBarEntry[] = []
-
-/** 合并后的交互皮肤清单（commons 内建 + 游戏贡献）。编辑器由此派生下拉/定位，不再静态 import。 */
-export function interactionSkins(): InteractionSkinEntry[] {
-  return [...(INTERACTION_SKINS as InteractionSkinEntry[]), ...gameInteractionSkins]
-}
-
-/** 合并后的血条组件清单。 */
-export function hpBarComponents(): HpBarEntry[] {
-  return [...(HP_BAR_COMPONENTS as HpBarEntry[]), ...gameHpBars]
-}
-
-/** 皮肤定位类型（未知/未选→'fixed'）。 */
-export function skinPositioning(id: string | undefined): SkinPositioning {
-  return interactionSkins().find((s) => s.id === id)?.positioning ?? 'fixed'
-}
-
-/** point 皮肤默认锚点；无则 undefined。 */
-export function skinDefaultAnchor(id: string | undefined): { x: number; y: number } | undefined {
-  return interactionSkins().find((s) => s.id === id)?.defaultAnchor
-}
-
-export interface GameComponentModule {
-  register?: (host: ComponentHostApi) => void
-  default?: { register?: (host: ComponentHostApi) => void } | ((host: ComponentHostApi) => void)
-}
-
-function hostApi(): ComponentHostApi {
-  return {
-    React,
-    registerComponent,
-    registerOverlayRenderer,
-    registerInteractionSkin: (entry) => {
-      if (!gameInteractionSkins.some((s) => s.id === entry.id)) gameInteractionSkins.push(entry)
-    },
-    registerHpBar: (entry) => {
-      if (!gameHpBars.some((s) => s.id === entry.id)) gameHpBars.push(entry)
-    },
+function registerCatalog(entries: readonly ComponentCatalogEntry[]): void {
+  for (const { component, manifest } of entries) {
+    registerComponent(manifest.id, manifest as unknown as ComponentDef)
+    registerOverlayRenderer(manifest.id, component, manifest as unknown as ComponentManifest)
   }
 }
 
 let builtinsBooted = false
-/** 注册平台内建组件集（幂等，永远先跑）。 */
-export function registerBuiltins(): void {
+/** 同步、幂等：把内建 catalog 装进默认契约表与渲染表。 */
+function ensureBuiltins(): void {
   if (builtinsBooted) return
   builtinsBooted = true
-  registerCoreSkins()
+  registerCatalog(components as readonly ComponentCatalogEntry[])
+}
+
+/**
+ * 返回进程内共享契约表（与 `bootComponents` 同一份）。
+ * 首次调用会同步装入内建集；之后与其它调用方共享同一实例。
+ */
+export function createDefaultComponentRegistry(): ComponentRegistry {
+  ensureBuiltins()
+  return defaultComponentRegistry
+}
+
+/**
+ * 返回进程内共享渲染表（与 `bootComponents` 同一份）。
+ * 首次调用会同步装入内建集；之后与其它调用方共享同一实例。
+ */
+export function createCoreSkinRegistry(): SkinRegistry {
+  ensureBuiltins()
+  return defaultSkinRegistry
 }
 
 const loadedGames = new Set<string>()
 
-function pickRegister(mod: GameComponentModule): ((host: ComponentHostApi) => void) | null {
-  if (typeof mod.register === 'function') return mod.register
-  if (typeof mod.default === 'function') return mod.default
-  if (typeof mod.default === 'object' && typeof mod.default?.register === 'function') return mod.default.register
-  return null
-}
-
 /**
- * 加载并注册某游戏仓的专属组件。模块来源由 Workbench Host 决定；
- * 开发期可转译源码，生产环境提供构建产物。
- * 都拿不到 / 无 `register` → 静默 false，运行时继续用内建集（fail-soft）。
+ * 尽力加载并注册某游戏仓的专属组件（幂等 per slug）。
+ * 模块须 `export default [{ component, manifest }, ...]`；失败则静默回落内建集。
  */
-export async function loadGameComponents(slug: string | undefined): Promise<boolean> {
+async function loadGameComponents(slug: string | undefined): Promise<boolean> {
   if (!slug || loadedGames.has(slug)) return false
   loadedGames.add(slug)
   const url = (() => {
@@ -122,10 +100,10 @@ export async function loadGameComponents(slug: string | undefined): Promise<bool
   })()
   if (url) {
     try {
-      const mod = (await import(/* @vite-ignore */ url)) as GameComponentModule
-      const reg = pickRegister(mod)
-      if (reg) {
-        reg(hostApi())
+      const mod = await import(/* @vite-ignore */ url)
+      const catalog = pickComponentCatalog(mod)
+      if (catalog) {
+        registerCatalog(catalog)
         return true
       }
     } catch {
@@ -136,8 +114,12 @@ export async function loadGameComponents(slug: string | undefined): Promise<bool
   return false
 }
 
-/** Boot：先内建集（必成），再尽力加载游戏专属组件（可失败）。 */
+/**
+ * 组件启动唯一入口（幂等）。
+ * 同步注册平台内建集；有 `slug` 时再异步加载游戏专属组件。
+ * 全部写入共享默认表，供 Session / 预览 / 引擎共用。
+ */
 export async function bootComponents(slug?: string): Promise<void> {
-  registerBuiltins()
+  ensureBuiltins()
   await loadGameComponents(slug)
 }

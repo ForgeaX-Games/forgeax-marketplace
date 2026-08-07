@@ -3,12 +3,14 @@ import type { MediaAsset } from '../registry-types'
 import { fetchRegistryAssets } from '../registry-assets'
 
 const mocks = vi.hoisted(() => ({
-  pluginFetch: vi.fn(),
+  extensionFetch: vi.fn(),
   readExtensionJson: vi.fn(),
 }))
 
-vi.mock('../../../lib/plugin-http', () => ({ pluginFetch: mocks.pluginFetch }))
-vi.mock('../../../lib/workbench-host', () => ({ readExtensionJson: mocks.readExtensionJson }))
+vi.mock('../../../lib/workbench-host', () => ({
+  getWorkbenchHost: () => ({ extension: { fetch: mocks.extensionFetch } }),
+  readExtensionJson: mocks.readExtensionJson,
+}))
 
 const GENERATED_CLIP: MediaAsset = {
   id: 'a-vid-generated',
@@ -21,9 +23,9 @@ const GENERATED_CLIP: MediaAsset = {
 
 describe('fetchRegistryAssets', () => {
   beforeEach(() => {
-    mocks.pluginFetch.mockReset()
+    mocks.extensionFetch.mockReset()
     mocks.readExtensionJson.mockReset()
-    mocks.pluginFetch.mockResolvedValue(new Response('{}'))
+    mocks.extensionFetch.mockResolvedValue(new Response('{}'))
   })
 
   it('calls the host-owned assets endpoint and preserves the requested kind', async () => {
@@ -32,7 +34,7 @@ describe('fetchRegistryAssets', () => {
     const assets = await fetchRegistryAssets('demo-game', 'video')
 
     expect(assets).toEqual([GENERATED_CLIP])
-    expect(mocks.pluginFetch).toHaveBeenCalledWith('assets?kind=video')
+    expect(mocks.extensionFetch).toHaveBeenCalledWith('assets?kind=video')
   })
 
   it('omits the optional kind query when no kind is requested', async () => {
@@ -40,7 +42,7 @@ describe('fetchRegistryAssets', () => {
 
     await fetchRegistryAssets()
 
-    expect(mocks.pluginFetch).toHaveBeenCalledWith('assets')
+    expect(mocks.extensionFetch).toHaveBeenCalledWith('assets')
   })
 
   it('throws host transport errors instead of treating them as an empty registry', async () => {

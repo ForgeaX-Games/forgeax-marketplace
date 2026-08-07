@@ -14,10 +14,12 @@ vi.mock('../styles/global.css', () => ({}))
 
 import { mount } from '../mount'
 import { resetHostInitForTests } from '../lib/forgeax-http'
+import { resetHostInjectionForTests } from '../host-init'
 
 afterEach(() => {
   graphAppProps.length = 0
   resetHostInitForTests()
+  resetHostInjectionForTests()
   document.body.innerHTML = ''
 })
 
@@ -43,4 +45,20 @@ test('leaves GraphApp on its URL-derived defaults when the host says nothing', (
 
   expect(graphAppProps[0]).toMatchObject({ pane: undefined, gameId: undefined })
   act(() => handle.unmount())
+})
+
+test('stores inspectorEl and onNodeSelect for the GraphStudio external panel', async () => {
+  const { getInspectorMountOptions } = await import('../host-init')
+  const inspectorEl = document.createElement('div')
+  document.body.append(inspectorEl)
+  const onNodeSelect = vi.fn()
+
+  const handle = mountInto({ inspectorEl, onNodeSelect })
+
+  expect(getInspectorMountOptions()).toEqual({ inspectorEl, onNodeSelect })
+  act(() => handle.unmount())
+  expect(getInspectorMountOptions()).toEqual({
+    inspectorEl: undefined,
+    onNodeSelect: undefined,
+  })
 })

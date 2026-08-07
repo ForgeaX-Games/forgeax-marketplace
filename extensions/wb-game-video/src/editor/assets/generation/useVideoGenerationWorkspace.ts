@@ -5,20 +5,29 @@ import { useClipGeneration } from './useClipGeneration'
 import type { VgenImageAsset } from './VgenImagePicker'
 import { listRegistryAssets, resolveAssetSrc } from '../../shell/media'
 import type { RecentGeneratedClip } from './VideoGenSheet'
+import { useVideoGenerationStore } from './videoGenerationStore'
 
 export function useVideoGenerationWorkspace(game: string, videoController: VideoAssetsController) {
   const [regAssets, setRegAssets] = useState<MediaAsset[]>([])
+  const generationEntry = useVideoGenerationStore((state) => state.byGame[game])
+  const selectedTask = generationEntry?.selectedTask
 
   useEffect(() => {
     let alive = true
+    const controller = new AbortController()
     const pull = async (): Promise<void> => {
-      const assets = await listRegistryAssets(game)
-      if (alive) setRegAssets(assets)
+      try {
+        const assets = await listRegistryAssets(game, undefined, { signal: controller.signal })
+        if (alive) setRegAssets(assets)
+      } catch (error) {
+        if (!controller.signal.aborted) throw error
+      }
     }
     void pull()
     const timer = window.setInterval(() => void pull(), 5000)
     return () => {
       alive = false
+      controller.abort()
       window.clearInterval(timer)
     }
   }, [game])
@@ -75,6 +84,8 @@ export function useVideoGenerationWorkspace(game: string, videoController: Video
   const clipGeneration = useClipGeneration(regAssets, {
     gameSlug: game,
     onTerminal: videoController.refresh,
+    restoredTask: selectedTask,
+    activeTasks: generationEntry?.tasks,
   })
 
   return { regAssets, imageAssets, recentClips, clipGeneration }

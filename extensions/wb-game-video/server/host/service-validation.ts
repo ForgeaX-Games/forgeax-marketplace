@@ -10,11 +10,13 @@ import importCharacterRefsSchema from '../../schemas/import-character-refs.args.
 import importSceneRefsSchema from '../../schemas/import-scene-refs.args.json'
 import listAssetsSchema from '../../schemas/list-assets.args.json'
 import listVideosSchema from '../../schemas/list-videos.args.json'
+import patchGraphSchema from '../../schemas/patch-graph.args.json'
 import saveGraphSchema from '../../schemas/save-graph.args.json'
 
 export type ServiceSchemaName =
   | 'getGraph'
   | 'saveGraph'
+  | 'patchGraph'
   | 'listAssets'
   | 'listVideos'
   | 'getAsset'
@@ -30,6 +32,7 @@ const ajv = new Ajv2020({ allErrors: true, strict: true })
 const validators: Record<ServiceSchemaName, ValidateFunction> = {
   getGraph: ajv.compile(getGraphSchema),
   saveGraph: ajv.compile(saveGraphSchema),
+  patchGraph: ajv.compile(patchGraphSchema),
   listAssets: ajv.compile(listAssetsSchema),
   listVideos: ajv.compile(listVideosSchema),
   getAsset: ajv.compile(getAssetSchema),

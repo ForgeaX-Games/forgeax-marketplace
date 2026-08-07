@@ -101,6 +101,13 @@ describe('useVideoAssets', () => {
     expect(defaultKinoList).toHaveBeenCalledTimes(1)
   })
 
+  it('does not query the media API with an empty game id', async () => {
+    const { result } = renderHook(() => useVideoAssets(''))
+
+    expect(result.current.loading).toBe(false)
+    expect(defaultKinoList).not.toHaveBeenCalled()
+  })
+
   it('adds updated_at as a playback URL revision', async () => {
     const client = makeClient()
     const { result } = renderHook(() => useVideoAssets('demo', { client }))

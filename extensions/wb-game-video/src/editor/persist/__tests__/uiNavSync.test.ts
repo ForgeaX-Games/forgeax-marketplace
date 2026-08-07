@@ -120,10 +120,12 @@ describe('uiNav split-pane sync', () => {
   it('applies add and remove commands only in the center store', () => {
     installPair()
 
-    expect(sendUiNavCommand({ type: 'add-scheme', parentId: 'folder' })).toBe(true)
+    expect(sendUiNavCommand({ type: 'add-scheme', parentId: 'folder', name: '战斗结算' })).toBe(true)
     const selection = useUiSelection.getState()
     expect(selection.selectedOverlayId).toBeTruthy()
-    expect(useGraphScenario.getState().meta.ui?.overlays?.[selection.selectedOverlayId!]).toBeTruthy()
+    expect(useGraphScenario.getState().meta.ui?.overlays?.[selection.selectedOverlayId!]).toMatchObject({
+      title: '战斗结算',
+    })
     expect(findUiTreeNode(
       useGraphScenario.getState().meta.uiTree!,
       selection.selectedTreeNodeId!,

@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { createPortal } from 'react-dom'
+import cardCopyPathIcon from '../../assets/asset-card-copy-path.svg?url'
+import cardMoreIcon from '../../assets/asset-card-more.svg?url'
 import externalToolbarIcon from '../../assets/asset-toolbar-external.svg?url'
 import generateToolbarIcon from '../../assets/asset-toolbar-generate.svg?url'
 import localToolbarIcon from '../../assets/asset-toolbar-local.svg?url'
-import presetToolbarIcon from '../../assets/asset-toolbar-preset.svg?url'
 import searchToolbarIcon from '../../assets/asset-toolbar-search.svg?url'
 import type { AssetLibraryController, ManagedAssetKind } from './assetLibraryClient'
 import {
@@ -48,8 +50,32 @@ const AUDIO_WAVEFORM_BARS = [
 
 const DEFAULT_ASSET_ROOT = ASSET_DIRECTORY_ROOTS[0]!
 
+async function copyText(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Sandboxed workbench iframes can reject the async Clipboard API.
+    }
+  }
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const copied = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return copied
+  } catch {
+    return false
+  }
+}
+
 interface FolderDialogState {
-  mode: 'create' | 'rename' | 'delete'
+  mode: 'create' | 'rename' | 'delete' | 'move'
   folder?: AssetLibraryFolder
 }
 
@@ -142,8 +168,16 @@ export function AssetLibraryPanel({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [selectionMode, setSelectionMode] = useState(false)
   const [menuFolderId, setMenuFolderId] = useState<string | null>(null)
+  const [menuAssetId, setMenuAssetId] = useState<string | null>(null)
+  const [cardMenuPosition, setCardMenuPosition] = useState<{ top: number, left: number } | null>(null)
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false)
+  const [toolbarMenuPosition, setToolbarMenuPosition] = useState<{ top: number, left: number } | null>(null)
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null)
   const [folderName, setFolderName] = useState('')
+  const [moveDestinationId, setMoveDestinationId] = useState('')
+  const [moveFolderDraft, setMoveFolderDraft] = useState('')
+  const [moveFolderCreateOpen, setMoveFolderCreateOpen] = useState(false)
+  const [movingAsset, setMovingAsset] = useState<BrowserAsset | null>(null)
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [draggingAssetId, setDraggingAssetId] = useState<string | null>(null)
@@ -156,6 +190,7 @@ export function AssetLibraryPanel({
   const [error, setError] = useState<string | null>(null)
   const [unavailableAction, setUnavailableAction] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const renameAssetInputRef = useRef<HTMLInputElement | null>(null)
   const suppressAssetOpenRef = useRef(false)
 
   useEffect(() => {
@@ -180,11 +215,29 @@ export function AssetLibraryPanel({
     if (!menuFolderId) return
     const closeOnOutsidePointerDown = (event: PointerEvent) => {
       const target = event.target as Element | null
-      if (!target?.closest('.alx-folder-menu, .alx-more')) setMenuFolderId(null)
+      if (!target?.closest('.alx-card-menu, .alx-card-menu-trigger')) setMenuFolderId(null)
     }
     document.addEventListener('pointerdown', closeOnOutsidePointerDown)
     return () => document.removeEventListener('pointerdown', closeOnOutsidePointerDown)
   }, [menuFolderId])
+  useEffect(() => {
+    if (!menuAssetId) return
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null
+      if (!target?.closest('.alx-card-menu, .alx-card-menu-trigger')) setMenuAssetId(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointerDown)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointerDown)
+  }, [menuAssetId])
+  useEffect(() => {
+    if (!toolbarMenuOpen) return
+    const closeOnOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null
+      if (!target?.closest('.alx-toolbar-menu, .alx-toolbar-more')) setToolbarMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointerDown)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointerDown)
+  }, [toolbarMenuOpen])
   const isLibraryHome = currentId === 'root:library'
   const currentFolder = directory.assetLibrary.folders.find((folder) => folder.id === currentId)
   const currentRoot: AssetDirectoryRoot = rootForId(currentId)
@@ -217,6 +270,43 @@ export function AssetLibraryPanel({
     setSelectedIds(new Set())
     setMenuFolderId(null)
   }
+  const copyRelativePath = async (path: string) => {
+    const copied = await copyText(path)
+    setUnavailableAction(copied ? '已复制相对路径' : '无法复制路径到剪切板')
+  }
+  const toggleCardMenu = (
+    event: ReactMouseEvent<HTMLButtonElement>,
+    id: string,
+    kind: 'asset' | 'folder',
+  ) => {
+    const active = kind === 'folder' ? menuFolderId === id : menuAssetId === id
+    if (active) {
+      setMenuFolderId(null)
+      setMenuAssetId(null)
+      setCardMenuPosition(null)
+      return
+    }
+    const rect = event.currentTarget.getBoundingClientRect()
+    setCardMenuPosition({
+      top: rect.bottom + 6,
+      left: Math.min(rect.left, window.innerWidth - 130),
+    })
+    setMenuFolderId(kind === 'folder' ? id : null)
+    setMenuAssetId(kind === 'asset' ? id : null)
+  }
+  const toggleToolbarMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (toolbarMenuOpen) {
+      setToolbarMenuOpen(false)
+      setToolbarMenuPosition(null)
+      return
+    }
+    const rect = event.currentTarget.getBoundingClientRect()
+    setToolbarMenuPosition({
+      top: rect.bottom + 8,
+      left: Math.min(rect.right - 114, window.innerWidth - 130),
+    })
+    setToolbarMenuOpen(true)
+  }
   useEffect(() => {
     setAssetName(selectedAsset?.name ?? '')
   }, [selectedAsset?.id, selectedAsset?.name])
@@ -229,10 +319,18 @@ export function AssetLibraryPanel({
           ? renameDirectoryFolder(directory.assetLibrary, folderDialog.folder.id, folderName)
           : folderDialog.mode === 'delete' && folderDialog.folder
             ? removeDirectoryFolder(directory.assetLibrary, folderDialog.folder.id)
+            : folderDialog.mode === 'move' && folderDialog.folder
+              ? moveDirectoryFolder(
+                directory.assetLibrary,
+                folderDialog.folder.id,
+                rootForId(moveDestinationId) ? undefined : moveDestinationId,
+              )
             : directory.assetLibrary
       const saved = await directory.save(next)
       if (saved) {
-        if (folderDialog.mode === 'delete' && folderDialog.folder?.id === currentId) openFolder(`root:${folderDialog.folder.rootKind}`)
+        if ((folderDialog.mode === 'delete' || folderDialog.mode === 'move') && folderDialog.folder?.id === currentId) {
+          openFolder(folderDialog.mode === 'move' ? moveDestinationId : `root:${folderDialog.folder.rootKind}`)
+        }
         setFolderDialog(null)
       }
     } catch (cause) {
@@ -318,6 +416,64 @@ export function AssetLibraryPanel({
     }
     return true
   }
+  const moveFolder = folderDialog?.mode === 'move' ? folderDialog.folder : undefined
+  const moveRootKind = moveFolder?.rootKind ?? movingAsset?.kind
+  const moveDestinations = moveRootKind
+    ? [
+      { id: `root:${moveRootKind}`, name: `${rootForId(`root:${moveRootKind}`)?.name ?? moveRootKind}（一级）` },
+      ...directory.assetLibrary.folders
+        .filter((candidate) => candidate.rootKind === moveRootKind && (!moveFolder || canDropFolderIntoFolder(moveFolder, candidate)))
+        .map((candidate) => ({ id: candidate.id, name: candidate.name })),
+    ]
+    : []
+  const renderMoveFolders = (parentId: string | undefined, depth = 1): JSX.Element[] => {
+    if (!moveRootKind) return []
+    return childrenOf(directory.assetLibrary, parentId ?? `root:${moveRootKind}`, moveRootKind)
+      .filter((folder) => !moveFolder || canDropFolderIntoFolder(moveFolder, folder))
+      .flatMap((folder) => [
+        <button
+          type="button"
+          className={`alx-move-tree-row${moveDestinationId === folder.id ? ' is-selected' : ''}`}
+          key={folder.id}
+          style={{ paddingLeft: `${16 + depth * 16}px` }}
+          onClick={() => setMoveDestinationId(folder.id)}
+        >
+          <span aria-hidden>⌄</span>{folder.name}
+        </button>,
+        ...renderMoveFolders(folder.id, depth + 1),
+      ])
+  }
+  const createFolderDuringMove = async () => {
+    if (!moveRootKind || !moveFolderDraft.trim()) return
+    try {
+      const next = createDirectoryFolder(directory.assetLibrary, {
+        parentId: moveDestinationId,
+        rootKind: moveRootKind,
+        name: moveFolderDraft,
+      })
+      const created = next.folders.at(-1)
+      const saved = await directory.save(next)
+      if (!saved || !created) return
+      setMoveDestinationId(created.id)
+      setMoveFolderDraft('')
+      setMoveFolderCreateOpen(false)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '文件夹操作失败')
+    }
+  }
+  const moveAssetDuringMove = async () => {
+    if (!movingAsset) return
+    try {
+      const saved = await directory.save(moveAsset(
+        directory.assetLibrary,
+        movingAsset.id,
+        rootForId(moveDestinationId) ? undefined : moveDestinationId,
+      ))
+      if (saved) setMovingAsset(null)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '资产移动失败')
+    }
+  }
   const dropFolderIntoFolder = async (
     event: DragEvent<HTMLElement>,
     targetFolder: AssetLibraryFolder,
@@ -356,6 +512,7 @@ export function AssetLibraryPanel({
     const acceptsAssetDrop = draggingEntry != null && assetEntryRoot(draggingEntry) === rootKind
     const acceptsFolderDrop = folder != null && draggingFolder != null && canDropFolderIntoFolder(draggingFolder, folder)
     const acceptsDrop = acceptsAssetDrop || acceptsFolderDrop
+    const path = `assets/${folderPath(folder, directory.assetLibrary.folders).map((item) => item.name).join('/')}`
     return (
       <article
         className={`alx-folder-card${dropFolderId === id ? ' is-drop-target' : ''}${acceptsDrop ? ' is-drop-ready' : ''}`}
@@ -405,14 +562,15 @@ export function AssetLibraryPanel({
           </span>
           <span>{name}</span>
         </button>
-        {folder ? <>
-          <button type="button" className="alx-more" aria-label={`${folder.name} 菜单`} onClick={() => setMenuFolderId((current) => current === folder.id ? null : folder.id)}>⋯</button>
-          {menuFolderId === folder.id ? <div className="alx-folder-menu" role="menu">
+        {folder ? <div className="alx-card-actions">
+          <button type="button" className="alx-card-copy" aria-label={`复制 ${folder.name} 路径`} title="复制相对路径" onClick={() => void copyRelativePath(path)}><img src={cardCopyPathIcon} alt="" /></button>
+          <button type="button" className="alx-card-menu-trigger" aria-label={`${folder.name} 菜单`} onClick={(event) => toggleCardMenu(event, folder.id, 'folder')}><img src={cardMoreIcon} alt="" /></button>
+          {menuFolderId === folder.id && cardMenuPosition && typeof document !== 'undefined' ? createPortal(<div className="alx-card-menu" role="menu" style={cardMenuPosition}>
             <button type="button" onClick={() => { setFolderName(folder.name); setFolderDialog({ mode: 'rename', folder }); setMenuFolderId(null) }}>重命名</button>
+            <button type="button" onClick={() => { setMoveDestinationId(`root:${folder.rootKind}`); setMoveFolderDraft(''); setMoveFolderCreateOpen(false); setFolderDialog({ mode: 'move', folder }); setMenuFolderId(null) }}>移动</button>
             <button type="button" onClick={() => { setFolderDialog({ mode: 'delete', folder }); setMenuFolderId(null) }}>删除</button>
-            <button type="button" onClick={() => { openFolder(folder.id); setFolderName(''); setFolderDialog({ mode: 'create' }); setMenuFolderId(null) }}>新增子文件夹</button>
-          </div> : null}
-        </> : null}
+          </div>, document.body) : null}
+        </div> : null}
       </article>
     )
   }
@@ -421,7 +579,7 @@ export function AssetLibraryPanel({
     <div className="alx-root">
       <section className="alx-workspace" aria-label={isLibraryHome ? '资产库' : `${currentRoot.name}资产`}>
         <header className="alx-toolbar">
-          <div className="alx-action-group">
+          {!isLibraryHome ? <div className="alx-action-group">
             <button
               type="button"
               onClick={() => {
@@ -434,12 +592,34 @@ export function AssetLibraryPanel({
             ><span className="alx-action-icon"><img src={generateToolbarIcon} alt="" /></span>生成</button>
             <button type="button" disabled={actionsDisabled || isLibraryHome} onClick={() => fileInputRef.current?.click()}><span className="alx-action-icon"><img src={localToolbarIcon} alt="" /></span>本地</button>
             <button type="button" onClick={() => setUnavailableAction('外部资产搜索服务尚未接入')}><span className="alx-action-icon"><img src={externalToolbarIcon} alt="" /></span>外部</button>
-            <button type="button" className="alx-preset" onClick={() => setUnavailableAction(`${isLibraryHome ? '资产' : currentRoot.name}预设服务尚未接入`)}><span className="alx-action-icon"><img src={presetToolbarIcon} alt="" /></span>{isLibraryHome ? '资产' : currentRoot.name}预设</button>
             <input ref={fileInputRef} type="file" accept={accept} multiple hidden aria-label="上传资产" onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void upload(files) }} />
-          </div>
+          </div> : null}
           <div className="alx-toolbar-end">
-            <button type="button" className={selectionMode ? 'is-on' : ''} disabled={actionsDisabled} onClick={() => { setSelectionMode((current) => !current); setSelectedIds(new Set()) }}>{selectionMode ? '完成' : '多选'}</button>
-            <button type="button" disabled={actionsDisabled || isLibraryHome} onClick={() => { setFolderName(''); setFolderDialog({ mode: 'create' }) }}>＋ 新增文件夹</button>
+            <div className="alx-toolbar-menu-anchor">
+              <button type="button" className={`alx-toolbar-more${toolbarMenuOpen ? ' is-on' : ''}`} aria-label="资产库更多操作" aria-expanded={toolbarMenuOpen} onClick={toggleToolbarMenu}>•••</button>
+              {toolbarMenuOpen && toolbarMenuPosition && typeof document !== 'undefined' ? createPortal(<div className="alx-toolbar-menu" role="menu" style={toolbarMenuPosition}>
+                <button type="button" disabled={!currentFolder || actionsDisabled} onClick={() => {
+                  if (!currentFolder) return
+                  setFolderName(currentFolder.name)
+                  setFolderDialog({ mode: 'rename', folder: currentFolder })
+                  setToolbarMenuOpen(false)
+                }}>重命名</button>
+                <button type="button" disabled={!currentFolder || actionsDisabled} onClick={() => {
+                  if (!currentFolder) return
+                  setFolderDialog({ mode: 'delete', folder: currentFolder })
+                  setToolbarMenuOpen(false)
+                }}>删除</button>
+                <button type="button" disabled={!currentFolder || actionsDisabled} onClick={() => {
+                  if (!currentFolder) return
+                  setMoveDestinationId(`root:${currentFolder.rootKind}`)
+                  setMoveFolderDraft('')
+                  setMoveFolderCreateOpen(false)
+                  setFolderDialog({ mode: 'move', folder: currentFolder })
+                  setToolbarMenuOpen(false)
+                }}>移动</button>
+              </div>, document.body) : null}
+            </div>
+            {!isLibraryHome ? <button type="button" className="alx-new-folder-button" disabled={actionsDisabled} onClick={() => { setFolderName(''); setFolderDialog({ mode: 'create' }) }}>＋ 新增文件夹</button> : null}
             <label className="alx-search"><span className="alx-search-icon"><img src={searchToolbarIcon} alt="" /></span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索资产" aria-label="搜索资产" />{query ? <button type="button" className="alx-search-clear" aria-label="清空搜索" onMouseDown={(event) => event.preventDefault()} onClick={() => setQuery('')}>×</button> : null}</label>
           </div>
         </header>
@@ -476,10 +656,10 @@ export function AssetLibraryPanel({
           })}
         </nav>
 
-        {directory.error || controller.error || error ? <div className="alx-message is-error" role="alert">{error ?? directory.error ?? controller.error}</div> : null}
+        {error ? <div className="alx-message is-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>关闭</button></div> : directory.error || controller.error ? <div className="alx-message is-error" role="alert">{directory.error ?? controller.error}</div> : null}
         {unavailableAction ? <div className="alx-message" role="status">{unavailableAction}<button type="button" onClick={() => setUnavailableAction(null)}>关闭</button></div> : null}
         {directory.loading ? <div className="alx-message" role="status">正在加载资产目录…</div> : null}
-        {selectionMode ? <div className="alx-selection-bar">已选 {selectedIds.size} 项 <button type="button" disabled={actionsDisabled || selectedIds.size === 0} onClick={() => setPendingBatchDelete(true)}>删除选中</button></div> : null}
+        {selectionMode ? <div className="alx-selection-bar">已选 {selectedIds.size} 项 <button type="button" disabled={actionsDisabled || selectedIds.size === 0} onClick={() => setPendingBatchDelete(true)}>删除选中</button><button type="button" onClick={() => { setSelectionMode(false); setSelectedIds(new Set()) }}>完成</button></div> : null}
 
         <div className="alx-grid" aria-label={isLibraryHome ? '资产库内容' : `${currentRoot.name}内容`}>
           {isLibraryHome && !isSearching ? ASSET_DIRECTORY_ROOTS.map((root) => renderFolderCard(root.id, root.name, root.kind)) : null}
@@ -489,6 +669,12 @@ export function AssetLibraryPanel({
             const isMedia = entry.source === 'media'
             const asset = isMedia ? entry.asset : null
             const name = assetEntryName(entry)
+            const containingFolder = directory.assetLibrary.folders.find((folder) => folder.id === directory.assetLibrary.placements[key])
+            const assetPath = entry.source === 'project-component'
+              ? `assets/控件/${name}`
+              : `assets/${containingFolder
+                ? folderPath(containingFolder, directory.assetLibrary.folders).map((item) => item.name).join('/')
+                : rootForId(`root:${asset!.kind}`)?.name ?? typeLabel(asset!.kind)}/${name}`
             return (
             <article
               className={`alx-asset-card${selectedIds.has(key) || selectedEntryId === key ? ' is-selected' : ''}${draggingAssetId === key ? ' is-dragging' : ''}`}
@@ -534,7 +720,23 @@ export function AssetLibraryPanel({
                 <span className="alx-asset-thumb">{entry.source === 'project-component' ? <ProjectComponentPreview component={entry.component} variant="card" /> : asset?.kind === 'image' && asset.url ? <img src={asset.url} alt="" /> : asset?.kind === 'video' ? <VideoThumbnail asset={asset} /> : asset?.kind === 'font' ? 'Aa' : <AudioWaveform />}</span>
                 <span>{name}</span><small>{entry.source === 'project-component' ? '控件' : typeLabel(asset!.kind)}</small>
               </div>
-              {asset && !asset.readOnly && !selectionMode ? <button type="button" className="alx-card-close" aria-label={`删除 ${name}`} onClick={() => setPendingDelete(asset)}>×</button> : null}
+              {!selectionMode ? <div className="alx-card-actions">
+                <button type="button" className="alx-card-copy" aria-label={`复制 ${name} 路径`} title="复制相对路径" onClick={() => void copyRelativePath(assetPath)}><img src={cardCopyPathIcon} alt="" /></button>
+                <button type="button" className="alx-card-menu-trigger" aria-label={`${name} 菜单`} onClick={(event) => toggleCardMenu(event, key, 'asset')}><img src={cardMoreIcon} alt="" /></button>
+                {menuAssetId === key && cardMenuPosition && typeof document !== 'undefined' ? createPortal(<div className="alx-card-menu" role="menu" style={cardMenuPosition}>
+                  <button type="button" disabled={!asset || asset.readOnly} onClick={() => { if (asset) setRenameAsset(asset); setMenuAssetId(null) }}>重命名</button>
+                  <button type="button" disabled={!asset || asset.readOnly} onClick={() => {
+                    if (!asset) return
+                    setMoveDestinationId(`root:${asset.kind}`)
+                    setMoveFolderDraft('')
+                    setMoveFolderCreateOpen(false)
+                    setMovingAsset(asset)
+                    setMenuAssetId(null)
+                  }}>移动</button>
+                  <button type="button" disabled={!asset || asset.readOnly} onClick={() => { if (asset) setPendingDelete(asset); setMenuAssetId(null) }}>删除</button>
+                  <button type="button" disabled={actionsDisabled} onClick={() => { setSelectionMode(true); setSelectedIds(new Set([key])); setMenuAssetId(null) }}>多选</button>
+                </div>, document.body) : null}
+              </div> : null}
             </article>
           )})}
         </div>
@@ -557,14 +759,40 @@ export function AssetLibraryPanel({
         }}
       /> : null}
 
-      {folderDialog ? <div className="alx-dialog-backdrop"><form className="alx-dialog" role="dialog" aria-label={folderDialog.mode === 'create' ? '新增文件夹' : folderDialog.mode === 'rename' ? '重命名文件夹' : '删除文件夹'} onSubmit={(event) => { event.preventDefault(); void saveFolder() }}>
-        <h2>{folderDialog.mode === 'create' ? '新增文件夹' : folderDialog.mode === 'rename' ? '重命名文件夹' : '删除文件夹'}</h2>
-        {folderDialog.mode === 'delete' ? <p>确定删除“{folderDialog.folder?.name}”？仅空文件夹可以删除。</p> : <label>文件夹名称<input autoFocus value={folderName} onChange={(event) => setFolderName(event.target.value)} /></label>}
-        <div><button type="button" onClick={() => setFolderDialog(null)}>取消</button><button type="submit" disabled={directory.saving || (folderDialog.mode !== 'delete' && !folderName.trim())}>{folderDialog.mode === 'delete' ? '删除' : '保存'}</button></div>
-      </form></div> : null}
-      {renameAsset ? <div className="alx-dialog-backdrop"><form className="alx-dialog" role="dialog" aria-label="重命名资产" onSubmit={(event) => { event.preventDefault(); const input = event.currentTarget.elements.namedItem('name') as HTMLInputElement; void controller.rename(renameAsset.id, input.value).then(() => setRenameAsset(null)) }}>
-        <h2>重命名资产</h2><label>资产名称<input name="name" autoFocus defaultValue={renameAsset.name} /></label><div><button type="button" onClick={() => setRenameAsset(null)}>取消</button><button type="submit">保存</button></div>
-      </form></div> : null}
+      {folderDialog?.mode === 'move' || movingAsset ? <div className="alx-dialog-backdrop"><div className="alx-dialog alx-move-dialog" role="dialog" aria-label={movingAsset ? '移动资产' : '移动文件夹'}>
+        <button type="button" className="alx-move-dialog-close" aria-label={movingAsset ? '关闭移动资产' : '关闭移动文件夹'} onClick={() => { if (movingAsset) setMovingAsset(null); else setFolderDialog(null) }}>×</button>
+        <div className="alx-move-dialog-content">
+          <h2>{movingAsset ? '资产移动' : '文件夹移动'}</h2>
+          <label>选择文件夹
+            <div className="alx-move-tree" role="tree" aria-label="移动目标文件夹">
+              <div className="alx-move-tree-root">▣ 资产库</div>
+              {moveRootKind ? <button
+                type="button"
+                className={`alx-move-tree-row${moveDestinationId === `root:${moveRootKind}` ? ' is-selected' : ''}`}
+                onClick={() => setMoveDestinationId(`root:${moveRootKind}`)}
+              >⌄ {rootForId(`root:${moveRootKind}`)?.name ?? moveRootKind}</button> : null}
+              {renderMoveFolders(undefined)}
+              {moveFolderCreateOpen ? <div className="alx-move-tree-create">
+                <input autoFocus aria-label="新文件夹名称" value={moveFolderDraft} onChange={(event) => setMoveFolderDraft(event.target.value)} onKeyDown={(event) => {
+                  if (event.key === 'Enter') { event.preventDefault(); void createFolderDuringMove() }
+                  if (event.key === 'Escape') { event.preventDefault(); setMoveFolderCreateOpen(false); setMoveFolderDraft('') }
+                }} />
+                <button type="button" onClick={() => void createFolderDuringMove()} disabled={!moveFolderDraft.trim() || directory.saving}>新增</button>
+                <button type="button" onClick={() => { setMoveFolderCreateOpen(false); setMoveFolderDraft('') }}>取消</button>
+              </div> : <button type="button" className="alx-move-tree-new" onClick={() => setMoveFolderCreateOpen(true)}>＋ 新增文件夹</button>}
+            </div>
+          </label>
+        </div>
+        <div className="alx-move-dialog-actions"><button type="button" onClick={() => { if (movingAsset) setMovingAsset(null); else setFolderDialog(null) }}>取消</button><button type="button" onClick={() => { if (movingAsset) void moveAssetDuringMove(); else void saveFolder() }} disabled={directory.saving || moveDestinations.length === 0}>确定</button></div>
+      </div></div> : folderDialog ? <div className="alx-dialog-backdrop"><div className={`alx-dialog alx-folder-dialog${folderDialog.mode === 'delete' ? ' is-delete' : ''}`} role="dialog" aria-label={folderDialog.mode === 'create' ? '新增文件夹' : folderDialog.mode === 'rename' ? '重命名文件夹' : '删除文件夹'}>
+        <button type="button" className="alx-folder-dialog-close" aria-label="关闭文件夹操作" onClick={() => setFolderDialog(null)}>×</button>
+        <h2>{folderDialog.mode === 'create' ? '新增文件夹' : folderDialog.mode === 'rename' ? '重命名文件夹' : folderDialog.mode === 'delete' ? '删除文件夹' : '移动文件夹'}</h2>
+        {folderDialog.mode === 'delete' ? <p>确定删除“{folderDialog.folder?.name}”？仅空文件夹可以删除。</p> : <label>文件夹名称<input autoFocus value={folderName} onChange={(event) => setFolderName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveFolder() } }} /></label>}
+        <div className="alx-folder-dialog-actions"><button type="button" onClick={() => setFolderDialog(null)}>取消</button><button type="button" onClick={() => void saveFolder()} disabled={directory.saving || (folderDialog.mode !== 'delete' && !folderName.trim())}>{folderDialog.mode === 'delete' ? '删除' : '确认'}</button></div>
+      </div></div> : null}
+      {renameAsset ? <div className="alx-dialog-backdrop"><div className="alx-dialog" role="dialog" aria-label="重命名资产">
+        <h2>重命名资产</h2><label>资产名称<input ref={renameAssetInputRef} autoFocus defaultValue={renameAsset.name} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void controller.rename(renameAsset.id, event.currentTarget.value).then(() => setRenameAsset(null)) } }} /></label><div><button type="button" onClick={() => setRenameAsset(null)}>取消</button><button type="button" onClick={() => void controller.rename(renameAsset.id, renameAssetInputRef.current?.value ?? '').then(() => setRenameAsset(null))}>保存</button></div>
+      </div></div> : null}
       {pendingDelete ? <div className="alx-dialog-backdrop"><div className="alx-dialog" role="dialog" aria-label="删除资产"><p>确定删除“{pendingDelete.name}”？此操作不可撤销。</p><div><button type="button" onClick={() => setPendingDelete(null)}>取消</button><button type="button" onClick={() => void removeAsset()}>删除</button></div></div></div> : null}
       {pendingBatchDelete ? <div className="alx-dialog-backdrop"><div className="alx-dialog" role="dialog" aria-label="批量删除资产"><p>确定删除选中的 {selectedIds.size} 项资产？此操作不可撤销。</p><div><button type="button" onClick={() => setPendingBatchDelete(false)}>取消</button><button type="button" disabled={actionsDisabled} onClick={() => { setPendingBatchDelete(false); void removeSelected() }}>删除</button></div></div></div> : null}
     </div>

@@ -31,6 +31,12 @@ export type FormulaAstNode =
   /** 留空位：应用公式时按 holeId 绑定具体值（实体属性 / 数值 / 变量）。 */
   | { t: 'hole'; id: string; holeId: string; kind: FormulaHoleKind; label?: string; suggestAttr?: string }
 
+export interface FormulaParseFailureSnapshot {
+  readonly kind: 'wb-game-video.formula-parse-failure.v1'
+  readonly invalidDraft: string
+  readonly parserDiagnostic: string
+}
+
 export interface Formula {
   id: string
   name?: string

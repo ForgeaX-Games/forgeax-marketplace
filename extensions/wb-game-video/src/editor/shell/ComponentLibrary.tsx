@@ -1,6 +1,6 @@
 /**
  * ComponentLibrary —— 界面 tab 底部的工作区组件库。
- * 直接读取 components/new 的唯一注册清单，
+ * 直接读取 components 的唯一注册清单，
  * 渲染成可拖拽 chip；拖到画布（OverlayCatalogPreview 的 stage）落地为一个 child。
  * 纯展示：不持有方案数据，落地逻辑在 stage 的 onDrop 里（读 dataTransfer 的组件 id）。
  */
@@ -13,7 +13,7 @@ import {
   type DragEvent,
   type JSX,
 } from 'react'
-import newComponents from '../../runtime/component-host/components/new'
+import newComponents from '../../runtime/component-host/components'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { overlayContentAndHitTargets } from './overlay-fit-targets'
 import { AiParameterFillButton } from './AiParameterFillButton'

@@ -1,59 +1,52 @@
 /**
- * 字幕/对白（component id: `dialogue`）—— 契约 + 渲染同文件。
+ * 字幕/对白（component id: `Dialogue`）。
+ * 文案由 RuntimeComponentHost 解析后以扁平 props 传入；此处只展示。
  */
-import type { CSSProperties, ReactNode } from 'react'
-import type { ComponentDef } from '../../registry/component-registry'
-import type { GraphTextStyle } from '../../schema/graph-schema'
-import type { OverlayProps } from '../rendererRegistry'
-import { anchorStyle } from './defaultUi'
+import type { ReactNode } from 'react'
+import { injectCss, resolveTextAppearance, type TextAppearanceInputs } from './skinRuntime'
+import type { LocalComponentManifest } from './manifest'
 
-export interface DialogueParams {
-  speaker?: string
-  text: string
-  color?: string
-  /** 文本样式（字幕预设快照）。 */
-  style?: GraphTextStyle
-  /** 归一化位置（缺省=底部居中字幕带）。 */
-  x?: number
-  y?: number
-}
-
-const dialogueBoxStyle: CSSProperties = {
-  padding: '12px 16px',
-  borderRadius: 12,
-  background: 'rgba(12,14,18,0.82)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  color: '#f0f0f0',
-  pointerEvents: 'none',
-  boxShadow: '0 6px 24px rgba(0,0,0,0.5)',
-}
-
-export const dialogueComponent: ComponentDef<DialogueParams> = {
+export const DialogueManifest: LocalComponentManifest = {
+  id: 'Dialogue',
   label: '字幕/对白',
   inputs: [
-    { key: 'speaker', label: '说话人', valueType: 'string', default: '' },
-    { key: 'text', label: '台词', valueType: 'string', default: '' },
-    { key: 'color', label: '说话人色', valueType: 'string', component: 'color' },
-    { key: 'style', label: '样式', valueType: 'string', component: 'textStyle' },
-    { key: 'x', label: 'x', valueType: 'number' },
-    { key: 'y', label: 'y', valueType: 'number' },
+    { key: 'speaker', label: '说话人', valueType: 'string', component: 'numberExpr' },
+    { key: 'text', label: '台词', valueType: 'string', component: 'numberExpr', default: '……' },
+    { key: 'color', label: '字色', valueType: 'string', component: 'color' },
+    { key: 'fontSize', label: '字号', valueType: 'number' },
   ],
-  validate: (p) => (p.text ? [] : ['dialogue 需要 text']),
+  events: [],
 }
 
-export function DialogueOverlay({ overlay }: OverlayProps): ReactNode {
-  const p = overlay.inputs as { speaker?: string; text?: string; color?: string; x?: number; y?: number }
-  // 单一渲染模式：始终居中锚点定位（缺省底部居中），minWidth 防空文本塌陷、maxWidth 限幅。
-  // 尺寸稳定 → 画布拖拽/钳制一致（不再有「首拖塌陷 / 首拖窄」）。
-  const boxPos = anchorStyle(p.x ?? 0.5, p.y ?? 0.9, { minWidth: '40%' })
+export interface DialogueProps {
+  speaker?: string
+  text?: string
+  color?: string
+  fontSize?: number
+}
+
+export function Dialogue({
+  speaker = '',
+  text = '……',
+  color,
+  fontSize,
+}: DialogueProps): ReactNode {
+  injectCss('dialogue', DIALOGUE_CSS)
+  const textStyle = resolveTextAppearance({ color, fontSize } as TextAppearanceInputs, { color: '#f0f0f0', fontSize: 2 })
+
   return (
-    <div className="gv-dialogue" style={{ ...boxPos, ...dialogueBoxStyle }}>
-      {p.speaker && (
-        <div style={{ fontWeight: 700, fontSize: 13, color: p.color ?? '#ffd54a', marginBottom: 4 }}>
-          {p.speaker}
-        </div>
-      )}
-      <div style={{ fontSize: 15, lineHeight: 1.5 }}>{p.text}</div>
+    <div className="gv-dialogue">
+      <div className="gv-dialogue-box" data-overlay-fit-target>
+        {speaker && <div className="gv-dialogue-speaker">{speaker}</div>}
+        <div className="gv-dialogue-text" style={textStyle}>{text}</div>
+      </div>
     </div>
   )
 }
+
+const DIALOGUE_CSS = `
+.gv-dialogue{position:relative;inline-size:100%;block-size:100%;display:flex;align-items:flex-end;justify-content:center;pointer-events:none}
+.gv-dialogue-box{inline-size:100%;box-sizing:border-box;padding:12px 16px;background:transparent}
+.gv-dialogue-speaker{margin-block-end:4px;color:#ffd54a;font-size:13px;font-weight:700;text-align:center}
+.gv-dialogue-text{font-size:var(--gv-text-font-size,2cqh);line-height:1.5;text-align:center}
+`

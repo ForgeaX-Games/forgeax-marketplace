@@ -11,6 +11,7 @@ interface GenerateHostVideoInput {
   prompt: string
   durationSeconds: number
   generateAudio: boolean
+  visualStyleKey?: string
   references: MediaReference[]
   metadata: {
     sceneNodeId: string
@@ -96,6 +97,7 @@ export async function generateVideoThroughHostCapability(
       prompt: input.prompt,
       durationSeconds: input.durationSeconds,
       generateAudio: input.generateAudio,
+      ...(input.visualStyleKey ? { visualStyleKey: input.visualStyleKey } : {}),
       references,
       metadata: input.metadata,
     },

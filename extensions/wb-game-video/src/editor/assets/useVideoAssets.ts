@@ -17,6 +17,7 @@ import { useKinoVideoCache, useKinoVideoResources } from './kinoVideoCacheStore'
 import { deleteSequentially } from './batch-delete'
 import { createExternalVideoImportInput } from './video-external-import'
 import { t } from '../../i18n'
+import { useVideoGenerationStore } from './generation/videoGenerationStore'
 
 export const DEFAULT_VIDEO_PAGE_SIZE = 20
 
@@ -104,6 +105,7 @@ export function useVideoAssets(
   gameId: string,
   options: UseVideoAssetsOptions = {},
 ): VideoAssetsController {
+  const hasGameId = gameId.trim().length > 0
   const pageSize = Math.min(options.pageSize ?? DEFAULT_VIDEO_PAGE_SIZE, MAX_KINO_RESOURCE_PAGE_SIZE)
   const initialPage = options.initialPage ?? 1
   const client = useMemo(
@@ -112,7 +114,11 @@ export function useVideoAssets(
   )
   const cacheUpsert = useKinoVideoCache((s) => s.upsert)
   const cacheRemove = useKinoVideoCache((s) => s.remove)
-  const kinoResources = useKinoVideoResources(gameId, !options.client)
+  const kinoResources = useKinoVideoResources(gameId, !options.client && hasGameId)
+  const generationCompletionRevision = useVideoGenerationStore(
+    (state) => state.byGame[gameId]?.completionRevision ?? 0,
+  )
+  const observedCompletionRevision = useRef(generationCompletionRevision)
 
   const [localLoading, setLocalLoading] = useState(true)
   const [localError, setLocalError] = useState<string | null>(null)
@@ -142,6 +148,10 @@ export function useVideoAssets(
 
   const fetchPage = useCallback(
     async (targetPage: number, mode: 'replace' | 'append') => {
+      if (!hasGameId) {
+        setLocalLoading(false)
+        return
+      }
       const generation = ++listGeneration.current
       setLocalLoading(true)
       setLocalError(null)
@@ -176,7 +186,7 @@ export function useVideoAssets(
         }
       }
     },
-    [client, gameId, pageSize],
+    [client, gameId, hasGameId, pageSize],
   )
 
   const refresh = useCallback(async () => {
@@ -186,6 +196,12 @@ export function useVideoAssets(
     }
     await kinoResources.refresh()
   }, [fetchPage, kinoResources, options.client])
+
+  useEffect(() => {
+    if (options.client || generationCompletionRevision === observedCompletionRevision.current) return
+    observedCompletionRevision.current = generationCompletionRevision
+    void kinoResources.refresh()
+  }, [generationCompletionRevision, kinoResources, options.client])
 
   const loadPage = useCallback(
     async (targetPage: number) => {
@@ -375,6 +391,7 @@ export function useVideoAssets(
         setLocalItems((currentItems) => currentItems.map((item) =>
           item.id === resourceId ? renamed : item))
         upsertCacheResource(resource)
+        if (!options.client) await refresh()
         return resource
       } catch (err) {
         if (!mountedRef.current || generation !== crudGeneration.current) {

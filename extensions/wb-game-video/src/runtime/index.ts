@@ -12,21 +12,8 @@ export * from './registry/component-registry'
 export * from './validate/validate'
 export * from './component-host/rendererRegistry'
 export {
-  newComponents,
-  registerCoreSkins,
+  bootComponents,
   createCoreSkinRegistry,
   createDefaultComponentRegistry,
-  installNewComponents,
-  DialogueManifest,
-  InkKouManifest,
-  BattleParryManifest,
-  InkYingMoManifest,
-  BattleSkillManifest,
-  DamageFloatTextManifest,
-  GainFloatTextManifest,
-  StatusNoticeManifest,
-  TextOptionManifest,
-  BattlePlayerHpBarManifest,
-  BattleEnemyHpBarManifest,
-} from './component-host/components'
+} from './component-host'
 export * from './input/playerFocus'

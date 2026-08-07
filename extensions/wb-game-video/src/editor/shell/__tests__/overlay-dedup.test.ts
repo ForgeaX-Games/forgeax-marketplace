@@ -28,8 +28,8 @@ describe('overlaySignature', () => {
   })
 
   it('id/title/trigger 不参与签名', () => {
-    const a = overlay('a', [child({ id: 'x', component: 'Dialogue', inputs: { text: 'hi' } })], '标题甲')
-    const b = overlay('b', [child({ id: 'z', component: 'Dialogue', trigger: { when: 'at', ms: 500 }, inputs: { text: 'hi' } })], '标题乙')
+    const a = overlay('a', [child({ id: 'x', component: 'test.dialogue', inputs: { text: 'hi' } })], '标题甲')
+    const b = overlay('b', [child({ id: 'z', component: 'test.dialogue', trigger: { when: 'at', ms: 500 }, inputs: { text: 'hi' } })], '标题乙')
     expect(overlaySignature(a)).toBe(overlaySignature(b))
   })
 
@@ -52,8 +52,8 @@ describe('overlaySignature', () => {
   })
 
   it('layout 同内容 → 同签名', () => {
-    const a = overlay('a', [child({ id: 'x', component: 'BattleParry', layout: { left: 0.5, top: 0.5, translateX: -0.5, translateY: -0.5 }, inputs: {} })])
-    const b = overlay('b', [child({ id: 'y', component: 'BattleParry', layout: { top: 0.5, left: 0.5, translateY: -0.5, translateX: -0.5 }, inputs: {} })])
+    const a = overlay('a', [child({ id: 'x', component: 'test.qte', layout: { left: 0.5, top: 0.5, translateX: -0.5, translateY: -0.5 }, inputs: {} })])
+    const b = overlay('b', [child({ id: 'y', component: 'test.qte', layout: { top: 0.5, left: 0.5, translateY: -0.5, translateX: -0.5 }, inputs: {} })])
     expect(overlaySignature(a)).toBe(overlaySignature(b))
   })
 })
@@ -70,7 +70,7 @@ describe('findDuplicateOverlays', () => {
   })
 
   it('三项同内容 → 每项列出其余两项', () => {
-    const mk = (id: string) => overlay(id, [child({ id: 'c', component: 'Dialogue', inputs: { text: '同' } })])
+    const mk = (id: string) => overlay(id, [child({ id: 'c', component: 'test.dialogue', inputs: { text: '同' } })])
     const dup = findDuplicateOverlays({ a: mk('a'), b: mk('b'), c: mk('c') })
     expect(dup.get('a')).toEqual(['b', 'c'])
     expect(dup.get('b')).toEqual(['a', 'c'])
@@ -78,7 +78,7 @@ describe('findDuplicateOverlays', () => {
   })
 
   it('node:* 容器不参与去重', () => {
-    const body = [child({ id: 'c', component: 'Dialogue', inputs: { text: '同' } })]
+    const body = [child({ id: 'c', component: 'test.dialogue', inputs: { text: '同' } })]
     const overlays: Record<string, Overlay> = {
       'node:n1': overlay('node:n1', body),
       'node:n2': overlay('node:n2', body),
@@ -88,7 +88,7 @@ describe('findDuplicateOverlays', () => {
 
   it('全不同 → 空 Map', () => {
     const overlays: Record<string, Overlay> = {
-      a: overlay('a', [child({ id: 'c', component: 'Dialogue', inputs: { text: 'A' } })]),
+      a: overlay('a', [child({ id: 'c', component: 'test.dialogue', inputs: { text: 'A' } })]),
       b: overlay('b', [child({ id: 'c', component: 'floatText', inputs: { text: 'B' } })]),
     }
     expect(findDuplicateOverlays(overlays).size).toBe(0)

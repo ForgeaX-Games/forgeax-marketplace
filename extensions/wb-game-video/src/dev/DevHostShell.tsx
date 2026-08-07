@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { WorkbenchFrame } from '@forgeax/workbench-host/react'
 import type { WorkbenchSessionContext } from '@forgeax/workbench-host/contracts'
@@ -59,8 +59,7 @@ function DevHostShell(): JSX.Element {
     return () => controller.abort()
   }, [gameId, frameEpoch])
 
-  const openGame = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const openGame = () => {
     try {
       const nextGameId = normalizeDevGameId(draftGameId)
       const url = new URL(location.href)
@@ -79,7 +78,7 @@ function DevHostShell(): JSX.Element {
       <header className="dev-host-toolbar">
         <strong className="dev-host-brand">wb-game-video</strong>
         <span className="dev-host-separator" aria-hidden="true" />
-        <form className="dev-host-game-form" onSubmit={openGame}>
+        <div className="dev-host-game-form">
           <label htmlFor="dev-host-game-id">Game</label>
           <input
             id="dev-host-game-id"
@@ -87,9 +86,15 @@ function DevHostShell(): JSX.Element {
             onChange={(event) => setDraftGameId(event.target.value)}
             autoComplete="off"
             spellCheck={false}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                openGame()
+              }
+            }}
           />
-          <button type="submit">Open</button>
-        </form>
+          <button type="button" onClick={openGame}>Open</button>
+        </div>
         <span className="dev-host-mode">Local host</span>
       </header>
       <section className="dev-host-runtime" aria-live="polite">
@@ -102,7 +107,7 @@ function DevHostShell(): JSX.Element {
             title={`wb-game-video - ${state.context.gameId}`}
             runtimeUrl={runtimeUrl}
             context={state.context}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads"
+            sandbox="allow-scripts allow-same-origin allow-modals allow-downloads"
             allow="autoplay; clipboard-read; clipboard-write; fullscreen"
           />
         )}

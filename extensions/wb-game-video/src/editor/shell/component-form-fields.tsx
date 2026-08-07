@@ -14,12 +14,12 @@ import { useState, type CSSProperties, type JSX } from 'react'
 import type { ComponentInput } from '../../runtime/schema/node-config-schema'
 import type { Entity, NumOrExpr } from '../../runtime/schema/graph-schema'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
-import newComponents from '../../runtime/component-host/components/new'
 import { hasOptionEventsInput } from './editors'
 import { AttrSelect, EffectsEditor, EntitySelect, EventsEditor, TextValueInput, ValueInput, type ComponentEventLike, type EditorPickerCtx } from './editors'
 import type { TextOrRef } from './TextValueEditor'
 import { ColorPicker } from './ColorPicker'
 import { KeyConflictInput } from './KeyConflictInput'
+import { NiSelect } from './ni-ui'
 import { entityDisplayName, findEntity, listAttrOptions } from './valueExprPick'
 import type {
   EntityAttributeCreateRequest,
@@ -51,7 +51,6 @@ const rowStyle: CSSProperties = { display: 'flex', gap: 4, alignItems: 'center',
 const lbl: CSSProperties = { width: 72, opacity: 0.7, flexShrink: 0, fontSize: 11 }
 const DEFAULT_COMPACT_LABEL_WIDTH = '7em'
 const COMPACT_CONTROL_WIDTH = 320
-const NEW_COMPONENT_IDS = new Set(newComponents.map(({ manifest }) => manifest.id))
 const DEFAULT_HP_ATTRIBUTE: EntityAttributeCreateRequest = {
   entityId: '',
   attrId: 'hp',
@@ -513,7 +512,7 @@ function renderInput(
   }
   if (inp.component === 'numberExpr') {
     const optional = inp.required !== true && inp.default === undefined
-    const isNewComponent = NEW_COMPONENT_IDS.has(componentId)
+    const isNewComponent = !!getComponentManifest(componentId)
     const stackControls = compact && isNewComponent && stackExpressionControls
     const preferredEntities = preferredEntityIds(componentId, pickers?.entities)
     const semantic = attributeSemantic(componentId, inp.key)
@@ -529,7 +528,7 @@ function renderInput(
         preferredEntityIds={preferredEntities}
         entityNameOnly={
           (isHpBarComponent(componentId) && inp.key === 'label')
-          || (componentId === 'Dialogue' && inp.key === 'speaker')
+          || inp.key === 'speaker'
         }
         createAttribute={onCreateEntityAttribute
           ? {
@@ -720,10 +719,10 @@ function renderInput(
     return (
       <span key={inp.key}>
         {wrap(
-          <select
-            aria-label={label}
+          <NiSelect
+            ariaLabel={label}
             value={selectedValue}
-            onChange={(e) => onPatch(inp.key, e.target.value)}
+            onChange={(next) => onPatch(inp.key, next)}
             style={{
               width: compact ? '100%' : undefined,
               minWidth: 0,
@@ -734,7 +733,7 @@ function renderInput(
             title={hint}
           >
             {inp.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>,
+          </NiSelect>,
         )}
       </span>
     )

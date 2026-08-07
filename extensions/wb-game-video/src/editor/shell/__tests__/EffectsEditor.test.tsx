@@ -31,8 +31,10 @@ describe('EffectsEditor numeric operations', () => {
       />,
     )
 
+    // 排除 .ni-select-value：那是 NiSelect 壳里显示当前选项的装饰 span（如「类型」选中「属性」），
+    // 与同名字段标签撞文本；这里量的是标签本身。
     for (const label of ['类型', '实体', '属性', '操作', '数值来源', '数值']) {
-      expect(screen.getByText(label, { selector: 'span' })).toHaveStyle({ width: '77px' })
+      expect(screen.getByText(label, { selector: 'span:not(.ni-select-value)' })).toHaveStyle({ width: '77px' })
     }
   })
 

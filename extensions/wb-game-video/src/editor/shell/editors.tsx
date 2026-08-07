@@ -44,6 +44,7 @@ import {
 } from './ValueExprEditor'
 import { TextValueEditor, type TextOrRef } from './TextValueEditor'
 import { LooseNumberInput } from './TermChainEditor'
+import { NiSelect } from './ni-ui'
 import { EffectOpButtons } from './OpSymbolButtons'
 import {
   compileValuePick,
@@ -129,17 +130,17 @@ function ItemIdEditor({
   const known = ids.includes(value)
   return (
     <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
-      <select
-        aria-label="道具"
+      <NiSelect
+        ariaLabel="道具"
         value={known ? value : '__custom__'}
-        onChange={(event) => {
-          if (event.target.value !== '__custom__') onChange(event.target.value)
+        onChange={(next) => {
+          if (next !== '__custom__') onChange(next)
         }}
         style={{ flex: 1, minWidth: 0 }}
       >
         {ids.map((id) => <option key={id} value={id}>{id}</option>)}
         <option value="__custom__">新建或输入道具 ID…</option>
-      </select>
+      </NiSelect>
       {!known ? (
         <input
           aria-label="道具 ID"
@@ -617,7 +618,7 @@ export function EntitySelect({
     )
   }
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value)} style={{ flex: 1 }}>
+    <NiSelect value={value} onChange={onChange} style={{ flex: 1 }}>
       <option value="" disabled={pickerOptions.length > 0}>选择对象…</option>
       {opts.map((option) => (
         <option key={option.id} value={option.id}>{option.label}</option>
@@ -625,7 +626,7 @@ export function EntitySelect({
       {value && !known.has(value) ? (
         <option value={value} disabled>{value}（实体模板已删除）</option>
       ) : null}
-    </select>
+    </NiSelect>
   )
 }
 
@@ -652,9 +653,9 @@ export function AttrSelect({
   }>>({})
   if (!entityId) {
     return (
-      <select value="" disabled style={{ flex: 1 }}>
+      <NiSelect value="" onChange={onChange} disabled style={{ flex: 1 }}>
         <option value="">请先选择对象…</option>
-      </select>
+      </NiSelect>
     )
   }
   const entity = findEntity(entities, entityId)
@@ -773,12 +774,12 @@ export function AttrSelect({
     )
   }
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value)} style={{ flex: 1 }}>
+    <NiSelect value={value} onChange={onChange} style={{ flex: 1 }}>
       <option value="" disabled={options.length > 0}>选择属性…</option>
       {options.map((attr) => (
         <option key={attr.id} value={attr.id}>{attr.label}</option>
       ))}
-    </select>
+    </NiSelect>
   )
 }
 
@@ -797,12 +798,12 @@ function VarSelect({
 }): JSX.Element {
   const opts = listVarOptions(variables, { flagsOnly, numbersOnly })
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ flex: 1 }}>
+    <NiSelect value={value} onChange={onChange} style={{ flex: 1 }}>
       <option value="" disabled={opts.length > 0}>选择变量…</option>
       {opts.map((o) => (
         <option key={o.id} value={o.id}>{o.label}</option>
       ))}
-    </select>
+    </NiSelect>
   )
 }
 
@@ -1004,15 +1005,15 @@ function EffectRow({
         </button>
       </div>
       {field('类型', (
-        <select
+        <NiSelect
           value={eff.kind}
-          onChange={(e) => onChange(defaultEffect(e.target.value as EffectKind, entities, variables))}
+          onChange={(value) => onChange(defaultEffect(value as EffectKind, entities, variables))}
           title={`效果类型：${allowedKinds.map((kind) => EFFECT_KIND_LABEL[kind] ?? kind).join(' / ')}`}
         >
           {selectableKinds.map((k) => (
             <option key={k} value={k}>{EFFECT_KIND_LABEL[k] ?? k}</option>
           ))}
-        </select>
+        </NiSelect>
       ), labelWidth)}
       {eff.kind === 'attr' && (
         <>
@@ -1096,10 +1097,10 @@ function EffectRow({
             />
           ), labelWidth)}
           {field('值', (
-            <select value={String(eff.value)} onChange={(e) => onChange({ ...eff, value: e.target.value === 'true' })}>
+            <NiSelect value={String(eff.value)} onChange={(value) => onChange({ ...eff, value: value === 'true' })}>
               <option value="true">是</option>
               <option value="false">否</option>
-            </select>
+            </NiSelect>
           ), labelWidth)}
         </>
       )}
@@ -1107,10 +1108,10 @@ function EffectRow({
         <>
           {field('道具', <ItemIdEditor value={eff.itemId} itemIds={itemIds ?? []} onChange={(itemId) => onChange({ ...eff, itemId })} />, labelWidth)}
           {field('操作', (
-            <select value={eff.op} onChange={(e) => onChange({ ...eff, op: e.target.value as 'give' | 'take' })}>
+            <NiSelect value={eff.op} onChange={(value) => onChange({ ...eff, op: value as 'give' | 'take' })}>
               <option value="give">给予（增加持有数量）</option>
               <option value="take">取走（减少且不低于 0）</option>
-            </select>
+            </NiSelect>
           ), labelWidth)}
           {field('数量', <LooseNumberInput value={eff.count} emptyValue={0} onChange={(count) => onChange({ ...eff, count })} style={{ width: 90 }} />, labelWidth)}
         </>
@@ -1239,11 +1240,11 @@ function defaultClause(
 }
 
 const opSelect = (op: CmpOp, onChange: (op: CmpOp) => void): JSX.Element => (
-  <select aria-label="比较运算符" value={op} onChange={(e) => onChange(e.target.value as CmpOp)}>
+  <NiSelect ariaLabel="比较运算符" value={op} onChange={(value) => onChange(value as CmpOp)}>
     {CMP_OPS.map((o) => (
       <option key={o} value={o}>{CMP_LABEL[o]}</option>
     ))}
-  </select>
+  </NiSelect>
 )
 
 function ClauseRow({
@@ -1268,11 +1269,11 @@ function ClauseRow({
   return (
     <div style={box}>
       <div style={rowStyle}>
-        <select aria-label="条件字段类型" value={clause.type} onChange={(e) => onChange(defaultClause(e.target.value as ClauseType, entities, variables))}>
+        <NiSelect ariaLabel="条件字段类型" value={clause.type} onChange={(value) => onChange(defaultClause(value as ClauseType, entities, variables))}>
           {clauseTypes.map((t) => (
             <option key={t} value={t}>{CLAUSE_LABEL[t] ?? t}</option>
           ))}
-        </select>
+        </NiSelect>
         <button style={del} onClick={onDelete}>删除</button>
       </div>
       {(clause.type === 'attr' || clause.type === 'attrRatio') && (
@@ -1343,20 +1344,20 @@ function ClauseRow({
             />
           ))}
           {field('等于', (
-            <select value={String(clause.equals)} onChange={(e) => onChange({ ...clause, equals: e.target.value === 'true' })}>
+            <NiSelect value={String(clause.equals)} onChange={(value) => onChange({ ...clause, equals: value === 'true' })}>
               <option value="true">是</option>
               <option value="false">否</option>
-            </select>
+            </NiSelect>
           ))}
         </>
       )}
       {clause.type === 'visited' && field('节点', (
-        <select value={clause.nodeId} onChange={(e) => onChange({ ...clause, nodeId: e.target.value })} style={{ flex: 1 }}>
+        <NiSelect value={clause.nodeId} onChange={(nodeId) => onChange({ ...clause, nodeId })} style={{ flex: 1 }}>
           <option value="">（选节点）</option>
           {nodeIds.map((id) => (
             <option key={id} value={id}>{nodeLabel?.(id) ?? id}</option>
           ))}
-        </select>
+        </NiSelect>
       ))}
       {clause.type === 'score' && (
         <>

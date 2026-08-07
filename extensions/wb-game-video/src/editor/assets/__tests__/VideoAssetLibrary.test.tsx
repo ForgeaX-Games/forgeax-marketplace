@@ -6,6 +6,7 @@ import { setLocale } from '../../../i18n'
 import * as videoAssetLibraryModule from '../VideoAssetLibrary'
 import { VideoAssetLibrary, type VideoAssetsController, type VideoLibraryEntry } from '../VideoAssetLibrary'
 import type { KinoResourceDTO } from '../kino-api'
+import { writeVideoLibraryEntryTag, writeVideoLibraryFolderName } from '../video-library-metadata'
 
 const EMPTY_SCENARIO: GameScenario = {
   version: 'wb-game-video.graph.v1',
@@ -74,6 +75,7 @@ function makeController(
 describe('VideoAssetLibrary', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    window.localStorage.clear()
     setLocale('zh')
   })
 
@@ -104,6 +106,109 @@ describe('VideoAssetLibrary', () => {
     )
     expect(screen.getByRole('button', { name: /idle01/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Clip one' })).toHaveClass('is-on')
+  })
+
+  it('renders an active generation first and reopens its durable task instead of video preview', () => {
+    const onOpenGeneration = vi.fn()
+    const onSelect = vi.fn()
+    render(
+      <VideoAssetLibrary
+        gameId="demo"
+        scenario={EMPTY_SCENARIO}
+        supplementalEntries={[{
+          id: 'generation:generation-1',
+          generationId: 'generation-1',
+          label: '雨夜追逐镜头',
+          url: '',
+          group: '生成视频',
+          status: 'generating',
+        }]}
+        controller={makeController()}
+        selectedId=""
+        onSelect={onSelect}
+        onOpenGeneration={onOpenGeneration}
+      />,
+    )
+
+    const buttons = screen.getAllByRole('button')
+    expect(buttons.findIndex((button) => button.getAttribute('aria-label') === '生成视频 · 雨夜追逐镜头'))
+      .toBeLessThan(buttons.findIndex((button) => button.getAttribute('aria-label') === 'Clip one'))
+    fireEvent.click(screen.getByRole('button', { name: '生成视频 · 雨夜追逐镜头' }))
+    expect(onOpenGeneration).toHaveBeenCalledWith('generation-1')
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('applies sidebar folder requests and reports local folder changes', () => {
+    const onFolderChange = vi.fn()
+    render(
+      <VideoAssetLibrary
+        gameId="demo"
+        scenario={EMPTY_SCENARIO}
+        controller={makeController()}
+        selectedId=""
+        requestedFolder="untagged"
+        onFolderChange={onFolderChange}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.getByLabelText('视频素材路径')).toHaveTextContent('未分类')
+    fireEvent.click(screen.getByRole('button', { name: '视频素材' }))
+    expect(onFolderChange).toHaveBeenCalledWith('all')
+  })
+
+  it('validates a new folder only after blur or submit and creates it on Enter', () => {
+    render(
+      <VideoAssetLibrary
+        gameId="demo"
+        scenario={EMPTY_SCENARIO}
+        controller={makeController({ items: [] })}
+        selectedId=""
+        onSelect={() => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }))
+    const input = screen.getByLabelText('文件夹名称')
+    expect(input.closest('form')).toBeNull()
+    expect(screen.queryByText('文件夹名称不能为空')).toBeNull()
+
+    fireEvent.blur(input)
+    expect(screen.getByRole('alert')).toHaveTextContent('文件夹名称不能为空')
+
+    fireEvent.change(input, { target: { value: '战斗镜头' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByLabelText('视频素材路径')).toHaveTextContent('战斗镜头')
+  })
+
+  it('places first-level folders beside untagged videos and opens a folder into its flat real-video list', () => {
+    writeVideoLibraryFolderName('demo', '户外')
+    writeVideoLibraryEntryTag('demo', 'tagged-video', '户外')
+    const controller = makeController({
+      items: [apiEntry('untagged-video', '未分类视频'), apiEntry('tagged-video', '户外视频')],
+    })
+    const onFolderChange = vi.fn()
+    render(
+      <VideoAssetLibrary
+        gameId="demo"
+        scenario={EMPTY_SCENARIO}
+        controller={controller}
+        selectedId=""
+        onFolderChange={onFolderChange}
+        onSelect={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '户外 1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '未分类视频' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '户外视频' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '户外 1' }))
+    expect(onFolderChange).toHaveBeenCalledWith('户外')
+    expect(screen.getByRole('button', { name: '户外视频' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '未分类视频' })).not.toBeInTheDocument()
   })
 
   it('places Kino entries before bundled videos', () => {
@@ -160,23 +265,24 @@ describe('VideoAssetLibrary', () => {
         onSelect={() => {}}
       />,
     )
-    const head = container.querySelector('.gc-list-head')
+    const head = container.querySelector('.val-library-head')
     expect(head).toBeTruthy()
     const children = [...head!.children]
-    const title = head!.querySelector('.gc-list-title')
     const sources = head!.querySelector('.val-library-sources')
     const upload = head!.querySelector('.val-head-upload')
-    const status = head!.querySelector('.val-head-status')
-    const count = head!.querySelector('.gc-list-count')
-    const refresh = head!.querySelector('.val-head-refresh')
+    const actions = head!.querySelector('.val-library-actions')
+    const statusRow = container.querySelector('.val-library-status-row')
+    const status = statusRow!.querySelector('.val-head-status')
+    const count = statusRow!.querySelector('.val-library-count')
 
-    expect(children.indexOf(sources!)).toBe(children.indexOf(title!) + 1)
+    expect(children[0]).toBe(sources)
+    expect(children[1]).toBe(actions)
     expect(within(sources as HTMLElement).getByRole('button', { name: '生成' })).toBeTruthy()
     expect(within(sources as HTMLElement).getByRole('button', { name: '外部视频导入' })).toBeDisabled()
     expect(sources as HTMLElement).toContainElement(upload as HTMLElement)
-    expect(children.indexOf(status!)).toBeGreaterThan(children.indexOf(sources!))
-    expect(children.indexOf(count!)).toBeGreaterThan(children.indexOf(status!))
-    expect(children.indexOf(refresh!)).toBeGreaterThan(children.indexOf(count!))
+    expect(status).toBeTruthy()
+    expect(statusRow).toContainElement(status as HTMLElement)
+    expect(statusRow).toContainElement(count as HTMLElement)
   })
 
   it('uses the file input itself as the single accessible upload control', () => {
@@ -203,7 +309,7 @@ describe('VideoAssetLibrary', () => {
     expect(input).toHaveClass('val-head-upload-input')
     expect(label).toHaveClass('val-head-upload')
     expect(label).toContainElement(input)
-    expect(container.querySelector('.gc-list-title')?.nextElementSibling).toHaveClass('val-library-sources')
+    expect(container.querySelector('.val-library-head')?.firstElementChild).toHaveClass('val-library-sources')
     expect(input.tabIndex).toBe(0)
   })
 
@@ -333,12 +439,12 @@ describe('VideoAssetLibrary', () => {
         onSelect={() => {}}
       />,
     )
-    const head = container.querySelector('.gc-list-head')
-    const status = within(head as HTMLElement).getByRole('status')
+    const statusRow = container.querySelector('.val-library-status-row')
+    const status = within(statusRow as HTMLElement).getByRole('status')
     expect(status).toHaveAttribute('aria-live', 'polite')
     expect(status).toHaveTextContent('上传 42%')
     expect(status).toHaveTextContent('完成失败')
-    expect(within(head as HTMLElement).getByRole('button', { name: '重试完成上传' })).toBeTruthy()
+    expect(within(statusRow as HTMLElement).getByRole('button', { name: '重试完成上传' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '重试完成上传' }))
     await waitFor(() => expect(controller.retryComplete).toHaveBeenCalledOnce())
   })
@@ -377,7 +483,8 @@ describe('VideoAssetLibrary', () => {
         onSelect={() => {}}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '刷新视频库' }))
+    fireEvent.click(screen.getByRole('button', { name: '更多视频操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '刷新视频库' }))
     await waitFor(() => expect(controller.refresh).toHaveBeenCalledOnce())
   })
 
@@ -476,8 +583,8 @@ describe('VideoAssetLibrary', () => {
     expect(css).toMatch(/\.val-row\s*>\s*\.gc-row\s*\{[^}]*min-width:\s*0/)
     expect(css).toMatch(/\.val-row\s+\.gc-row-label\s*\{[^}]*text-overflow:\s*ellipsis/)
     expect(css).toMatch(/\.val-row-action\s*\{[^}]*position:\s*absolute/)
-    expect(css).toMatch(/\.val-row-action\s*\{[^}]*min-height:\s*28px/)
-    expect(css).toMatch(/\.val-row:hover\s*>\s*\.gc-row[^}]*padding-right:\s*112px/)
+    expect(css).toMatch(/\.val-row-action\s*\{[^}]*min-height:\s*26px/)
+    expect(css).toMatch(/\.val-row:hover\s*>\s*\.gc-row[^}]*padding-right:\s*0/)
     expect(css).toMatch(/\.val-row:hover\s+\.val-row-action[^}]*opacity:\s*1/)
     expect(css).toMatch(/\.val-row:has\(>\s*\.val-row-action:focus-visible\)\s+\.val-row-action[^}]*opacity:\s*1/)
     expect(css).not.toMatch(/\.val-row:focus-within/)

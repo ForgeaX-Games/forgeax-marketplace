@@ -1,6 +1,15 @@
 import { afterEach, expect, test, vi } from 'vitest'
+import { getComponent } from '../../registry/component-registry'
 
-const moduleUrl = vi.fn(() => 'data:text/javascript,export const register = () => {}')
+const remoteModule = [
+  'data:text/javascript,',
+  'export default [{',
+  '  component: function RemoteComp() { return null },',
+  '  manifest: { id: "remote-test", label: "Remote", events: [] },',
+  '}]',
+].join('')
+
+const moduleUrl = vi.fn(() => remoteModule)
 
 vi.mock('../../../lib/workbench-host', () => ({
   getWorkbenchHost: () => ({ gameComponents: { moduleUrl } }),
@@ -8,9 +17,11 @@ vi.mock('../../../lib/workbench-host', () => ({
 
 afterEach(() => moduleUrl.mockClear())
 
-test('loads game components through the handshake-bound Workbench endpoint', async () => {
-  const { loadGameComponents } = await import('../index')
+test('bootComponents loads catalog-shaped game components through the Workbench endpoint', async () => {
+  const { bootComponents } = await import('../index')
+  const slug = `game-${crypto.randomUUID()}`
 
-  await expect(loadGameComponents(`game-${crypto.randomUUID()}`)).resolves.toBe(true)
+  await expect(bootComponents(slug)).resolves.toBeUndefined()
   expect(moduleUrl).toHaveBeenCalledWith('index.js')
+  expect(getComponent('remote-test')).toMatchObject({ id: 'remote-test', label: 'Remote' })
 })

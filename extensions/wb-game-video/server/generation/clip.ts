@@ -12,6 +12,7 @@ const MAX_DURATION_SECONDS = 15
 const MAX_PROMPT_LENGTH = 4_000
 const MAX_LABEL_LENGTH = 120
 const MAX_REFERENCE_IMAGES = 9
+const VISUAL_STYLE_KEY_PATTERN = /^[A-Za-z0-9_-]{1,80}$/
 
 export type VideoClipGenerationMode = 'strict' | 'firstref' | 'ref' | 't2v'
 
@@ -25,6 +26,7 @@ export interface GenerateVideoClipArgs {
   referenceImageAssetIds?: string[]
   label?: string
   requestId?: string
+  visualStyleKey?: string
 }
 
 export type GenerateVideoClipResult =
@@ -37,6 +39,7 @@ interface ValidatedClipInput {
   label: string
   mode: VideoClipGenerationMode
   requestId?: string
+  visualStyleKey?: string
 }
 
 /**
@@ -73,6 +76,7 @@ export async function generateVideoClip(
       mode: validated.mode,
       referenceAssetIds,
       ...(validated.requestId !== undefined ? { requestId: validated.requestId } : {}),
+      ...(validated.visualStyleKey !== undefined ? { visualStyleKey: validated.visualStyleKey } : {}),
     },
   })
 
@@ -83,6 +87,7 @@ export async function generateVideoClip(
       references,
       durationSeconds: validated.durationSeconds,
       generateAudio: validated.generateAudio,
+      visualStyleKey: validated.visualStyleKey,
       metadata: {
         sceneNodeId: ASSET_LIBRARY_NODE_ID,
         nodeName: validated.label,
@@ -103,6 +108,7 @@ export async function generateVideoClip(
         mode: validated.mode,
         referenceAssetIds,
         ...(validated.requestId !== undefined ? { requestId: validated.requestId } : {}),
+        ...(validated.visualStyleKey !== undefined ? { visualStyleKey: validated.visualStyleKey } : {}),
       },
     })
   } catch (error) {
@@ -153,6 +159,13 @@ function validateClipInput(args: GenerateVideoClipArgs): ValidatedClipInput {
   const firstFrameAssetId = optionalAssetId(args.firstFrameAssetId, 'firstFrameAssetId')
   const lastFrameAssetId = optionalAssetId(args.lastFrameAssetId, 'lastFrameAssetId')
   const referenceImageAssetIds = validateReferenceImageIds(args.referenceImageAssetIds)
+  const visualStyleKey = args.visualStyleKey
+  if (
+    visualStyleKey !== undefined
+    && (typeof visualStyleKey !== 'string' || !VISUAL_STYLE_KEY_PATTERN.test(visualStyleKey))
+  ) {
+    throw new Error('visualStyleKey 必须是有效的 Kino 风格 key')
+  }
 
   if (mode === 'strict') {
     if (!firstFrameAssetId || !lastFrameAssetId) {
@@ -183,6 +196,7 @@ function validateClipInput(args: GenerateVideoClipArgs): ValidatedClipInput {
     label: explicitLabel || deriveLabelFromPrompt(args.prompt),
     mode,
     requestId: args.requestId,
+    visualStyleKey,
   }
 }
 

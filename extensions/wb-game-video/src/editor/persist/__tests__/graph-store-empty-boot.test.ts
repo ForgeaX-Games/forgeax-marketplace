@@ -15,7 +15,7 @@ vi.mock('../../../runtime/component-host', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../runtime/component-host')>()
   return {
     ...actual,
-    loadGameComponents: vi.fn(async () => {}),
+    bootComponents: vi.fn(async () => {}),
   }
 })
 

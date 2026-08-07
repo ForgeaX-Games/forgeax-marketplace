@@ -71,8 +71,110 @@ describe('VideoGenSheet', () => {
 
     expect(screen.getByRole('main', { name: '生成视频素材' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(container.querySelector('.vgen-page-results')).toBeInTheDocument()
-    expect(container.querySelector('.vgen-page-composer')).toBeInTheDocument()
+    expect(container.querySelector('.vgen-settings')).toBeInTheDocument()
+    expect(container.querySelector('.vgen-preview-stage')).toBeInTheDocument()
+    expect(container.querySelector('.vgen-composer')).toBeInTheDocument()
+    expect(container.querySelector('form')).not.toBeInTheDocument()
+  })
+
+  it('uses React button handlers instead of native form submission inside the sandboxed iframe', () => {
+    const { container, onSubmit } = renderSheet({ variant: 'page' })
+    expect(container.querySelector('form')).not.toBeInTheDocument()
+
+    fillPrompt('雨夜街道上的追逐镜头')
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }))
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '雨夜街道上的追逐镜头',
+      mode: 't2v',
+    }))
+  })
+
+  it('restores the durable Kino prompt when reopening an active task', () => {
+    renderSheet({
+      variant: 'page',
+      genState: {
+        phase: 'generating',
+        generationId: 'generation-1',
+        prompt: '刷新前保存的提示词',
+      },
+    })
+
+    expect(screen.getByRole('textbox', { name: '视频提示词' })).toHaveValue('刷新前保存的提示词')
+    expect(screen.getByRole('button', { name: '生成中' })).toBeDisabled()
+  })
+
+  it('maps the Figma page controls onto the real generation request', () => {
+    const { onSubmit } = renderSheet({ variant: 'page' })
+
+    expect(screen.getByRole('tab', { name: '文生视频' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('开始创造独属自己的资源，建造独一无二的游戏体验')).toBeInTheDocument()
+    expect(screen.getByLabelText('生成音频')).toBeChecked()
+
+    fireEvent.click(screen.getByRole('tab', { name: '文生视频' }))
+    fillPrompt('海港中的追逐镜头')
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }))
+
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: '海港中的追逐镜头',
+      mode: 't2v',
+      durationSeconds: 5,
+      generateAudio: true,
+    }))
+  })
+
+  it('keeps the page submit action responsive and shows prompt validation when empty', () => {
+    const { onSubmit } = renderSheet({ variant: 'page' })
+    const submit = screen.getByRole('button', { name: '生成视频' })
+    expect(submit).toBeEnabled()
+
+    fireEvent.click(submit)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入视频提示词。')
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('loads Kino visual styles on demand and submits the selected style key', async () => {
+    const loadVisualStyles = vi.fn(async () => [{
+      key: 'bwcinema',
+      label: '黑白电影风格',
+      cdnUrl: 'https://example.com/bwcinema.jpg',
+      tags: ['真人'],
+      order: 1,
+    }])
+    const { onSubmit } = renderSheet({ variant: 'page', loadVisualStyles })
+
+    fireEvent.click(screen.getByRole('button', { name: '风格' }))
+    expect(await screen.findByRole('dialog', { name: '风格选择' })).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: '黑白电影风格' }))
+    expect(loadVisualStyles).toHaveBeenCalledTimes(1)
+
+    fillPrompt('黑白雨夜中的追逐镜头')
+    fireEvent.click(screen.getByRole('button', { name: '生成视频' }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 't2v',
+      visualStyleKey: 'bwcinema',
+    }))
+  })
+
+  it('shows the real generated video in the designed player and applies its asset id', () => {
+    const { onLocateAsset } = renderSheet({
+      variant: 'page',
+      genState: { phase: 'succeeded', transport: 'tool', assetId: 'host-video-1' },
+      recentClips: [{
+        id: 'host-video-1',
+        label: 'Generated Host asset',
+        createdAt: 100,
+        status: 'ready',
+        playbackUrl: '/host-video-1.mp4',
+      }],
+    })
+
+    expect(screen.getByTestId('generation-preview')).toHaveAttribute('src', '/host-video-1.mp4')
+    expect(screen.getByRole('button', { name: '播放' })).toBeInTheDocument()
+    expect(screen.getByRole('slider', { name: '视频播放进度' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '应用' }))
+    expect(onLocateAsset).toHaveBeenCalledWith('host-video-1')
   })
 
   it('renders the English generation resource without falling back to translation keys', () => {
@@ -81,6 +183,16 @@ describe('VideoGenSheet', () => {
     expect(screen.getByRole('dialog', { name: 'Generate video asset' })).toBeInTheDocument()
     expect(screen.getByLabelText('Generation mode')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Generate video' })).toBeInTheDocument()
+  })
+
+  it('localizes the full-page Figma controls and player labels', () => {
+    setLocale('en')
+    renderSheet({ variant: 'page' })
+    expect(screen.getByRole('tab', { name: 'Text to video' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Reference to video' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Style' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Video generator')).toBeInTheDocument()
+    expect(screen.getByText('Prompt tools')).toBeInTheDocument()
   })
 
   it.each([

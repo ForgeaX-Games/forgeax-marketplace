@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { registerCoreSkins } from '../component-host/components'
+import { registerTestComponents } from './test-components'
 import { getComponentManifest } from '../registry/component-registry'
 import type { Overlay, Reaction } from '../schema/node-config-schema'
 import {
@@ -13,7 +13,7 @@ import { GraphRuntime } from '../engine/engine'
 import { scnOf, node, rid } from './test-fixtures'
 import type { GameGraph } from '../schema/graph-schema'
 
-registerCoreSkins()
+registerTestComponents()
 
 describe('overlay events / reactions', () => {
   const overlay: Overlay = {
@@ -22,7 +22,7 @@ describe('overlay events / reactions', () => {
       { id: 'hp', component: 'battleHpBar', inputs: { bind: 'ent-player' } },
       {
         id: 'parry',
-        component: 'BattleParry',
+        component: 'test.qte',
         inputs: {
           events: [
             { id: 'A', label: '防反' },
@@ -37,7 +37,7 @@ describe('overlay events / reactions', () => {
   it('aggregates events from inputs.events when single emitter', () => {
     const refs = aggregateOverlayEvents(overlay, getComponentManifest)
     expect(refs.map((r) => r.eventId)).toEqual(['A', 'B', 'miss'])
-    expect(refs[0]?.componentId).toBe('BattleParry')
+    expect(refs[0]?.componentId).toBe('test.qte')
   })
 
   it('namespaces when multiple emitters', () => {

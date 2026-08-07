@@ -2,6 +2,7 @@ import type { GameNode, GameScenario, OverlayInstanceChild } from '../../runtime
 import { expandNodeChildren } from '../../runtime/schema/expand-overlay'
 import { isSettlementReaction, type NodeAction } from '../../runtime/schema/node-config-schema'
 import { elementStartMs } from '../../graph/canvas/timeline-geometry'
+import { formatWatchPathLabel } from '../watch-path-label'
 import type { TimelineConditionMarker, TimelinePointMarker } from './materialTimelineShared'
 
 /** 动作侧分段：效果 / 绑定界面 / 隐藏界面 / 沿边推进各成一段，供条件行 chips 与 label 复用。 */
@@ -67,7 +68,9 @@ export function collectNodeTimelineMarkers(
     }
     if (reaction.when.type === 'watch') {
       const direction = reaction.when.on === 'inc' ? '增加' : reaction.when.on === 'dec' ? '减少' : '变化'
-      const conditionChips = [reaction.when.of || '未选数值', direction]
+      // 条件行给作者看：用实体/属性中文名，不把 entity.ent-player.attr.hp 原样甩上时间轴。
+      const ofLabel = formatWatchPathLabel(reaction.when.of ?? '', scenario.entities, scenario.variables)
+      const conditionChips = [ofLabel, direction]
       conditionMarkers.push({ id, label: `${conditionChips.join(' ')} → ${actionLabel}`, conditionChips, actionChips })
       return
     }

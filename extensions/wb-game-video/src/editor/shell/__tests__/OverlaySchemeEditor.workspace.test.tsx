@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { ComponentProps } from 'react'
+import { registerTestComponents } from '../../../runtime/__tests__/test-components'
 import { overlayStageMaxPercent, OverlaySchemeEditor } from '../OverlaySchemeEditor'
 
+beforeAll(registerTestComponents)
 afterEach(cleanup)
 
 function renderEditor(
@@ -73,7 +75,7 @@ describe('OverlaySchemeEditor workspace layout', () => {
       overlay: {
         id: 'workspace',
         title: '战斗界面',
-        children: [{ id: 'notice', component: 'StatusNotice', inputs: {} }],
+        children: [{ id: 'notice', component: 'test.notice', inputs: {} }],
       },
     })
 
@@ -87,7 +89,7 @@ describe('OverlaySchemeEditor workspace layout', () => {
       locked: true,
       overlay: {
         id: 'workspace',
-        children: [{ id: 'notice', component: 'StatusNotice', inputs: {} }],
+        children: [{ id: 'notice', component: 'test.notice', inputs: {} }],
       },
     })
 

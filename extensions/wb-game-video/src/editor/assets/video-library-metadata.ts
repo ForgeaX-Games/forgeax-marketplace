@@ -9,12 +9,18 @@ export const VIDEO_LIBRARY_METADATA_VERSION = 1
 export const VIDEO_LIBRARY_METADATA_MAX_FOLDER_NAME_LENGTH = 32
 
 const STORAGE_KEY_PREFIX = `wb-game-video:video-library-metadata:v${VIDEO_LIBRARY_METADATA_VERSION}:`
+const CHANGE_EVENT = 'wb-game-video:video-library-metadata-change'
 
 export interface VideoLibraryMetadata {
   /** 仅存有分类的条目；没有键即表示 root / 未分类。 */
   tagsByEntryId: Record<string, string>
   /** Empty folders are kept separately so creating a folder survives reload. */
   folderNames: string[]
+}
+
+function notifyMetadataChanged(storageKey: string, storage?: VideoLibraryMetadataStorage): void {
+  if (storage !== undefined || typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(CHANGE_EVENT, { detail: { storageKey } }))
 }
 
 /** Creates an empty local folder without changing any Kino resource. */
@@ -44,6 +50,7 @@ export function writeVideoLibraryFolderName(
   }
   try {
     resolved.storage.setItem(storageKey, serializeMetadata(nextMetadata))
+    notifyMetadataChanged(storageKey, storage)
     return { status: 'written', storageKey, ...nextMetadata }
   } catch (error) {
     return unavailable('storage-unavailable', 'write', error)
@@ -238,6 +245,28 @@ export function readVideoLibraryMetadata(
   }
 }
 
+/** Subscribes to same-document writes and same-origin iframe storage changes. */
+export function subscribeVideoLibraryMetadata(
+  gameId: string,
+  listener: () => void,
+): () => void {
+  assertGameId(gameId)
+  if (typeof window === 'undefined') return () => {}
+  const storageKey = videoLibraryMetadataStorageKey(gameId)
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key === storageKey) listener()
+  }
+  const onChange = (event: Event): void => {
+    if ((event as CustomEvent<{ storageKey?: string }>).detail?.storageKey === storageKey) listener()
+  }
+  window.addEventListener('storage', onStorage)
+  window.addEventListener(CHANGE_EVENT, onChange)
+  return () => {
+    window.removeEventListener('storage', onStorage)
+    window.removeEventListener(CHANGE_EVENT, onChange)
+  }
+}
+
 /** Returns a tag by entry id; `null` is the root / 未分类 bucket. */
 export function resolveVideoLibraryEntryTag(
   entryId: string,
@@ -309,6 +338,7 @@ export function writeVideoLibraryEntryTag(
     } else {
       resolved.storage.setItem(storageKey, serializeMetadata(nextMetadata))
     }
+    notifyMetadataChanged(storageKey, storage)
     return { status: 'written', storageKey, ...nextMetadata }
   } catch (error) {
     return unavailable('storage-unavailable', 'write', error)

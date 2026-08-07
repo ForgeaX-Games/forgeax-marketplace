@@ -27,7 +27,7 @@ import type { GameNode, GameScenario, Layout, OverlayInstanceChild } from '../..
 import type { SkinCtx } from '../../runtime/component-host/rendererRegistry'
 import { bootEditorSkins } from '../init'
 import { injectStyleOnce } from '../../styles/injectStyle'
-import { createCoreSkinRegistry } from '../../runtime/component-host/components'
+import { createCoreSkinRegistry } from '../../runtime/component-host'
 import { resolveVideoFxForNode } from '../../runtime/fx/video-fx'
 import { CATALOG_CSS } from './catalogCss'
 import { renderOverlayChildPreview } from './overlayChildPreview'
@@ -40,7 +40,7 @@ import { MATERIAL_DND_MIME, MaterialTimeline } from '../video/MaterialTimeline'
 import { settlementInsertMsBeforePlayhead, type MaterialItem } from '../video/materialTimelineShared'
 import { collectNodeTimelineMarkers } from '../video/nodeTimelineMarkers'
 import { useVideoContentRect } from '../../runtime/play/useVideoContentRect'
-import { PRESET_SCHEME_BY_ID, overlayDisplayLabel } from './schemeOverlays'
+import { overlayDisplayLabel } from './schemeOverlays'
 import { listSchemeAndBaseOverlayIds } from '../demo/builtin-schemes'
 import {
   overlayMountId,
@@ -454,7 +454,7 @@ function EditableNodePreviewStage({
     () => resolveVideoFxForNode(node, overlays, playheadMs, maxMs),
     [node, overlays, playheadMs, maxMs],
   )
-  // 与视频 tab / 界面 tab 同源：完整皮肤表，不依赖 default 单例是否被 HMR 冲掉。
+  // 与 bootComponents / Session 同源：共享默认皮肤表。
   const previewSkinReg = useMemo(() => createCoreSkinRegistry(), [])
   const previewSkinCtx = useMemo((): SkinCtx => {
     const st = projectNodePreviewState(scenario, node, playheadMs, maxMs)
@@ -677,7 +677,7 @@ function EditableNodePreviewStage({
   /** 「添加控件」点击 / 拖入：挂载一张覆盖物（可带落点 ms → 整体平移到该时刻）。 */
   function mountOverlay(overlayId: string, atMs?: number): void {
     onEditScenario((s, n) => {
-      const s1 = mountOverlayGraph(s, n, overlayId, PRESET_SCHEME_BY_ID[overlayId])
+      const s1 = mountOverlayGraph(s, n, overlayId)
       if (atMs == null) return s1
       const n1 = s1.graph.nodes.find((x) => x.id === n.id) ?? n
       return shiftMountWindowGraph(s1, n1, maxMs, overlayId, { startMs: atMs })

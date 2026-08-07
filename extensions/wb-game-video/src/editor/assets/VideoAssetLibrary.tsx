@@ -10,6 +10,10 @@ import {
 } from 'react'
 import type { BlueprintDoc, GameScenario } from '../../runtime/schema/graph-schema'
 import { tf, useT } from '../../i18n'
+import generateToolbarIcon from '../../assets/asset-toolbar-generate.svg?url'
+import localToolbarIcon from '../../assets/asset-toolbar-local.svg?url'
+import externalToolbarIcon from '../../assets/asset-toolbar-external.svg?url'
+import searchToolbarIcon from '../../assets/asset-toolbar-search.svg?url'
 import type { MediaStatus } from './registry-types'
 import { findVideoReferences } from './video-references'
 import type { VideoAssetsController, VideoAssetListItem } from './useVideoAssets'
@@ -37,6 +41,8 @@ export interface VideoLibraryEntry {
   updatedAt?: number
   /** Optional future server-provided tag; current Kino resources use local metadata instead. */
   tag?: string
+  /** Durable Kino task identity for a generation card that has no resource yet. */
+  generationId?: string
 }
 
 export type { VideoAssetsController }
@@ -134,6 +140,9 @@ function RenameDialog({
   const [name, setName] = useState(entry.label)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const nextName = name.trim()
+  const submit = (): void => {
+    if (nextName && nextName !== entry.label && !busy) onConfirm(nextName)
+  }
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -145,17 +154,11 @@ function RenameDialog({
 
   return (
     <div className="val-dialog-backdrop" role="presentation">
-      <form
+      <div
         className="val-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (nextName && nextName !== entry.label && !busy) {
-            onConfirm(nextName)
-          }
-        }}
         onKeyDown={(event) => {
           if (event.key === 'Escape' && !busy) {
             event.preventDefault()
@@ -172,16 +175,22 @@ function RenameDialog({
           disabled={busy}
           aria-invalid={!nextName}
           onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              submit()
+            }
+          }}
         />
         {!nextName ? <div className="val-dialog-error">{t('videoAssets.emptyName')}</div> : null}
         {error ? <div className="val-dialog-error" role="alert">{error}</div> : null}
         <div className="val-dialog-actions">
           <button type="button" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
-          <button type="submit" disabled={!nextName || nextName === entry.label || busy}>
+          <button type="button" disabled={!nextName || nextName === entry.label || busy} onClick={submit}>
             {busy ? t('common.processing') : t('common.save')}
           </button>
         </div>
-      </form>
+      </div>
     </div>
   )
 }
@@ -215,8 +224,16 @@ function FolderDialog({
   const titleId = useId()
   const inputId = useId()
   const [name, setName] = useState(initialValue)
+  const [validationTriggered, setValidationTriggered] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const normalizedName = name.trim()
+  const emptyName = !allowClear && normalizedName.length === 0
+  const nameTooLong = normalizedName.length > 32
+
+  const submit = (): void => {
+    setValidationTriggered(true)
+    if (!emptyName && !nameTooLong && !busy) onConfirm(normalizedName)
+  }
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -226,15 +243,11 @@ function FolderDialog({
 
   return (
     <div className="val-dialog-backdrop" role="presentation">
-      <form
+      <div
         className="val-dialog val-folder-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if ((allowClear || normalizedName.length > 0) && !busy) onConfirm(normalizedName)
-        }}
         onKeyDown={(event) => {
           if (event.key === 'Escape' && !busy) {
             event.preventDefault()
@@ -250,7 +263,15 @@ function FolderDialog({
           value={name}
           maxLength={32}
           disabled={busy}
+          aria-invalid={validationTriggered && (emptyName || nameTooLong)}
           onChange={(event) => setName(event.target.value)}
+          onBlur={() => setValidationTriggered(true)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              submit()
+            }
+          }}
         />
         {existingFolders && existingFolders.length > 0 ? (
           <div className="val-folder-suggestions" aria-label="已有文件夹">
@@ -266,18 +287,18 @@ function FolderDialog({
             {t('videoAssets.folder.removeTag')}
           </button>
         ) : null}
-        {!allowClear && normalizedName.length === 0 ? (
-          <div className="val-dialog-error">{t('videoAssets.folder.emptyName')}</div>
+        {validationTriggered && emptyName ? (
+          <div className="val-dialog-error" role="alert">{t('videoAssets.folder.emptyName')}</div>
         ) : null}
-        {normalizedName.length > 32 ? <div className="val-dialog-error">{t('videoAssets.folder.nameTooLong')}</div> : null}
+        {validationTriggered && nameTooLong ? <div className="val-dialog-error" role="alert">{t('videoAssets.folder.nameTooLong')}</div> : null}
         {error ? <div className="val-dialog-error" role="alert">{error}</div> : null}
         <div className="val-dialog-actions">
           <button type="button" onClick={onCancel} disabled={busy}>{t('common.cancel')}</button>
-          <button type="submit" disabled={busy || (!allowClear && (normalizedName.length === 0 || normalizedName.length > 32))}>
+          <button type="button" disabled={busy || nameTooLong} onClick={submit}>
             {busy ? t('common.processing') : submitLabel}
           </button>
         </div>
-      </form>
+      </div>
     </div>
   )
 }
@@ -348,9 +369,13 @@ export interface VideoAssetLibraryProps {
   supplementalEntries?: VideoLibraryEntry[]
   selectedId: string
   boundId?: string
- onSelect: (id: string) => void
+  /** Sidebar-requested folder: `all`, `untagged`, or a real first-level tag. */
+  requestedFolder?: string
+  onFolderChange?: (folder: string) => void
+  onSelect: (id: string) => void
   onOpenPreview?: (id: string) => void
   onOpenGenerate?: () => void
+  onOpenGeneration?: (generationId: string) => void
   /** Opens the host-owned external-video import dialog when that integration is available. */
   onOpenExternalImport?: () => void
   onDeleted?: (id: string) => void
@@ -373,10 +398,13 @@ export function VideoAssetLibrary({
   bundledEntries = [],
   supplementalEntries = [],
   selectedId,
- boundId,
- onSelect,
+  boundId,
+  requestedFolder = 'all',
+  onFolderChange,
+  onSelect,
   onOpenPreview,
   onOpenGenerate,
+  onOpenGeneration,
   onOpenExternalImport,
   onDeleted,
   controller,
@@ -392,6 +420,7 @@ export function VideoAssetLibrary({
   const [operationError, setOperationError] = useState<string | null>(null)
   const [batchUpload, setBatchUpload] = useState<BatchUploadState | null>(null)
   const [selectionMode, setSelectionMode] = useState(false)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const [batchSelection, setBatchSelection] = useState<Set<string>>(() => new Set())
   const [pendingBatchDelete, setPendingBatchDelete] = useState(false)
   const renameTriggerRef = useRef<HTMLElement | null>(null)
@@ -407,7 +436,7 @@ export function VideoAssetLibrary({
   const [metadataError, setMetadataError] = useState<string | null>(
     initialMetadata.status === 'ready' ? null : '本地文件夹状态不可用，标签不会被持久化。',
   )
-  const [activeFolder, setActiveFolder] = useState('all')
+  const [activeFolder, setActiveFolder] = useState(requestedFolder)
   const [searchQuery, setSearchQuery] = useState('')
   const [pendingFolder, setPendingFolder] = useState(false)
   const [pendingTag, setPendingTag] = useState<VideoLibraryEntry | null>(null)
@@ -427,7 +456,9 @@ export function VideoAssetLibrary({
   const entries = (() => {
     const seen = new Set<string>()
     const out: VideoLibraryEntry[] = []
-    for (const entry of [...apiEntries, ...bundledEntries, ...supplementalEntries]) {
+    const activeGenerations = supplementalEntries.filter((entry) => entry.generationId)
+    const remainingSupplemental = supplementalEntries.filter((entry) => !entry.generationId)
+    for (const entry of [...activeGenerations, ...apiEntries, ...bundledEntries, ...remainingSupplemental]) {
       if (seen.has(entry.id)) {
         continue
       }
@@ -449,10 +480,18 @@ export function VideoAssetLibrary({
     setActiveFolder('all')
   }, [gameId])
 
+  useEffect(() => {
+    setActiveFolder(requestedFolder)
+  }, [requestedFolder])
+
   const folderNames = useMemo(
     () => listVideoLibraryFolderNames(metadata),
     [metadata],
   )
+  const selectFolder = (folder: string): void => {
+    setActiveFolder(folder)
+    onFolderChange?.(folder)
+  }
   const entryTag = (entry: VideoLibraryEntry): string | null => (
     normalizeVideoLibraryFolderName(entry.tag)
       ?? resolveVideoLibraryEntryTag(entry.id, metadata)
@@ -461,12 +500,18 @@ export function VideoAssetLibrary({
     const query = searchQuery.trim().toLocaleLowerCase()
     return entries.filter((entry) => {
       const tag = entryTag(entry)
+      if (activeFolder === 'all' && !query && tag !== null) return false
       if (activeFolder === 'untagged' && tag !== null) return false
       if (activeFolder !== 'all' && activeFolder !== 'untagged' && tag !== activeFolder) return false
       if (!query) return true
       return `${entry.label} ${entry.group} ${tag ?? ''}`.toLocaleLowerCase().includes(query)
     })
   }, [activeFolder, entries, metadata, searchQuery])
+  const visibleFolders = useMemo(() => {
+    if (activeFolder !== 'all') return []
+    const query = searchQuery.trim().toLocaleLowerCase()
+    return folderNames.filter((folder) => !query || folder.toLocaleLowerCase().includes(query))
+  }, [activeFolder, folderNames, searchQuery])
   const selectedLibraryEntry = entries.find((entry) => entry.id === selectedId)
 
   const showUploadStatus = batchUpload != null
@@ -523,7 +568,7 @@ export function VideoAssetLibrary({
     } finally {
       setMetadataBusy(false)
     }
-    setActiveFolder(folderName)
+    selectFolder(folderName)
     setPendingFolder(false)
   }
 
@@ -677,9 +722,7 @@ export function VideoAssetLibrary({
 
   return (
     <aside className="gc-list val-library" aria-label={t('videoAssets.libraryAria')}>
-      <div className="gc-list-head">
-        <span className="gc-list-ico" aria-hidden>🎥</span>
-        <span className="gc-list-title">{t('videoAssets.title')}</span>
+      <header className="val-library-head">
         <div className="val-library-sources" aria-label="视频素材入口">
           <button
             type="button"
@@ -687,10 +730,12 @@ export function VideoAssetLibrary({
             disabled={!onOpenGenerate}
             onClick={onOpenGenerate}
           >
-            <span aria-hidden>✨</span> {t('videoAssets.generate.entry')}
+            <span className="val-source-icon" aria-hidden><img src={generateToolbarIcon} alt="" /></span>
+            {t('videoAssets.generate.entry')}
           </button>
           <label className="val-head-upload val-source-action" aria-disabled={actionsBusy}>
-            <span aria-hidden>＋</span> {t('videoAssets.localUpload')}
+            <span className="val-source-icon" aria-hidden><img src={localToolbarIcon} alt="" /></span>
+            {t('videoAssets.localUpload')}
             <input
               className="val-head-upload-input"
               type="file"
@@ -706,12 +751,96 @@ export function VideoAssetLibrary({
             className="val-source-action val-source-external"
             disabled={!onOpenExternalImport}
             title={onOpenExternalImport ? undefined : '外部视频导入即将接入'}
+            aria-label="外部视频导入"
             onClick={onOpenExternalImport}
           >
-            <span aria-hidden>↗</span> 外部视频导入
+            <span className="val-source-icon" aria-hidden><img src={externalToolbarIcon} alt="" /></span>
+            外部
           </button>
         </div>
-        <button type="button" className={`val-head-select${selectionMode ? ' is-on' : ''}`} aria-label={selectionMode ? '退出多选' : '多选视频'} disabled={actionsBusy} onClick={() => { setSelectionMode((current) => !current); setBatchSelection(new Set()) }}>☑</button>
+        <div className="val-library-actions">
+          <div className="val-more-wrap">
+            <button
+              type="button"
+              className={`val-head-more${selectionMode ? ' is-on' : ''}`}
+              aria-label="更多视频操作"
+              aria-expanded={moreMenuOpen}
+              disabled={actionsBusy}
+              onClick={() => setMoreMenuOpen((current) => !current)}
+            >
+              ⋯
+            </button>
+            {moreMenuOpen ? (
+              <div className="val-more-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setSelectionMode((current) => !current)
+                    setBatchSelection(new Set())
+                    setMoreMenuOpen(false)
+                  }}
+                >
+                  {selectionMode ? '退出多选' : '多选视频'}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={controller.loading || actionsBusy}
+                  onClick={() => {
+                    setMoreMenuOpen(false)
+                    void controller.refresh()
+                  }}
+                >
+                  {t('videoAssets.refresh')}
+                </button>
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="val-folder-create"
+            disabled={actionsBusy}
+            onClick={(event) => {
+              folderTriggerRef.current = event.currentTarget
+              setPendingFolder(true)
+            }}
+          >
+            <span aria-hidden>＋</span>{t('videoAssets.folder.create')}
+          </button>
+          <label className="val-library-search">
+            <span className="val-search-icon" aria-hidden><img src={searchToolbarIcon} alt="" /></span>
+            <input
+              type="search"
+              value={searchQuery}
+              placeholder={t('videoAssets.folder.searchPlaceholder')}
+              aria-label={t('videoAssets.folder.searchAria')}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                className="val-search-clear"
+                aria-label="清空搜索"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setSearchQuery('')}
+              >
+                ×
+              </button>
+            ) : null}
+          </label>
+        </div>
+      </header>
+      <div className="val-library-breadcrumb" aria-label={t('videoAssets.folder.breadcrumbAria')}>
+        <button type="button" onClick={() => selectFolder('all')}>{t('videoAssets.folder.root')}</button>
+        <span aria-hidden>›</span>
+        <button type="button" disabled={activeFolder === 'all'} onClick={() => selectFolder('all')}>{t('videoAssets.title')}</button>
+        {activeFolder !== 'all' ? (
+          <><span aria-hidden>›</span><strong>{activeFolder === 'untagged' ? t('videoAssets.folder.untagged') : activeFolder}</strong></>
+        ) : null}
+      </div>
+
+      <div className="val-library-status-row">
         {showUploadStatus ? (
           <div className="val-head-status" role="status" aria-live="polite">
             {batchUpload ? (
@@ -747,16 +876,17 @@ export function VideoAssetLibrary({
             ) : null}
           </div>
         ) : null}
-        <span className="gc-list-count">{entries.length}</span>
-        <button
-          type="button"
-          className="val-head-refresh"
-          aria-label={t('videoAssets.refresh')}
-          onClick={() => void controller.refresh()}
-          disabled={controller.loading || actionsBusy}
-        >
-          ↻
-        </button>
+        {selectedLibraryEntry ? (
+          <button
+            type="button"
+            className="val-tag-action"
+            disabled={actionsBusy}
+            onClick={(event) => openTagDialog(selectedLibraryEntry, event.currentTarget)}
+          >
+            {entryTag(selectedLibraryEntry) ? t('videoAssets.folder.changeTag') : t('videoAssets.folder.setTag')}
+          </button>
+        ) : null}
+        <span className="val-library-count">{entries.length} 个视频</span>
       </div>
       {selectionMode ? <div className="val-batch-bar"><span>已选 {batchSelection.size} 项</span><button type="button" disabled={batchSelection.size === 0 || actionsBusy} onClick={() => setPendingBatchDelete(true)}>删除选中</button><button type="button" disabled={actionsBusy} onClick={() => { setSelectionMode(false); setBatchSelection(new Set()) }}>完成</button></div> : null}
 
@@ -766,103 +896,45 @@ export function VideoAssetLibrary({
         </div>
       ) : null}
 
-      <div className="val-library-layout">
-        <nav className="val-folder-rail" aria-label={t('videoAssets.folder.aria')} role="tablist" aria-orientation="vertical">
-          <div className="val-folder-rail-head">
-            <span>{t('videoAssets.folder.title')}</span>
-            <button
-              type="button"
-              className="val-folder-add"
-              aria-label={t('videoAssets.folder.create')}
-              disabled={actionsBusy}
-              onClick={(event) => {
-                folderTriggerRef.current = event.currentTarget
-                setPendingFolder(true)
-              }}
-            >
-              ＋
-            </button>
-          </div>
-          <button
-            type="button"
-            role="tab"
-            className={`val-folder-item${activeFolder === 'all' ? ' is-on' : ''}`}
-            aria-controls={folderContentId}
-            aria-selected={activeFolder === 'all'}
-            onClick={() => setActiveFolder('all')}
-          >
-            <span aria-hidden>▦</span>
-            <span>{t('videoAssets.folder.all')}</span>
-            <span className="val-folder-count">{entries.length}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`val-folder-item${activeFolder === 'untagged' ? ' is-on' : ''}`}
-            aria-controls={folderContentId}
-            aria-selected={activeFolder === 'untagged'}
-            onClick={() => setActiveFolder('untagged')}
-          >
-            <span aria-hidden>□</span>
-            <span>{t('videoAssets.folder.untagged')}</span>
-            <span className="val-folder-count">{entries.filter((entry) => entryTag(entry) === null).length}</span>
-          </button>
-          {folderNames.map((folder) => (
-            <button
-              key={folder}
-              type="button"
-              role="tab"
-              className={`val-folder-item${activeFolder === folder ? ' is-on' : ''}`}
-              aria-controls={folderContentId}
-              aria-selected={activeFolder === folder}
-              onClick={() => setActiveFolder(folder)}
-            >
-              <span aria-hidden>▰</span>
-              <span className="val-folder-label">{folder}</span>
-              <span className="val-folder-count">{entries.filter((entry) => entryTag(entry) === folder).length}</span>
-            </button>
-          ))}
-        </nav>
-
-        <section id={folderContentId} className="val-library-content" role="tabpanel" aria-label={t('videoAssets.folder.contentAria')}>
-          <div className="val-library-toolbar">
-            <div className="val-breadcrumb" aria-label={t('videoAssets.folder.breadcrumbAria')}>
-              <span>{t('videoAssets.folder.root')}</span>
-              <span aria-hidden>/</span>
-              <strong>{activeFolder === 'all' ? t('videoAssets.title') : activeFolder === 'untagged' ? t('videoAssets.folder.untagged') : activeFolder}</strong>
-            </div>
-            <input
-              className="val-library-search"
-              type="search"
-              value={searchQuery}
-              placeholder={t('videoAssets.folder.searchPlaceholder')}
-              aria-label={t('videoAssets.folder.searchAria')}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-            {selectedLibraryEntry ? (
-              <button
-                type="button"
-                className="val-tag-action"
-                disabled={actionsBusy}
-                onClick={(event) => openTagDialog(selectedLibraryEntry, event.currentTarget)}
-              >
-                {entryTag(selectedLibraryEntry) ? t('videoAssets.folder.changeTag') : t('videoAssets.folder.setTag')}
-              </button>
-            ) : null}
-          </div>
+      <section id={folderContentId} className="val-library-content" aria-label={t('videoAssets.folder.contentAria')}>
           {metadataError || metadataOperationError ? (
             <div className="val-meta-warning" role="status">{metadataOperationError ?? metadataError}</div>
           ) : null}
           <div className="gc-list-body" ref={listBodyRef}>
-            {controller.loading && entries.length === 0 ? (
+            {visibleFolders.map((folder) => {
+              const previews = entries.filter((entry) => entryTag(entry) === folder).slice(0, 6)
+              return (
+                <article key={folder} className="val-folder-card">
+                  <button
+                    type="button"
+                    className="val-folder-open"
+                    aria-label={`${folder} ${entries.filter((entry) => entryTag(entry) === folder).length}`}
+                    onClick={() => selectFolder(folder)}
+                  >
+                    <span className="val-folder-visual" aria-hidden>
+                      <span className="val-folder-preview">
+                        {previews.map((entry) => (
+                          <span key={entry.id} className="val-folder-preview-item">
+                            {entry.url ? <video src={entry.url} muted playsInline preload="metadata" /> : <span>▶</span>}
+                          </span>
+                        ))}
+                      </span>
+                    </span>
+                    <span className="val-folder-name" title={folder}>{folder}</span>
+                  </button>
+                </article>
+              )
+            })}
+
+            {controller.loading && entries.length === 0 && visibleFolders.length === 0 ? (
               <div className="val-empty" role="status">{t('videoAssets.loading')}</div>
             ) : null}
 
-            {!controller.loading && entries.length === 0 ? (
+            {!controller.loading && entries.length === 0 && visibleFolders.length === 0 ? (
               <div className="val-empty">{t('videoAssets.empty')}</div>
             ) : null}
 
-            {!controller.loading && entries.length > 0 && filteredEntries.length === 0 ? (
+            {!controller.loading && entries.length > 0 && filteredEntries.length === 0 && visibleFolders.length === 0 ? (
               <div className="val-empty">{t('videoAssets.folder.empty')}</div>
             ) : null}
 
@@ -870,7 +942,6 @@ export function VideoAssetLibrary({
               const isSelected = entry.id === selectedId
               const isBound = entry.id === boundId
               const label = displayLabel(entry)
-              const tag = entryTag(entry)
               return (
                 <div key={entry.id} className={`val-row${isSelected ? ' is-on' : ''}${selectionMode ? ' is-selecting' : ''}`}>
                   <button
@@ -878,7 +949,14 @@ export function VideoAssetLibrary({
                     data-clip-id={entry.id}
                     className={`gc-row${isSelected ? ' is-on' : ''}`}
                     aria-label={label}
-                    onClick={() => { onSelect(entry.id); onOpenPreview?.(entry.id) }}
+                    onClick={() => {
+                      if (entry.generationId) {
+                        onOpenGeneration?.(entry.generationId)
+                        return
+                      }
+                      onSelect(entry.id)
+                      onOpenPreview?.(entry.id)
+                    }}
                     onDoubleClick={(event) => {
                       if (entry.fromApi && !actionsBusy) {
                         openRenameDialog(entry, event.currentTarget)
@@ -886,15 +964,15 @@ export function VideoAssetLibrary({
                     }}
                   >
                     {isBound ? <span className="gc-row-mark" aria-hidden>✓</span> : null}
-                    <span className="val-card-thumb" aria-hidden>
-                      {entry.url ? <video src={entry.url} muted playsInline preload="metadata" /> : <span>▶</span>}
+                    <span className={`val-card-thumb${entry.generationId ? ' is-generating' : ''}`} aria-hidden>
+                      {entry.url
+                        ? <video src={entry.url} muted playsInline preload="metadata" />
+                        : entry.generationId
+                          ? <span className="val-generation-spinner" />
+                          : <span>▶</span>}
                     </span>
                     <span className="val-card-copy">
                       <span className="gc-row-label" title={label}>{label}</span>
-                      <span className="val-card-meta" aria-hidden>
-                        {tag ? <span className="val-card-tag">{tag}</span> : <span>{t('videoAssets.folder.untagged')}</span>}
-                        {entry.type ? <span>{entry.type}</span> : null}
-                      </span>
                     </span>
                     {entry.status && entry.status !== 'ready' ? (
                       <span className={`gvv-row-status is-${entry.status}`}>
@@ -918,7 +996,7 @@ export function VideoAssetLibrary({
                           openRenameDialog(entry, event.currentTarget)
                         }}
                       >
-                        {t('videoAssets.rename')}
+                        <span aria-hidden>✎</span><span className="sr-only">{t('videoAssets.rename')}</span>
                       </button>
                       <button
                         type="button"
@@ -930,7 +1008,7 @@ export function VideoAssetLibrary({
                           openDeleteDialog(entry, event.currentTarget)
                         }}
                       >
-                        {t('videoAssets.delete')}
+                        <span aria-hidden>×</span><span className="sr-only">{t('videoAssets.delete')}</span>
                       </button>
                     </>
                   ) : null}
@@ -951,8 +1029,7 @@ export function VideoAssetLibrary({
               {controller.loading ? t('videoAssets.loadingMore') : t('videoAssets.loadMore')}
             </button>
           ) : null}
-        </section>
-      </div>
+      </section>
 
       {pendingDelete ? (
         <ConfirmDialog

@@ -10,6 +10,9 @@ describe('WB_GAME_VIDEO_HTTP_ROUTES', () => {
     expect(keys).toEqual([
       'GET assets',
       'GET assets/:id',
+      'GET documents',
+      'GET documents/:id',
+      'POST documents/selection',
       'GET media/bundled/:name',
       'GET style-axes',
       'POST style-axes',

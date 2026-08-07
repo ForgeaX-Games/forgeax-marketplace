@@ -1,8 +1,11 @@
 # component-host/commons
 
-预留：**真正跨游戏共享的公共组件**放这里（现为空）。
+预留：**真正跨游戏共享的公共组件**放这里（现为空，且当前未接入默认 catalog）。
 
-- `components/` = 本期组件集（本质属游戏，先留平台供各处引用；保存时同步一份到游戏仓 `.forgeax/games/<slug>/components/`）。
-- `commons/` = 将来出现「所有游戏都通用」的组件时，放这里，由 `component-host` 与 `components/` / 游戏仓组件合并注册。
+- `components/` 是当前仓内内建 catalog，条目形状统一为 `{ component, manifest }`。
+- `commons/` 仅是未来公共 catalog 的预留位置；只新增文件不会自动注册，也不会自动同步到游戏仓。
+- 公共 manifest 同样使用 `components/manifest.ts` 的本地契约，不得直接依赖平台 schema；平台
+  `ComponentDef` / `ComponentManifest` 转换只发生在 `component-host/index.ts`。
 
-放入公共组件后，在 `component-host/index.ts` 里把 `commons` 也纳入 `registerBuiltins()` / 合并访问器即可。
+将来启用 `commons/` 时，应导出与 `components/index.ts` 相同形状的 catalog，并在
+`bootComponents()` / `ensureBuiltins()` 的内建注册路径中显式合并。

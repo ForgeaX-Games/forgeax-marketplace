@@ -7,7 +7,7 @@
  *     获得，不用接任何 props。
  *   - `localMsForChild` + rendererRegistry 的 preview/previewTimeMs 统一管「时刻」：只有少数要
  *     scrub 精确对齐入场帧、或自己用 rAF 计时的皮肤才需要按需 opt-in
- *     （见 `runtime/component-host/components/skinRuntime.ts` 的 previewFreezeClass/previewTStyle）。
+ *     （见 `runtime/component-host/components/skinRuntime.ts` 的 previewTStyle）。
  */
 import { createContext, useContext } from 'react'
 import type { OverlayChild } from '../../runtime/schema/graph-schema'

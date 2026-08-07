@@ -81,6 +81,51 @@ describe('wb-game-video media routing', () => {
     expect(response.status).toBe(400)
   })
 
+  it('keeps resumable chunks within the Workbench Host request-body limit', async () => {
+    const context = {
+      gameId: 'game-1',
+      media: {
+        createUpload: async () => ({
+          id: 'upload-1',
+          filename: 'large.mp4',
+          contentType: 'video/mp4',
+          sizeBytes: 5 * 1024 * 1024,
+          offset: 0,
+          state: 'uploading',
+        }),
+        getUpload: async () => null,
+        writeUploadChunk: async () => null,
+        completeUpload: async () => { throw new Error('unused') },
+        update: async () => null,
+      },
+    } as unknown as WorkbenchExtensionContext
+
+    const response = await createWbGameVideoRouter(context).handle({
+      gameId: 'game-1',
+      runtimeId: 'runtime-1',
+      method: 'POST',
+      path: 'media/image-assets/upload',
+      headers: { 'content-type': ['application/json'] },
+      query: {},
+      body: new TextEncoder().encode(JSON.stringify({
+        game_id: 'game-1',
+        file_name: 'large.mp4',
+        mime_type: 'video/mp4',
+        bytes: 5 * 1024 * 1024,
+      })),
+    })
+
+    expect(response.status).toBe(200)
+    expect(JSON.parse(new TextDecoder().decode(response.body))).toMatchObject({
+      data: {
+        upload: {
+          chunk_size: 1024 * 1024,
+          chunk_count: 5,
+        },
+      },
+    })
+  })
+
   it('completes batch resources through resumable Host media without caller-selected games', async () => {
     const completed: string[] = []
     const context = {

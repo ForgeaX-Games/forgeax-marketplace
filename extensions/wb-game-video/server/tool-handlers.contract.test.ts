@@ -1,7 +1,7 @@
 import type { WorkbenchExtensionContext } from '@forgeax/workbench-host/node'
 import type { ServiceCapability, VideoGenerationGateway } from '@forgeax/workbench-host/contracts'
 import { describe, expect, test } from 'vitest'
-import { makeNodiaDemo } from '../src/editor/demo/demo'
+import { NODIA_DEMO_PROJECT } from '../src/editor/demo/demo'
 import tools from './tool-handlers'
 
 const encoder = new TextEncoder()
@@ -70,7 +70,7 @@ function createContext(gameId = 'contract-game') {
 describe('host tool context contract', () => {
   test('persists graph data only through its injected bounded host context', async () => {
     const { context, entries } = createContext()
-    const project = makeNodiaDemo()
+    const project = structuredClone(NODIA_DEMO_PROJECT)
 
     await expect(tools['wb-game-video:save-graph']!(
       context,
