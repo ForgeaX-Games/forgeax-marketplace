@@ -39,6 +39,11 @@ export interface MaterialItem {
    * 未标记 = 仍跟随方案，改方案会同步；标记后可在素材属性里「↺ 回连方案」。
    */
   overridden?: boolean
+  /**
+   * 视频条帧画面地址（剪映同款 Filmstrip）。
+   * 优先于 `MaterialTimeline` 的统一 `videoSrc`；Flow 多段预览用它按片段各自抽帧。
+   */
+  videoSrc?: string
 }
 
 /**
@@ -76,10 +81,15 @@ export interface TimelinePointMarker {
   draggable?: boolean
 }
 
-/** 无固定时间坐标的结算条件；在时间轴上以贯穿节点时长的条件条表达。 */
+/** 无固定时间坐标的结算条件；每个条件在时间轴上独占一轨（行结构：↻ 条件 chips → 动作 chips）。 */
 export interface TimelineConditionMarker {
   id: string
+  /** 完整文案（title / 无障碍名），由条件侧 + 动作侧拼接。 */
   label: string
+  /** 条件侧分段 chips（如 [分数, 增加] / [满足 2 项条件]）。 */
+  conditionChips: string[]
+  /** 动作侧分段 chips（效果 / 绑定界面 / 推进各一段）。 */
+  actionChips: string[]
 }
 
 /**
@@ -141,7 +151,47 @@ export const TIMELINE_MAX_LAYER = 15
 // 默认可见轨数（0..MIN-1）；更多轨道由固定高度视口纵向滚动查看。
 export const TIMELINE_MIN_TRACKS = 6
 export const ZOOM_MIN = 1
-export const ZOOM_MAX = 20
+export const ZOOM_MAX = 5
+/** 缩放步进（±按钮 / 滑轨吸附粒度）。 */
+export const ZOOM_STEP = 0.2
+
+/** 滚动条量级：视口宽在此幅度内来回跳，判为滚动条显隐引起的自激振荡而非真实布局变化。 */
+export const SCROLLBAR_JITTER_PX = 24
+
+/**
+ * 视口宽度闩锁状态。
+ *
+ * 画布宽由视口 `clientWidth` 派生，而滚动条显隐又会改 `clientWidth`，天然成环：
+ * 画布变宽 → 出横向滚动条 → 内高变矮 → 出纵向滚动条 → clientWidth 变窄 → 画布变窄 → …
+ * 每帧抽动一次，还会让视频条帧画面位图反复重建。
+ *
+ * 不用 `scrollbar-gutter: stable` 切环：常驻沟槽会破坏设计稿的时间轴观感。改在这里闩住——
+ * 一旦观察到「按滚动条量级变窄」，就记住那个更宽的值；它再次出现时不再采用，环在一个来回内收敛。
+ */
+export interface ViewportWidthLatch {
+  /** 当前采用的视口宽。 */
+  width: number
+  /** 被判为滚动条抖动而压住的更宽值；再次量到同一值时忽略。 */
+  suppressed: number | null
+}
+
+export function initialViewportWidthLatch(): ViewportWidthLatch {
+  return { width: 0, suppressed: null }
+}
+
+/** 收到一次测量：返回新的闩锁状态（无变化时返回原对象，避免多余渲染）。 */
+export function latchViewportWidth(state: ViewportWidthLatch, measured: number): ViewportWidthLatch {
+  if (measured === state.width) return state
+  const delta = measured - state.width
+  // 真实布局变化（拖分栏 / 窗口缩放）：直接采用并清掉旧怀疑对象。
+  if (Math.abs(delta) > SCROLLBAR_JITTER_PX) return { width: measured, suppressed: null }
+  // 已被压住的宽度再次出现 = 正在来回抖，维持窄值（它不会再触发横向滚动条）。
+  if (measured === state.suppressed) return state
+  // 按滚动条量级变窄：采用窄值，并记住刚才那个更宽的值。
+  if (delta < 0) return { width: measured, suppressed: state.width }
+  // 首次按滚动条量级变宽：可能是真实变化，先采用；若随后又缩回来就会被上面两条收敛。
+  return { width: measured, suppressed: state.suppressed }
+}
 
 /** 前端时间输入分度：0.01 秒（底层仍存毫秒）。 */
 export const TIME_STEP_SEC = 0.01
@@ -185,6 +235,15 @@ export function fmtDur(ms: number): string {
   const m = Math.floor(totalSec / 60)
   const s = totalSec - m * 60
   return `${m}:${s.toFixed(2).padStart(5, '0')}`
+}
+
+/** ruler 时刻标签（Figma 15635:85018）：`mm:ss` 双双补零；亚秒刻度加一位小数（`00:00.5`）。 */
+export function fmtTickClock(ms: number): string {
+  const totalSec = Math.max(0, ms) / 1000
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec - m * 60
+  const ss = Number.isInteger(s) ? String(s).padStart(2, '0') : s.toFixed(1).padStart(4, '0')
+  return `${String(m).padStart(2, '0')}:${ss}`
 }
 
 export function clampMs(v: number, min: number, max: number): number {
@@ -232,7 +291,7 @@ export function buildMaterialTicks(maxMs: number, pxPerMs: number): Array<{ ms: 
   const nice = [100, 200, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000]
   const step = nice.find((n) => n >= rawMs) ?? 120000
   const out: Array<{ ms: number; label: string }> = []
-  for (let t = 0; t <= maxMs + 1; t += step) out.push({ ms: t, label: fmtDur(t) })
+  for (let t = 0; t <= maxMs + 1; t += step) out.push({ ms: t, label: fmtTickClock(t) })
   return out
 }
 

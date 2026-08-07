@@ -16,7 +16,7 @@ import { injectStyleOnce } from '../../styles/injectStyle'
 import { CATALOG_CSS } from './catalogCss'
 import { GRAPH_VIDEO_VIEW_CSS } from './graphVideoViewStyles'
 import { forgeaxHost } from '../../platform/HostSdkBridge'
-import { buildNodeReferencePill } from './node-agent-context'
+import { buildNodeContextReference } from './node-agent-context'
 
 interface NodeAgentVideoActionsProps {
   game: string
@@ -103,10 +103,10 @@ export function NodeAgentVideoActions({
 
   function referenceNode(): void {
     if (!forgeaxHost.available) {
-      setAgentStatus({ text: '请在 Studio 中打开后使用侧边 Chat', error: true })
+      setAgentStatus({ text: '当前无 Agent 可接收引用', error: true })
       return
     }
-    forgeaxHost.composer.insert(buildNodeReferencePill({
+    forgeaxHost.composer.insertReference(buildNodeContextReference({
       gameId: game,
       blueprintId,
       blueprintTitle,

@@ -66,6 +66,11 @@ describe('BattleParry', () => {
     expect(container.firstElementChild).toHaveStyle({ '--preview-t': '1500ms' })
   })
 
+  it('exposes the animated green-ring bounds to library preview measurement', () => {
+    const { container } = render(<BattleParry preview previewTimeMs={400} />)
+    expect(container.querySelector('.pvb-parry-visual-bounds')).toHaveAttribute('data-overlay-hit-target')
+  })
+
   it('declares the three QTE result events', () => {
     expect(BattleParryManifest.inputs).toEqual([
       { key: 'firstKey', label: '第一按键', valueType: 'string', default: 'A' },

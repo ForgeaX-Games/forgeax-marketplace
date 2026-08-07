@@ -71,6 +71,13 @@ import {
   shiftMountWindowGraph,
 } from '../video/graphMaterialOps'
 import { FlowNodePreviewStage, type FlowNodePreviewState } from './FlowNodePreviewStage'
+import {
+  formatPreviewTime,
+  PreviewPauseIcon,
+  PreviewPlayIcon,
+  PreviewRefreshIcon,
+  PreviewVolumeIcon,
+} from './nodePreviewControls'
 
 export type { FlowNodePreviewState } from './FlowNodePreviewStage'
 
@@ -94,34 +101,43 @@ const NPS_CSS = `
   --gc-accent-soft: var(--accent-soft, rgba(240,136,64,.16));
   --gc-accent-line: var(--accent-line, rgba(240,136,64,.42));
   display: flex; flex-direction: column; gap: 8px;
-  padding: 10px; min-height: 0; overflow-y: auto; flex: 1;
+  padding: 10px; min-height: 0; overflow-y: auto; flex: 1; background: #2C2C2C;
 }
 .nps-frame { flex: none; }
+/* Figma 14935:70362：节点编辑与全流程预览共用浅灰半透圆角视频面。
+   .nps-frame-edit 是这套视觉壳的历史类名，不表示可编辑能力；交互权限仍由各模式自身控制。 */
+.nps-frame-edit {
+  background: rgba(217,217,217,0.1);
+  border: none;
+  border-radius: 10px;
+}
+/* Figma 15635:84858：视频控制卡 = 帧下方独立卡片（#292625 + 白 6% 描边，圆角 4），
+   左：暂停/重播/音量（图标 15px，间距 12）；右：时长。不再使用帧内渐变 HUD。 */
+.nps-video-controls {
+  display: flex; align-items: center; justify-content: space-between; flex: none;
+  background: #292625; border: 1px solid rgba(255,255,255,0.06); border-radius: 4px;
+  padding: 4.5px 10px;
+}
+.nps-video-controls-left { display: flex; align-items: center; gap: 12px; height: 15px; }
+.nps-video-controls-right { display: flex; align-items: center; gap: 8px; }
+.nps-video-controls button {
+  flex: none; width: 15px; height: 15px; padding: 0; border: none; border-radius: 0;
+  background: none; color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.nps-video-controls button:hover { background: none; }
+.nps-hud-btn-dim { opacity: .4; }
+.nps-hud-time {
+  font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.8);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.nps-hud-time > span { color: rgba(255,255,255,0.4); }
+.nps-video-controls .nps-timeline-toggle { color: rgba(255,255,255,.6); }
+.nps-video-controls .nps-timeline-toggle:hover { color: #fff; }
 .nps-stage-empty {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 4px;
   color: rgba(246,241,233,.45); font-size: 11px; pointer-events: none; padding: 0 16px; text-align: center;
 }
-.nps-controls {
-  display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-radius: 9px;
-  background: var(--gc-panel2); border: 1px solid var(--gc-line-soft); flex: none;
-}
-.nps-controls button {
-  flex: none; width: 30px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--gc-accent-line); background: var(--gc-accent-soft); color: var(--gc-text);
-  border-radius: 7px; cursor: pointer; font-size: 12px; line-height: 1;
-}
-.nps-controls button:hover { background: rgba(240,136,64,.24); border-color: var(--gc-accent); }
-.nps-time { color: var(--gc-faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.nps-controls .nps-mute { margin-left: auto; }
-.nps-controls .nps-timeline-toggle {
-  margin-left: auto; padding: 0; color: var(--gc-muted); transition:
-    background var(--motion-duration-base, 150ms) var(--motion-ease-out, ease),
-    border-color var(--motion-duration-base, 150ms) var(--motion-ease-out, ease),
-    color var(--motion-duration-fast, 110ms) var(--motion-ease-out, ease);
-}
-.nps-controls .nps-mute + .nps-timeline-toggle { margin-left: 0; }
-.nps-controls .nps-timeline-toggle:hover { color: var(--gc-text); }
 .nps-timeline-toggle-icon {
   position: relative; flex: none; width: 16px; height: 16px; display: block;
 }
@@ -153,7 +169,10 @@ const NPS_CSS = `
 .nps-more-pop button { justify-content: flex-start; width: 100%; border-color: transparent; background: transparent; }
 .nps-more-pop button:hover { background: var(--gc-accent-soft); border-color: var(--gc-accent-line); }
 .nps-more-empty { font-size: 11px; color: var(--gc-faint); padding: 6px 8px; }
-.nps-root .mtl-root { flex: none; }
+/* 时间轴宿主列：占满预览列剩余竖直空间（flex 链定界），轨道超出时滚动发生在时间轴视口内部，
+   而不是顶高整列。mtl-root 沿链接力；视口自身地板高度由 --gc-timeline-h 保底。 */
+.nps-root .nps-timeline-host { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.nps-root .nps-timeline-host > .mtl-root { flex: 1 1 auto; min-height: 0; }
 `
 
 const NODE_VIDEO_TRACK_KEY = '__node-video__'
@@ -170,13 +189,6 @@ function isFullStageMountLayout(layout: Layout | undefined): boolean {
     && layout.translateX == null
     && layout.translateY == null
   )
-}
-
-function fmtTime(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000))
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
 /**
@@ -575,6 +587,13 @@ function EditableNodePreviewStage({
     onMutedChange(!muted)
   }
 
+  /** 从头重播（控制卡刷新钮）：播放头归零并起播；无视频时仅归零播放头。 */
+  function replayFromStart(): void {
+    seekTo(0)
+    const v = videoRef.current
+    if (v) void v.play().catch(() => { /* autoplay 限制 */ })
+  }
+
   // ── 写回（全部走 graphMaterialOps 既有映射，无新协议字段） ─────────────────
   /** 时间轴挂载条整体平移（patchMaterialGraph 的 mount 分支）。 */
   function patchMaterial(item: MaterialItem, patch: { startMs?: number; endMs?: number; zIndex?: number; markerMs?: number }): void {
@@ -894,7 +913,7 @@ function EditableNodePreviewStage({
 
   return (
     <div className="nps-root">
-      <div className="gc-frame nps-frame" data-type="video">
+      <div className="gc-frame nps-frame nps-frame-edit" data-type="video">
         {previewSrc && !loadError ? (
           <video
             key={`${node.id}:${mediaRef}`}
@@ -1050,15 +1069,24 @@ function EditableNodePreviewStage({
         </div>
       </div>
 
-      <div className="nps-controls">
-        <button type="button" onClick={togglePlay} title={isVideoPlaying ? '暂停' : '播放'} aria-label={isVideoPlaying ? '暂停' : '播放'}>
-          {isVideoPlaying ? '⏸' : '▶'}
-        </button>
-        <span className="nps-time">{fmtTime(playheadMs)} / {fmtTime(maxMs)}</span>
-        <button type="button" className="nps-mute" onClick={toggleMute} title={muted ? '取消静音' : '静音'} aria-label={muted ? '取消静音' : '静音'}>
-          {muted ? '🔇' : '🔊'}
-        </button>
-        {timelineToggle}
+      {/* 视频控制卡（Figma 15635:84858）：帧下方独立卡片——左：暂停/重播/音量；右：时长。
+          重播复用既有 seekTo + play（togglePlay 播完重开的同源动作），无视频时按钮行为同前为空值守卫。 */}
+      <div className="nps-video-controls">
+        <div className="nps-video-controls-left">
+          <button type="button" onClick={togglePlay} title={isVideoPlaying ? '暂停' : '播放'} aria-label={isVideoPlaying ? '暂停' : '播放'}>
+            {isVideoPlaying ? <PreviewPauseIcon /> : <PreviewPlayIcon />}
+          </button>
+          <button type="button" onClick={replayFromStart} title="从头重播" aria-label="从头重播">
+            <PreviewRefreshIcon />
+          </button>
+          <button type="button" className={muted ? 'nps-hud-btn-dim' : undefined} onClick={toggleMute} title={muted ? '取消静音' : '静音'} aria-label={muted ? '取消静音' : '静音'}>
+            <PreviewVolumeIcon />
+          </button>
+        </div>
+        <div className="nps-video-controls-right">
+          <span className="nps-hud-time">{formatPreviewTime(playheadMs)}<span> / {formatPreviewTime(maxMs)}</span></span>
+          {timelineToggle}
+        </div>
       </div>
 
       {/* 「添加控件」= 覆盖物挂载入口：前 5 个未挂载覆盖物点击直接挂载，「更多」展开完整列表。 先暂时隐藏 */}
@@ -1109,11 +1137,15 @@ function EditableNodePreviewStage({
       </div>
 
       {timelineExpanded ? (
-        <div id={timelineId} ref={timelineHostRef}>
+        <div id={timelineId} ref={timelineHostRef} className="nps-timeline-host">
+          {/* key=node.id：切节点整体重挂载——zoom（1× 默认）等时间轴本地状态随之重置，
+              避免上一个节点的 20× 残留到下一个节点（滚动条莫名变长）。 */}
           <MaterialTimeline
+            key={node.id}
             materials={timelineMaterials}
             maxMs={maxMs}
             playheadMs={playheadMs}
+            videoSrc={previewSrc}
             mediaPlayhead={playMode === 'loop' && mediaRef
               ? { materialKey: NODE_VIDEO_TRACK_KEY, localMs: mediaPlayheadMs }
               : undefined}

@@ -12,11 +12,6 @@
     "title": {
       "type": "string",
       "description": "Reserved human-readable label. Accepted for compatibility but currently ignored."
-    },
-    "gameSlug": {
-      "type": "string",
-      "pattern": "^(?!\\.{1,2}$)[^/\\\\]+$",
-      "description": "Optional explicit game id; when present it must exactly equal the host-bound game. Unicode and single-character ids are supported."
     }
   }
 }

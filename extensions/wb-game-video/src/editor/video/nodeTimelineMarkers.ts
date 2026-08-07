@@ -4,7 +4,8 @@ import { isSettlementReaction, type NodeAction } from '../../runtime/schema/node
 import { elementStartMs } from '../../graph/canvas/timeline-geometry'
 import type { TimelineConditionMarker, TimelinePointMarker } from './materialTimelineShared'
 
-function effectsBrief(actions: NodeAction[]): string {
+/** 动作侧分段：效果 / 绑定界面 / 隐藏界面 / 沿边推进各成一段，供条件行 chips 与 label 复用。 */
+function effectsParts(actions: NodeAction[]): string[] {
   const effects = actions.flatMap((action) => (action.kind === 'effect' ? action.effects : []))
   const spawns = actions.filter((action) => action.kind === 'spawn').length
   const hiddenOverlays = actions.filter((action) => action.kind === 'hideOverlay').length
@@ -18,7 +19,11 @@ function effectsBrief(actions: NodeAction[]): string {
   if (spawns > 0) parts.push(`绑定 ${spawns} 个界面`)
   if (hiddenOverlays > 0) parts.push(`隐藏 ${hiddenOverlays} 个界面`)
   if (actions.some((action) => action.kind === 'advance')) parts.push('沿边推进')
-  return parts.length ? parts.join(' · ') : '未配置动作'
+  return parts.length ? parts : ['未配置动作']
+}
+
+function effectsBrief(actions: NodeAction[]): string {
+  return effectsParts(actions).join(' · ')
 }
 
 function matchesReactionTarget(of: string, child: OverlayInstanceChild): boolean {
@@ -49,7 +54,8 @@ export function collectNodeTimelineMarkers(
   const children = expandNodeChildren(scenario, node)
   ;(node.data.reactions ?? []).filter(isSettlementReaction).forEach((reaction, settlementIndex) => {
     const id = `life:${settlementIndex}`
-    const actionLabel = effectsBrief(reaction.do)
+    const actionChips = effectsParts(reaction.do)
+    const actionLabel = actionChips.join(' · ')
     if (reaction.when.type === 'at' || reaction.when.type === 'enter') {
       pointMarkers.push({
         id,
@@ -61,12 +67,14 @@ export function collectNodeTimelineMarkers(
     }
     if (reaction.when.type === 'watch') {
       const direction = reaction.when.on === 'inc' ? '增加' : reaction.when.on === 'dec' ? '减少' : '变化'
-      conditionMarkers.push({ id, label: `${reaction.when.of || '未选数值'} ${direction} → ${actionLabel}` })
+      const conditionChips = [reaction.when.of || '未选数值', direction]
+      conditionMarkers.push({ id, label: `${conditionChips.join(' ')} → ${actionLabel}`, conditionChips, actionChips })
       return
     }
     if (reaction.when.type === 'state') {
       const count = reaction.when.condition.all.length
-      conditionMarkers.push({ id, label: `${count ? `满足 ${count} 项条件` : '未配置条件'} → ${actionLabel}` })
+      const conditionChips = [count ? `满足 ${count} 项条件` : '未配置条件']
+      conditionMarkers.push({ id, label: `${conditionChips[0]} → ${actionLabel}`, conditionChips, actionChips })
       return
     }
     if (reaction.when.type === 'shown' || reaction.when.type === 'hidden') {
@@ -80,7 +88,7 @@ export function collectNodeTimelineMarkers(
       if (ms != null) {
         pointMarkers.push({ id, ms, kind: 'derived', draggable: false, label })
       } else {
-        conditionMarkers.push({ id, label })
+        conditionMarkers.push({ id, label, conditionChips: [when.of || '未选界面', phase], actionChips })
       }
     }
   })

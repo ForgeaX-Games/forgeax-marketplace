@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { GraphSession, SessionSnapshot } from '../../runtime/engine/session'
 import { PlayerRootContext } from '../../runtime/component-host/rendererRegistry'
 import { claimPlayerFocus, releasePlayerFocus } from '../../runtime/input/playerFocus'
@@ -6,22 +6,41 @@ import {
   BgmPlayer,
   GameStage,
   PlaybackClockProvider,
-  VideoAudioToggle,
   type GameStageProps,
 } from '../../runtime/play'
 import { MaterialTimeline } from '../video/MaterialTimeline'
 import type { ProjectedFlowTimeline } from '../video/flowPreviewTimeline'
 import { injectStyleOnce } from '../../styles/injectStyle'
+import {
+  formatPreviewTime,
+  PreviewPauseIcon,
+  PreviewPlayIcon,
+  PreviewRefreshIcon,
+  PreviewVolumeIcon,
+} from './nodePreviewControls'
+import {
+  createFollowIdleReattach,
+  isHorizontalNavKey,
+  isHorizontalWheelIntent,
+  nextSoftFollowScrollLeft,
+  shouldFollowPlayheadScroll,
+} from './flowPreviewScrollFollow'
 
 const FLOW_PREVIEW_CSS = `
-.nps-flow-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--gc-muted); font-size: 11px; }
-.nps-flow-status strong { color: var(--gc-text); font-weight: 600; }
-.nps-flow-controls { gap: 7px; }
-.nps-flow-controls select {
-  height: 26px; border: 1px solid var(--gc-line); border-radius: 6px;
-  background: var(--gc-panel); color: var(--gc-text); font-size: 10px; padding: 1px 4px;
+.nps-flow-controls { gap: 12px; }
+.nps-flow-controls .nps-video-controls-right { min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
+.nps-flow-status {
+  min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: rgba(255,255,255,.4); font-size: 11px;
 }
-.nps-flow-controls .nps-restart { width: auto; padding: 0 8px; color: #f5bd75; }
+.nps-flow-status strong { color: rgba(255,255,255,.8); font-weight: 500; }
+.nps-flow-controls select {
+  flex: none; height: 21px; box-sizing: border-box;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 4px;
+  background: rgba(255,255,255,.04); color: rgba(255,255,255,.8);
+  font-size: 10px; padding: 1px 4px;
+}
+.nps-flow-controls .nps-hud-time { flex: none; }
 `
 
 export interface FlowNodePreviewState {
@@ -78,6 +97,19 @@ export function FlowNodePreviewStage({
   const syntheticLocalMsRef = useRef(0)
   const pendingSeekRef = useRef<PendingFlowSeek | null>(null)
   const scrubbingRef = useRef(false)
+  /** 播放头横向跟随；用户手动横滚后脱钩，继续播放 / 重开 / seek / 闲置超时再挂钩。 */
+  const followPlayheadRef = useRef(true)
+  const followIdleRef = useRef<ReturnType<typeof createFollowIdleReattach> | null>(null)
+  if (!followIdleRef.current) {
+    followIdleRef.current = createFollowIdleReattach({
+      onDetach: () => {
+        followPlayheadRef.current = false
+      },
+      onReattach: () => {
+        followPlayheadRef.current = true
+      },
+    })
+  }
   timelineModelRef.current = flow.timeline
   const bindRoot = useCallback((element: HTMLDivElement | null) => {
     const previous = rootRef.current
@@ -86,19 +118,51 @@ export function FlowNodePreviewStage({
     if (!element && previous) releasePlayerFocus(previous)
   }, [])
   const snap = flow.snapshot
-  const writeGlobalPlayhead = useCallback((globalMs: number) => {
-    const timeline = timelineModelRef.current
-    const playhead = timelineHostRef.current?.querySelector<HTMLElement>('.gc-playhead')
-    if (!playhead || !(timeline.maxMs > 0)) return
-    const ratio = globalMs / timeline.maxMs
-    playhead.style.left = `${ratio * 100}%`
-    const viewport = timelineHostRef.current?.querySelector<HTMLElement>('.gc-mtimeline-viewport')
-    const canvas = timelineHostRef.current?.querySelector<HTMLElement>('.gc-mtimeline-canvas')
-    if (viewport && canvas && !scrubbingRef.current) {
-      const playheadX = ratio * canvas.clientWidth
-      viewport.scrollLeft = Math.max(0, playheadX - viewport.clientWidth * 0.7)
-    }
+  const enablePlayheadFollow = useCallback(() => {
+    followIdleRef.current?.cancel()
+    followPlayheadRef.current = true
   }, [])
+  /**
+   * 播放头位置的真相在这里（ms），DOM 位置每帧由它派生。
+   * MaterialTimeline 自己也会按 `playheadMs` prop 写同一个 inline `left`——宿主每 tick 重渲染时
+   * 那个值只到片段起点，会把平滑位置打回去。故每次渲染后都用本 ref 重新落地（见 layout effect）。
+   */
+  const playheadGlobalMsRef = useRef<number | null>(null)
+  /** 把 ref 里的播放头时刻落到 DOM；返回画布内像素位置（无法计算时 null）。 */
+  const applyPlayheadDom = useCallback((): number | null => {
+    const timeline = timelineModelRef.current
+    const globalMs = playheadGlobalMsRef.current
+    if (globalMs == null || !(timeline.maxMs > 0)) return null
+    const host = timelineHostRef.current
+    const playhead = host?.querySelector<HTMLElement>('.gc-playhead')
+    const canvas = host?.querySelector<HTMLElement>('.gc-mtimeline-canvas')
+    if (!playhead || !canvas) return null
+    const x = (globalMs / timeline.maxMs) * canvas.clientWidth
+    playhead.style.left = `${x}px`
+    return x
+  }, [])
+  const writeGlobalPlayhead = useCallback((globalMs: number, opts?: { forceScroll?: boolean }) => {
+    playheadGlobalMsRef.current = globalMs
+    const playheadX = applyPlayheadDom()
+    if (playheadX == null) return
+    const viewport = timelineHostRef.current?.querySelector<HTMLElement>('.gc-mtimeline-viewport')
+    if (!viewport) return
+    const canFollow = opts?.forceScroll === true || shouldFollowPlayheadScroll({
+      followEnabled: followPlayheadRef.current,
+      scrubbing: scrubbingRef.current,
+      paused: flow.paused,
+      phase: snap.phase,
+    })
+    if (!canFollow) return
+    const next = nextSoftFollowScrollLeft({
+      playheadX,
+      viewportWidth: viewport.clientWidth,
+      scrollLeft: viewport.scrollLeft,
+    })
+    // 连续跟滚每帧只移动几像素，阈值必须远小于 1px，否则慢速播放会被判成「不用滚」而卡顿。
+    if (next == null || Math.abs(next - viewport.scrollLeft) < 0.05) return
+    viewport.scrollLeft = next
+  }, [applyPlayheadDom, flow.paused, snap.phase])
   const writeSmoothPlayhead = useCallback((localMs: number) => {
     const timeline = timelineModelRef.current
     const active = timeline.segments[timeline.activeIndex]
@@ -113,7 +177,7 @@ export function FlowNodePreviewStage({
     if (pending && timelineModelRef.current.activeIndex === pending.segmentIndex) {
       try { video.currentTime = pending.localMs / 1000 } catch { /* metadata 未就绪 */ }
       syntheticLocalMsRef.current = pending.localMs
-      writeGlobalPlayhead(pending.globalMs)
+      writeGlobalPlayhead(pending.globalMs, { forceScroll: true })
       pendingSeekRef.current = null
       return
     }
@@ -133,6 +197,17 @@ export function FlowNodePreviewStage({
     scrubbingRef.current = false
   }, [])
 
+  const handlePausedChange = useCallback((paused: boolean) => {
+    // 继续播放：重新挂钩，回到关注 playhead（业界剪辑软件同款）。
+    if (!paused) enablePlayheadFollow()
+    flow.onPausedChange(paused)
+  }, [enablePlayheadFollow, flow.onPausedChange])
+
+  const handleRestart = useCallback(() => {
+    enablePlayheadFollow()
+    flow.onRestart()
+  }, [enablePlayheadFollow, flow.onRestart])
+
   const handleTimelineSeek = useCallback((globalMs: number) => {
     const timeline = timelineModelRef.current
     const segmentIndex = timeline.segments.findIndex((segment, index) => (
@@ -142,34 +217,91 @@ export function FlowNodePreviewStage({
     if (!segment) return
     const localMs = Math.max(0, Math.min(segment.endMs - segment.startMs, globalMs - segment.startMs))
     if (!flow.onSeek(segmentIndex, localMs)) return
+    enablePlayheadFollow()
     const pending = { segmentIndex, localMs, globalMs: segment.startMs + localMs }
     pendingSeekRef.current = pending
     syntheticLocalMsRef.current = localMs
-    writeGlobalPlayhead(pending.globalMs)
+    writeGlobalPlayhead(pending.globalMs, { forceScroll: true })
     if (segmentIndex === timeline.activeIndex && activeVideoRef.current) {
       try { activeVideoRef.current.currentTime = localMs / 1000 } catch { /* metadata 未就绪 */ }
       pendingSeekRef.current = null
     }
-  }, [flow.onSeek, writeGlobalPlayhead])
+  }, [enablePlayheadFollow, flow.onSeek, writeGlobalPlayhead])
 
+  // 用户横向浏览 → 脱钩并开始闲置计时；闲置结束后自动重新挂钩。
+  useEffect(() => {
+    if (!timelineExpanded) return
+    let viewport: HTMLElement | null = null
+    let cancelled = false
+    let frameId = 0
+    const idle = followIdleRef.current
+    if (!idle) return
+    const onWheel = (event: WheelEvent): void => {
+      if (isHorizontalWheelIntent(event)) idle.noteUserScroll()
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (isHorizontalNavKey(event.key)) idle.noteUserScroll()
+    }
+    const onPointerDown = (): void => {
+      idle.noteUserScroll()
+    }
+    const bind = (): void => {
+      if (cancelled) return
+      viewport = timelineHostRef.current?.querySelector<HTMLElement>('.gc-mtimeline-viewport') ?? null
+      if (!viewport) {
+        frameId = requestAnimationFrame(bind)
+        return
+      }
+      viewport.addEventListener('wheel', onWheel, { passive: true })
+      viewport.addEventListener('keydown', onKeyDown)
+      // 拖滚动条 / 触摸平移；点画布 seek 也会先走到这里，但随后 handleTimelineSeek 会立刻重新挂钩。
+      viewport.addEventListener('pointerdown', onPointerDown, { passive: true })
+      viewport.addEventListener('touchstart', onPointerDown, { passive: true })
+    }
+    bind()
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(frameId)
+      viewport?.removeEventListener('wheel', onWheel)
+      viewport?.removeEventListener('keydown', onKeyDown)
+      viewport?.removeEventListener('pointerdown', onPointerDown)
+      viewport?.removeEventListener('touchstart', onPointerDown)
+    }
+    // 只随时间轴显隐重绑。刻意不依赖 timeline/maxMs：试玩推进到新节点就会让它变，
+    // 重绑本身无害，但 cleanup 会顺手清掉闲置计时器，导致脱钩后永远等不到自动恢复。
+  }, [timelineExpanded])
+
+  // 闲置计时器只在卸载时清，避免任何中途重绑吞掉待恢复的挂钩。
+  useEffect(() => () => followIdleRef.current?.cancel(), [])
+
+  /**
+   * 重定位播放头只在「真的换了位置」时做：换片段（clipSeq）或 seek。
+   * 刻意不依赖 `flow.timeline` 引用——宿主每 tick 都会重建它，跟着跑就会把平滑位置反复打回片段起点。
+   */
   useEffect(() => {
     const pending = pendingSeekRef.current
     if (pending) {
-      writeGlobalPlayhead(pending.globalMs)
-      if (!flow.videoSrc && flow.timeline.activeIndex === pending.segmentIndex) {
+      writeGlobalPlayhead(pending.globalMs, { forceScroll: true })
+      if (!flow.videoSrc && timelineModelRef.current.activeIndex === pending.segmentIndex) {
         syntheticLocalMsRef.current = pending.localMs
         pendingSeekRef.current = null
       }
       return
     }
-    const active = flow.timeline.segments[flow.timeline.activeIndex]
-    const localMs = active ? Math.max(0, flow.timeline.playheadMs - active.startMs) : 0
+    const timeline = timelineModelRef.current
+    const active = timeline.segments[timeline.activeIndex]
+    const localMs = active ? Math.max(0, timeline.playheadMs - active.startMs) : 0
     syntheticLocalMsRef.current = localMs
     writeSmoothPlayhead(localMs)
-  }, [snap.clipSeq, flow.timeline, flow.videoSrc, writeGlobalPlayhead, writeSmoothPlayhead])
+  }, [snap.clipSeq, flow.timeline.activeIndex, flow.videoSrc, writeGlobalPlayhead, writeSmoothPlayhead])
+
+  // 每次渲染后把平滑播放头重新落地，压过 MaterialTimeline 依 prop 写回的片段起点位置。
+  useLayoutEffect(() => {
+    applyPlayheadDom()
+  })
 
   useEffect(() => {
-    if (flow.paused) {
+    if (flow.paused || snap.phase === 'ended') {
       const video = activeVideoRef.current
       if (video) writeSmoothPlayhead(video.currentTime * 1000)
       return
@@ -179,7 +311,7 @@ export function FlowNodePreviewStage({
     const renderFrame = (now: number): void => {
       const pending = pendingSeekRef.current
       if (pending) {
-        writeGlobalPlayhead(pending.globalMs)
+        writeGlobalPlayhead(pending.globalMs, { forceScroll: true })
         previousFrameAt = now
         frameId = requestAnimationFrame(renderFrame)
         return
@@ -196,11 +328,11 @@ export function FlowNodePreviewStage({
     }
     frameId = requestAnimationFrame(renderFrame)
     return () => cancelAnimationFrame(frameId)
-  }, [flow.paused, flow.playbackRate, flow.videoSrc, snap.clipSeq, writeGlobalPlayhead, writeSmoothPlayhead])
+  }, [flow.paused, flow.playbackRate, flow.videoSrc, snap.clipSeq, snap.phase, writeGlobalPlayhead, writeSmoothPlayhead])
 
   return (
     <div className="nps-root nps-flow-root" data-testid="flow-node-preview">
-      <div className="gc-frame nps-frame" data-type="video">
+      <div className="gc-frame nps-frame nps-frame-edit" data-type="video">
         <PlaybackClockProvider value={{ paused: flow.paused, rate: flow.playbackRate }}>
           <PlayerRootContext.Provider value={rootElement}>
             <div
@@ -246,42 +378,55 @@ export function FlowNodePreviewStage({
         </PlaybackClockProvider>
       </div>
 
-      <div className="nps-controls nps-flow-controls">
-        <button
-          type="button"
-          onClick={() => flow.onPausedChange(!flow.paused)}
-          title={flow.paused ? '继续预览' : '暂停预览'}
-          aria-label={flow.paused ? '继续预览' : '暂停预览'}
-        >
-          {flow.paused ? '▶' : 'Ⅱ'}
-        </button>
-        <span className="nps-flow-status" title={`${snap.phase} · ${snap.clip?.name || snap.currentNodeId || ''}`}>
-          <strong>{snap.phase}</strong>{snap.clip?.name || snap.currentNodeId ? ` · ${snap.clip?.name || snap.currentNodeId}` : ''}
-        </span>
-        <select
-          aria-label="预览倍速"
-          value={flow.playbackRate}
-          onChange={(event) => flow.onPlaybackRateChange(Number(event.target.value))}
-        >
-          {[0.5, 1, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}x</option>)}
-        </select>
-        <VideoAudioToggle
-          compact
-          enabled={flow.videoAudioEnabled}
-          onToggle={flow.onVideoAudioToggle}
-        />
-        <button type="button" className="nps-restart" onClick={flow.onRestart} title="从起始节点重开">
-          ↻ 重开
-        </button>
-        {timelineToggle}
+      <div className="nps-video-controls nps-flow-controls">
+        <div className="nps-video-controls-left">
+          <button
+            type="button"
+            onClick={() => handlePausedChange(!flow.paused)}
+            title={flow.paused ? '继续预览' : '暂停预览'}
+            aria-label={flow.paused ? '继续预览' : '暂停预览'}
+          >
+            {flow.paused ? <PreviewPlayIcon /> : <PreviewPauseIcon />}
+          </button>
+          <button type="button" onClick={handleRestart} title="从起始节点重开" aria-label="从起始节点重开">
+            <PreviewRefreshIcon />
+          </button>
+          <button
+            type="button"
+            className={flow.videoAudioEnabled ? undefined : 'nps-hud-btn-dim'}
+            onClick={flow.onVideoAudioToggle}
+            title={flow.videoAudioEnabled ? '关闭视频声音' : '开启视频声音'}
+            aria-label={flow.videoAudioEnabled ? '关闭视频声音' : '开启视频声音'}
+          >
+            <PreviewVolumeIcon />
+          </button>
+        </div>
+        <div className="nps-video-controls-right">
+          <span className="nps-flow-status" title={`${snap.phase} · ${snap.clip?.name || snap.currentNodeId || ''}`}>
+            <strong>{snap.phase}</strong>{snap.clip?.name || snap.currentNodeId ? ` · ${snap.clip?.name || snap.currentNodeId}` : ''}
+          </span>
+          <select
+            aria-label="预览倍速"
+            value={flow.playbackRate}
+            onChange={(event) => flow.onPlaybackRateChange(Number(event.target.value))}
+          >
+            {[0.5, 1, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}x</option>)}
+          </select>
+          <span className="nps-hud-time">
+            {formatPreviewTime(flow.timeline.playheadMs)}
+            <span> / {formatPreviewTime(flow.timeline.maxMs)}</span>
+          </span>
+          {timelineToggle}
+        </div>
       </div>
 
       {timelineExpanded ? (
-        <div ref={timelineHostRef} id={timelineId}>
+        <div ref={timelineHostRef} id={timelineId} className="nps-timeline-host">
           <MaterialTimeline
             materials={flow.timeline.materials}
             maxMs={flow.timeline.maxMs}
             playheadMs={flow.timeline.playheadMs}
+            videoSrc={flow.videoSrc}
             selectedMaterialKey={null}
             pointMarkers={flow.timeline.pointMarkers}
             conditionMarkers={flow.timeline.conditionMarkers}

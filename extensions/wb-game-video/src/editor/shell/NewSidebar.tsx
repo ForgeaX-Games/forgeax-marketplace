@@ -1,84 +1,55 @@
 /**
- * NewSidebar —— 新版左侧栏（按 Figma 15195_75500 视觉稿一比一还原）。
+ * NewSidebar —— 新版左侧栏（按 Figma 15195_75500 视觉稿）。
  *
- * 视觉契约（来自 Figma 15195_75500，1920 基准）：
- *   · 整栏宽度 220px，背景 #2C2C2C；内容区 196px（左右各 12px 内边距）。
- *   · 每行高 42px，内容高 26px（上 8px），底部 1px rgba(255,255,255,0.10) 分隔线。
- *   · 文字 16px PingFang SC weight 400，白色。
- *   · 图标 20×20；文字从图标右侧起（图标 20 + 间距 8 = 左 28px）。
- *   · chevron：展开态=向上 ⌃（白色实线）；折叠态=向右 ›（白 40%）。
- *   · 层级缩进：顶层 left 0，每下一层 +16px（对齐设计稿 8/16/24 的递进）。
- *   · 选中态：整行背景 rgba(255,255,255,0.10)。
- *   · 可展开的容器节点右上角带「＋」新增子项按钮（14×14 加号，白 80%）。
- *   · 行 hover / 选中时右侧显示操作图标组：重命名(铅笔) / 删除(垃圾桶)，14×14。
- *   · 编辑态：行内输入框 rgba(44,44,44,0.20) 背景 + 白 60% 描边 + 3px 圆角，
- *     右侧带确认(加号) / 取消 图标。
- *
- * 功能契约（与旧 GraphSidebar 等价，缺失的先 mock）：
- *   · 顶层「蓝图/界面/资产库/规则」点击 → setView 跳转主区对应视图。
- *   · 其余层级（章节、子蓝图等）为 mock 树数据，点击仅切换本地选中态。
- *   · 展开/折叠、新增子项、重命名、删除等交互：无真实后端能力时先 mock（本地态 + console 留痕），
- *     但相应 icon 必须齐全。
- *
- * 新旧并存：本组件已替换旧 GraphSidebar 的 UI 渲染位置；旧组件代码保留待清理。
+ * 「蓝图」子树接真实 `blueprints`（扁平：主入口置顶 + 子蓝图排序），资产和规则
+ * 同样从项目数据派生；视频仍为 mock。
  */
-import { useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { injectStyleOnce } from '../../styles/injectStyle'
+import { countOverlayReferences } from '../../graph/edit/overlay-edit'
 import { useGraphScenario } from '../persist/graphScenarioStore'
+import { BASIC_UI_FOLDER_ID, ensureUiTree, findUiTreeNode } from '../persist/ui-tree'
+import { sendUiNavCommand, useUiNavMirror } from '../persist/uiNavSync'
+import { useUiSelection } from '../persist/uiSelectionStore'
 import { useGraphView, type GraphView } from '../persist/graphViewStore'
+import { useAssetNav } from '../persist/assetNavStore'
+import { useRuleSelection } from '../persist/ruleSelectionStore'
+import { ASSET_DIRECTORY_ROOTS, childrenOf, type AssetDirectoryController } from '../assets/asset-directory'
+import {
+  assetEntryKey,
+  assetEntryName,
+  assetEntryRoot,
+  parentFolderIdForAssetEntry,
+  type AssetListEntry,
+} from '../assets/asset-entries'
+import { useAssetBrowser } from '../assets/use-asset-browser'
+import type { AssetLibraryRootKind } from '../assets/registry-types'
+import { blueprintListItems } from './blueprintNav'
+import { useBlueprintNavActions, type BlueprintNavActions } from './useBlueprintNavActions'
+import { UiTreeView, type UiTreeViewNode } from './UiTreeView'
 
-/** 树节点类型：区分「可展开容器 / 叶子 / 顶层入口」。 */
 type NavKind = 'entry' | 'branch' | 'leaf'
 
-/** 侧栏树节点的 mock 形状。 */
 export interface NavNode {
-  /** 稳定 id，用于选中态与展开态。 */
   id: string
-  /** 显示文案。 */
   label: string
-  /** 节点种类。 */
   kind: NavKind
-  /** 顶层入口点击后跳转的主区视图；仅 kind==='entry' 且需要跳转时提供。 */
   view?: GraphView
-  /** 是否可新增子项（右上角「＋」按钮）；对齐设计稿部分容器/入口才有。 */
   canAddChild?: boolean
-  /** 子节点。 */
+  /** 子项由节点外部组件渲染（如界面 UiTreeView），但本行仍应按可展开节点布局。 */
+  externallyExpandable?: boolean
+  /** 真实蓝图叶子：走 store CRUD；主蓝图可重命名，不可删除/设为入口。 */
+  blueprint?: boolean
+  /** 是否为入口蓝图。 */
+  isEntry?: boolean
+  assetLocation?: { root: AssetLibraryRootKind, folderId?: string, entryKey?: string }
+  ruleTarget?: { section: 'entities' | 'variables' | 'formulas', itemId?: string }
   children?: NavNode[]
 }
 
-/**
- * 侧栏树 mock 数据（对齐 Figma 15195_75500 的层级）。
- * 顶层入口的 view 与 GraphView 对齐，点击即跳转主区；其余为占位便于视觉还原。
- */
-const NAV_TREE: readonly NavNode[] = [
-  {
-    id: 'graph',
-    label: '蓝图',
-kind: 'entry',
-    view: 'graph',
-    canAddChild: true,
-    children: [
-      {
-        id: 'bp-debug',
-    label: '调试蓝图',
-        kind: 'branch',
-   children: [
-          {
-    id: 'bp-chapter1',
-   label: '章节1',
-  kind: 'branch',
-            children: [
-     { id: 'bp-c1-open', label: '章节1-开幕', kind: 'leaf' },
-    { id: 'bp-c1-cast', label: '章节1-选角', kind: 'leaf' },
-   ],
-          },
-          { id: 'bp-chapter2', label: '章节2', kind: 'leaf' },
-        ],
-      },
-{ id: 'bp-narrative', label: '叙事蓝图', kind: 'leaf' },
-    { id: 'bp-battle', label: '战斗蓝图', kind: 'leaf' },
-    ],
-  },
+/** 非蓝图顶层 mock（视频/界面/试玩）。 */
+const MOCK_ENTRIES: readonly NavNode[] = [
   {
     id: 'video',
     label: '视频',
@@ -89,12 +60,13 @@ kind: 'entry',
       {
         id: 'vid-generated',
         label: '生成视频',
-   kind: 'branch',
+        kind: 'branch',
+        view: 'video-generate',
         children: [
-        { id: 'vid-gen-door', label: 'narr-door.mp4', kind: 'leaf' },
+          { id: 'vid-gen-door', label: 'narr-door.mp4', kind: 'leaf' },
           { id: 'vid-gen-land', label: 'narr-land.mp4', kind: 'leaf' },
         ],
-   },
+      },
       { id: 'vid-uploaded', label: '上传视频', kind: 'leaf' },
     ],
   },
@@ -104,84 +76,107 @@ kind: 'entry',
     kind: 'entry',
     view: 'ui',
     canAddChild: true,
-    children: [
-      {
-        id: 'ui-hud',
-        label: '战斗 HUD',
-        kind: 'branch',
-    children: [
-      { id: 'ui-hud-hp', label: '我方水墨血条', kind: 'leaf' },
-          { id: 'ui-hud-skill', label: '战斗技能条', kind: 'leaf' },
-      ],
-      },
-      { id: 'ui-dialog', label: '对话框', kind: 'leaf' },
-    { id: 'ui-choice', label: '选项面板', kind: 'leaf' },
-    ],
-  },
-  {
- id: 'assets',
-    label: '资产库',
-    kind: 'entry',
-    view: 'assets',
-    canAddChild: true,
-    children: [
-      {
-        id: 'as-video',
- label: '视频',
-        kind: 'branch',
-        children: [
-    { id: 'as-video-door', label: 'narr-door.mp4', kind: 'leaf' },
-          { id: 'as-video-land', label: 'narr-land.mp4', kind: 'leaf' },
-    ],
-      },
-      {
-        id: 'as-image',
-        label: '图片',
-        kind: 'branch',
-        children: [
-   { id: 'as-img-hero', label: '主角立绘', kind: 'leaf' },
-     { id: 'as-img-bg', label: '场景背景', kind: 'leaf' },
-        ],
-   },
-      { id: 'as-bgm', label: 'BGM', kind: 'leaf' },
-    ],
-  },
-  {
-    id: 'rule',
-    label: '规则',
-    kind: 'entry',
-    view: 'rule',
-    canAddChild: true,
-    children: [
-      {
-        id: 'rule-entity',
-        label: '实体',
-        kind: 'branch',
-        children: [
-          { id: 'rule-entity-hero', label: '主角', kind: 'leaf' },
-          { id: 'rule-entity-enemy', label: '空藏', kind: 'leaf' },
-        ],
-      },
-      { id: 'rule-var', label: '变量', kind: 'leaf' },
-      { id: 'rule-formula', label: '公式', kind: 'leaf' },
-    ],
+    externallyExpandable: true,
+    // 子树由真实 UiTreeView 渲染（main #115），不再用 mock children。
+    // 行内加号在「自定义界面(ui-folder:custom)」下新建界面方案。
   },
   { id: 'play', label: '试玩', kind: 'entry', view: 'play' },
 ]
 
-/** 递归收集所有可展开节点 id（初始默认全部展开，对齐设计稿展开态）。 */
-function collectExpandableIds(nodes: readonly NavNode[], acc: Set<string> = new Set()): Set<string> {
-  for (const n of nodes) {
-    if (n.children && n.children.length > 0) {
-      acc.add(n.id)
- collectExpandableIds(n.children, acc)
-    }
+function buildNavTree(
+  blueprints: Parameters<typeof blueprintListItems>[0],
+  mainId: string,
+  assets: NavNode,
+  rules: NavNode,
+): NavNode[] {
+  const bpChildren: NavNode[] = blueprintListItems(blueprints, mainId).map((it) => ({
+    id: it.id,
+    label: it.label,
+    kind: 'leaf',
+    blueprint: true,
+    isEntry: it.isEntry,
+  }))
+  return [
+    {
+      id: 'graph',
+      label: '蓝图',
+      kind: 'entry',
+      view: 'graph',
+      canAddChild: true,
+      children: bpChildren,
+    },
+    ...MOCK_ENTRIES,
+    assets,
+    rules,
+  ]
+}
+
+function buildAssetNavNode(directory: AssetDirectoryController, entries: readonly AssetListEntry[]): NavNode {
+  const buildFolder = (folderId: string, root: AssetLibraryRootKind): NavNode[] => [
+    ...childrenOf(directory.assetLibrary, folderId, root).map((folder) => ({
+      id: `asset-folder:${folder.id}`,
+      label: folder.name,
+      kind: 'branch' as const,
+      assetLocation: { root, folderId: folder.id },
+      children: buildFolder(folder.id, root),
+    })),
+    ...entries
+      .filter((entry) => assetEntryRoot(entry) === root
+        && parentFolderIdForAssetEntry(entry, directory.assetLibrary.placements) === folderId)
+      .sort((left, right) => assetEntryName(left).localeCompare(assetEntryName(right), 'zh-CN'))
+      .map((entry) => ({
+        id: `asset-entry:${assetEntryKey(entry)}`,
+        label: assetEntryName(entry),
+        kind: 'leaf' as const,
+        assetLocation: { root, folderId: folderId.startsWith('root:') ? undefined : folderId, entryKey: assetEntryKey(entry) },
+      })),
+  ]
+  return {
+    id: 'assets',
+    label: '资产库',
+    kind: 'entry',
+    view: 'assets',
+    children: ASSET_DIRECTORY_ROOTS.map((root) => ({
+      id: `asset-root:${root.kind}`,
+      label: root.name,
+      kind: 'branch',
+      assetLocation: { root: root.kind },
+      children: buildFolder(root.id, root.kind),
+    })),
   }
-  return acc
+}
+
+function buildRuleNavNode(meta: { entities?: Record<string, { id: string, name?: string }>, variables?: Record<string, { id: string, name?: string }>, formulas?: Record<string, { id: string, name?: string }> }): NavNode {
+  const section = <T extends { id: string, name?: string }>(
+    id: 'entities' | 'variables' | 'formulas',
+    label: string,
+    values: Record<string, T> | undefined,
+  ): NavNode => ({
+    id: `rule-${id}`,
+    label,
+    kind: 'branch',
+    ruleTarget: { section: id },
+    children: Object.entries(values ?? {}).map(([key, value]) => ({
+      id: `rule-${id}:${key}`,
+      label: value.name?.trim() || value.id || key,
+      kind: 'leaf',
+      ruleTarget: { section: id, itemId: key },
+    })),
+  })
+  return {
+    id: 'rule',
+    label: '规则',
+    kind: 'entry',
+    view: 'rule',
+    children: [
+      section('entities', '实体', meta.entities),
+      section('variables', '变量', meta.variables),
+      section('formulas', '公式', meta.formulas),
+    ],
+  }
 }
 
 const NEW_SIDEBAR_CSS = `
-/* ── 新版左侧栏 · Figma 15195_75500 ─────────────────────────────────── */
 .ns-sidebar {
   --ns-bg: #2C2C2C;
   --ns-line: rgba(255, 255, 255, 0.10);
@@ -190,10 +185,6 @@ const NEW_SIDEBAR_CSS = `
   --ns-text-60: rgba(255, 255, 255, 0.60);
   --ns-text-80: rgba(255, 255, 255, 0.80);
   --ns-row-h: 42px;
-  --ns-indent: 8px;
-
-  /* 完整页面模式：固定一个合理宽度（最小 220px），主区自适应剩余空间。
-     split-pane（?pane=left）模式下由 GraphApp 覆盖为 width:100% 撑满 iframe。 */
   width: 240px;
   min-width: 220px;
   flex: none;
@@ -206,8 +197,6 @@ const NEW_SIDEBAR_CSS = `
   color: var(--ns-text);
   font-family: 'PingFang SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
-
-/* 内容区：左右 12px 内边距（对齐设计稿 196px 内容 / 220px 栏宽）。 */
 .ns-scroll {
   flex: 1;
   min-height: 0;
@@ -217,12 +206,9 @@ const NEW_SIDEBAR_CSS = `
 .ns-scroll::-webkit-scrollbar { width: 6px; }
 .ns-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 3px; }
 .ns-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
-
-/* 每一行：42px 高，底部 1px 分隔线，内容垂直居中。
-   右侧留 8px 内边距，避免操作图标（重命名/删除）与「＋」贴死到最右边缘。 */
 .ns-row {
   all: unset;
-box-sizing: border-box;
+  box-sizing: border-box;
   position: relative;
   display: flex;
   align-items: center;
@@ -236,9 +222,8 @@ box-sizing: border-box;
 }
 .ns-row:hover { background: rgba(255, 255, 255, 0.04); }
 .ns-row.is-active { background: rgba(255, 255, 255, 0.10); }
+.ns-row.is-editing { background: rgba(255, 255, 255, 0.10); }
 .ns-row:focus-visible { outline: 1px solid rgba(255,255,255,0.45); outline-offset: -1px; }
-
-/* chevron：20×20；展开态向上 ⌃，折叠态向右 ›（旋转 -90deg）。与文字间距 8px。 */
 .ns-chev {
   flex: none;
   width: 20px;
@@ -256,22 +241,6 @@ box-sizing: border-box;
 }
 .ns-chev svg { width: 20px; height: 20px; display: block; }
 .ns-chev.is-collapsed { transform: rotate(-90deg); }
-
-/* 行图标（叶子节点）：20×20 容器，图形 16×16 居中；与文字间距 8px，
-   与 chevron 同宽同间距，使叶子/容器节点文字对齐同一列。 */
-.ns-ico {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ns-text-80);
-  margin-right: 8px;
-}
-.ns-ico svg { width: 16px; height: 16px; display: block; }
-
-/* 文字：16px PingFang SC weight 400 白色，单行省略。 */
 .ns-label {
   flex: 1;
   min-width: 0;
@@ -283,8 +252,7 @@ box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-/* 右上角「＋」新增子项按钮（可展开容器/入口）。 */
+.ns-add-anchor { flex: none; position: relative; display: inline-flex; }
 .ns-add {
   flex: none;
   width: 20px;
@@ -300,10 +268,8 @@ box-sizing: border-box;
   border-radius: 4px;
   transition: background .12s;
 }
-.ns-add:hover { background: rgba(255,255,255,0.10); }
+.ns-add:hover, .ns-add.is-on { background: rgba(255,255,255,0.10); }
 .ns-add svg { width: 14px; height: 14px; display: block; }
-
-/* 行右操作图标组（hover / 选中时显示）：重命名 / 删除，14×14。 */
 .ns-row-actions {
   flex: none;
   display: none;
@@ -311,8 +277,10 @@ box-sizing: border-box;
   gap: 8px;
   margin-left: 8px;
 }
+/* 仅 hover 显示操作组；选中态不常驻。浮层打开时（.is-on）保持可见以免 pop 被藏。 */
 .ns-row:hover .ns-row-actions,
-.ns-row.is-active .ns-row-actions { display: inline-flex; }
+.ns-row-actions:has(.is-on) { display: inline-flex; }
+.ns-act-anchor { position: relative; display: inline-flex; }
 .ns-act {
   width: 16px;
   height: 16px;
@@ -327,197 +295,479 @@ box-sizing: border-box;
   border-radius: 3px;
   transition: color .12s, background .12s;
 }
-.ns-act:hover { color: var(--ns-text); background: rgba(255,255,255,0.10); }
+.ns-act:hover, .ns-act.is-on { color: var(--ns-text); background: rgba(255,255,255,0.10); }
+.ns-act.is-danger:hover, .ns-act.is-danger.is-on { color: #ff8e8e; }
 .ns-act svg { width: 14px; height: 14px; display: block; }
-
-/* 编辑态输入框：rgba(44,44,44,0.20) 背景 + 白 60% 描边 + 3px 圆角。 */
-.ns-edit {
+/* portal 到 body 的删除确认；位置 / --ns-arrow 由 placeAdaptivePop 写入。 */
+.ns-pop-confirm {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 160px;
+  max-width: min(240px, calc(100vw - 16px));
+  padding: 10px;
+  background: #3a3a3a;
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  color: #fff;
+  font-family: 'PingFang SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.ns-pop-arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #3a3a3a;
+  border: 1px solid rgba(255,255,255,0.16);
+  transform: rotate(45deg);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+/* 浮层在按钮下方 → 箭头在顶边朝上指向按钮 */
+.ns-pop-confirm[data-side="below"] .ns-pop-arrow {
+  top: -5px;
+  left: var(--ns-arrow);
+  margin-left: -4px;
+  border-right: none;
+  border-bottom: none;
+}
+/* 浮层在按钮上方 → 箭头在底边朝下 */
+.ns-pop-confirm[data-side="above"] .ns-pop-arrow {
+  bottom: -5px;
+  left: var(--ns-arrow);
+  margin-left: -4px;
+  border-left: none;
+  border-top: none;
+}
+/* 浮层在按钮右侧 → 箭头在左边朝左 */
+.ns-pop-confirm[data-side="right"] .ns-pop-arrow {
+  left: -5px;
+  top: var(--ns-arrow);
+  margin-top: -4px;
+  border-right: none;
+  border-top: none;
+}
+/* 浮层在按钮左侧 → 箭头在右边朝右 */
+.ns-pop-confirm[data-side="left"] .ns-pop-arrow {
+  right: -5px;
+  top: var(--ns-arrow);
+  margin-top: -4px;
+  border-left: none;
+  border-bottom: none;
+}
+.ns-pop-confirm-msg {
+  font-size: 13px;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.80);
+  word-break: break-word;
+}
+.ns-pop-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ns-pop-confirm-actions button {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255,255,255,0.80);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+.ns-pop-confirm-actions button.is-danger {
+  background: rgba(220, 80, 80, 0.25);
+  border-color: rgba(255,142,142,0.35);
+  color: #ffb4b4;
+}
+.ns-entry-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 17.80px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 4px;
+  outline: 0.4px solid rgba(255, 255, 255, 0.40);
+  outline-offset: -0.4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 400;
+  font-family: 'PingFang SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  flex-shrink: 0;
+  vertical-align: middle;
+  line-height: 1;
+}
+.ns-inline-edit {
   flex: 1;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  height: 26px;
+  box-sizing: border-box;
+  height: 22px;
   padding: 0 4px;
-  background: rgba(44, 44, 44, 0.20);
+  border: none;
   border-radius: 3px;
   outline: 0.4px solid var(--ns-text-60);
   outline-offset: -0.4px;
-}
-.ns-edit input {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: none;
-  outline: none;
-  background: transparent;
+  background: rgba(44, 44, 44, 0.20);
   color: var(--ns-text-60);
   font-family: inherit;
   font-size: 16px;
   font-weight: 400;
+  line-height: 22px;
 }
-.ns-edit input::placeholder { color: var(--ns-text-60); }
+.ns-inline-edit:focus { outline-color: rgba(255,255,255,0.80); }
+.ns-inline-edit[aria-invalid="true"] { outline-color: #ff8e8e; }
+.ns-ui-tree {
+  width: 100%;
+  min-width: 0;
+}
 `
 
-/* ── 图标（对齐 Figma 15195_75500 的 SVG）─────────────────────────── */
+function toViewNodes(nodes: readonly UiTreeViewNode[]): UiTreeViewNode[] {
+  return nodes.map((node) => {
+    if (node.kind === 'scheme') {
+      return { ...node, readOnly: node.overlayId?.startsWith('base:') ?? false }
+    }
+    return {
+      ...node,
+      readOnly: node.id === BASIC_UI_FOLDER_ID,
+      children: toViewNodes(node.children ?? []),
+    }
+  })
+}
 
-/** chevron：展开态向上 ⌃（白色）。折叠态由 .is-collapsed 旋转 -90deg。 */
 const ChevronIcon = (
   <svg viewBox="0 0 20 20" fill="none" aria-hidden>
     <path d="M15 12.5L10 7.5L5 12.5" stroke="currentColor" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
-
-/** 加号（14×14，白 80%）：新增子项 / 确认新建。 */
 const PlusIcon = (
   <svg viewBox="0 0 14 14" fill="none" aria-hidden>
     <path d="M0 5.85059L0 7.72559L5.91943 7.6875V13.5H7.79443V7.6875H13.5V5.8125H7.79443V0H5.91943V5.8125L0 5.85059Z" fill="currentColor" />
   </svg>
 )
-
-/** 铅笔（14×14）：重命名。 */
 const PencilIcon = (
   <svg viewBox="0 0 14 14" fill="none" aria-hidden>
     <path d="M10.2083 6.41732L12.5416 4.08398L9.91661 1.45898L7.58327 3.79232L1.75 9.62565V12.2506H4.37494L10.2083 6.41732ZM7.58327 3.79232L10.2083 6.41732" stroke="currentColor" strokeWidth="1.16667" />
   </svg>
 )
-
-/** 垃圾桶（14×14）：删除。 */
 const TrashIcon = (
   <svg viewBox="0 0 14 14" fill="none" aria-hidden>
     <path d="M12.25 2.91602H1.75M2.91667 2.91602H11.0833L10.7917 12.8327H3.20833L2.91667 2.91602ZM4.95833 1.16602H9.04167V2.91602H4.95833V1.16602Z" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" />
     <path d="M7 5.25V10.5" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" />
   </svg>
 )
-
-/** 文件/文档图标（20×20 占位，用简单文档轮廓，作为叶子/入口的默认图标）。 */
-const DocIcon = (
-  <svg viewBox="0 0 20 20" fill="none" aria-hidden>
-    <path d="M5 2.5h6l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-14a1 1 0 0 1 1-1Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-    <path d="M11 2.5V6.5H15" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+const HomeIcon = (
+  <svg viewBox="0 0 14 14" fill="none" aria-hidden>
+    <path d="M10.2096 8.4589L7.0013 5.25057L3.79297 8.4589M2.91797 2.91724H11.0846M7.0013 5.97974V11.6672" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" />
   </svg>
 )
-
 interface NsRowProps {
   node: NavNode
   depth: number
   expanded: Set<string>
   activeId: string | null
+  mainId: string
+  bp: BlueprintNavActions
   onToggle: (id: string) => void
   onSelect: (node: NavNode) => void
-  onAddChild: (node: NavNode) => void
-  onRename: (node: NavNode) => void
-  onDelete: (node: NavNode) => void
+  onMockAddChild: (node: NavNode) => void
+  onMockRename: (node: NavNode) => void
+  onMockDelete: (node: NavNode) => void
 }
 
-/**
- * NsRow —— 单行 + 递归子行渲染。
- * 缩进由 depth 决定（每层 +16px，加在 chevron 前的 paddingLeft）。
- */
-function NsRow({ node, depth, expanded, activeId, onToggle, onSelect, onAddChild, onRename, onDelete }: NsRowProps): JSX.Element {
+function NsRow({
+  node, depth, expanded, activeId, mainId, bp,
+  onToggle, onSelect, onMockAddChild, onMockRename, onMockDelete,
+}: NsRowProps): JSX.Element {
   const hasChildren = !!(node.children && node.children.length > 0)
+  const isExpandable = hasChildren || !!node.externallyExpandable
   const isExpanded = expanded.has(node.id)
   const isActive = activeId === node.id
-  // 缩进：对齐 Figma I14597_19057 —— 顶层 depth=0 无缩进，每深一层 +8px（设计稿 8.33px）。
   const indent = depth * 8
+  const isBlueprintLeaf = !!node.blueprint
+  const isMainBp = isBlueprintLeaf && (node.isEntry || node.id === mainId)
+  const isEditing = !!isBlueprintLeaf && bp.renameId === node.id
+  const inlineRenameRef = useRef<HTMLInputElement>(null!)
 
-  return (
-<>
-      <div
-        className={`ns-row${isActive ? ' is-active' : ''}`}
-   role="treeitem"
-        aria-expanded={hasChildren ? isExpanded : undefined}
-aria-selected={isActive}
-        tabIndex={0}
-style={{ paddingLeft: indent }}
-        onClick={() => onSelect(node)}
-  onKeyDown={(e) => {
-  if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            onSelect(node)
-   }
+  useEffect(() => {
+    if (isEditing && inlineRenameRef.current) {
+      inlineRenameRef.current.focus()
+      inlineRenameRef.current.select()
+    }
+  }, [isEditing])
+
+  let rowActions: ReactNode = null
+  if (isBlueprintLeaf) {
+    rowActions = (
+      <>
+        <button
+          type="button"
+          className={`ns-act${isEditing ? ' is-on' : ''}`}
+          aria-label={`重命名 ${node.label}`}
+          title="重命名"
+          onClick={() => {
+            if (isEditing) bp.cancelRename()
+            else bp.openRename(node.id)
+          }}
+        >
+          {PencilIcon}
+        </button>
+        {!isMainBp && (
+          <>
+            <button
+              type="button"
+              className="ns-act"
+              aria-label={`设为入口 ${node.label}`}
+              title="设为入口"
+              onClick={() => bp.setMain(node.id)}
+            >
+              {HomeIcon}
+            </button>
+            <button
+              type="button"
+              className={`ns-act is-danger${bp.pendingDeleteId === node.id ? ' is-on' : ''}`}
+              aria-label={`删除 ${node.label}`}
+              title="删除"
+              aria-expanded={bp.pendingDeleteId === node.id}
+              onClick={(e) => {
+                if (bp.pendingDeleteId === node.id) bp.cancelDelete()
+                else bp.openDelete(node.id, e.currentTarget)
+              }}
+            >
+              {TrashIcon}
+            </button>
+          </>
+        )}
+      </>
+    )
+  } else if (!isBlueprintLeaf && node.kind !== 'entry') {
+    rowActions = (
+      <>
+        <button type="button" className="ns-act" aria-label={`重命名 ${node.label}`} title="重命名" onClick={() => onMockRename(node)}>
+          {PencilIcon}
+        </button>
+        <button type="button" className="ns-act" aria-label={`删除 ${node.label}`} title="删除" onClick={() => onMockDelete(node)}>
+          {TrashIcon}
+        </button>
+      </>
+    )
+  }
+
+  const addChild = node.id === 'graph'
+    ? (
+      <button
+        type="button"
+        className={`ns-add${bp.composing ? ' is-on' : ''}`}
+        aria-label="新增 蓝图 子项"
+        title="新建蓝图"
+        aria-expanded={bp.composing}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (bp.composing) bp.cancelCompose()
+          else bp.openCompose()
         }}
       >
-      {hasChildren ? (
-          <button
-      type="button"
-  className={`ns-chev${isExpanded ? '' : ' is-collapsed'}`}
-  aria-label={isExpanded ? '折叠' : '展开'}
-       onClick={(e) => {
-       e.stopPropagation()
-     onToggle(node.id)
-    }}
-   >
-  {ChevronIcon}
-  </button>
-      ) : (
-        // 叶子节点：用文档图标占据与 chevron 同一列（不再额外加 chev-spacer，避免多出一个 20px 前缀）。
-       <span className="ns-ico" aria-hidden>{DocIcon}</span>
-  )}
-     <span className="ns-label" title={node.label}>{node.label}</span>
-      {/* 行右操作组：重命名 / 删除（hover / 选中显示）。 */}
-        <span className="ns-row-actions" onClick={(e) => e.stopPropagation()}>
-     <button type="button" className="ns-act" aria-label={`重命名 ${node.label}`} title="重命名" onClick={() => onRename(node)}>
-    {PencilIcon}
-     </button>
-   <button type="button" className="ns-act" aria-label={`删除 ${node.label}`} title="删除" onClick={() => onDelete(node)}>
-   {TrashIcon}
+        {PlusIcon}
       </button>
-     </span>
-  {/* 可新增子项：右上角「＋」按钮。 */}
-   {node.canAddChild && (
-          <button
-       type="button"
-   className="ns-add"
-        aria-label={`新增 ${node.label} 子项`}
-        title="新增子项"
+    )
+    : node.canAddChild
+      ? (
+        <button
+          type="button"
+          className="ns-add"
+          aria-label={`新增 ${node.label} 子项`}
+          title="新增子项"
           onClick={(e) => {
-       e.stopPropagation()
-     onAddChild(node)
+            e.stopPropagation()
+            onMockAddChild(node)
           }}
+        >
+          {PlusIcon}
+        </button>
+      )
+      : null
+
+  return (
+    <>
+      <div
+        className={`ns-row${isActive ? ' is-active' : ''}${isEditing ? ' is-editing' : ''}`}
+        role="treeitem"
+        aria-expanded={isExpandable ? isExpanded : undefined}
+        aria-selected={isActive}
+        tabIndex={0}
+        style={{ paddingLeft: indent }}
+        onClick={() => onSelect(node)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onSelect(node)
+          }
+        }}
+      >
+        {isExpandable && (
+          <button
+            type="button"
+            className={`ns-chev${isExpanded ? '' : ' is-collapsed'}`}
+            aria-label={`${isExpanded ? '折叠' : '展开'} ${node.label}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggle(node.id)
+            }}
           >
-            {PlusIcon}
+            {ChevronIcon}
           </button>
         )}
+        {isEditing ? (
+          <input
+            ref={inlineRenameRef}
+            className="ns-inline-edit"
+            aria-label="重命名蓝图"
+            aria-invalid={!!bp.renameError}
+            value={bp.renameDraft}
+            placeholder="蓝图名称"
+            onChange={(e) => {
+              bp.setRenameDraft(e.target.value)
+              if (bp.renameError) bp.clearRenameError()
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); bp.confirmRename() }
+              else if (e.key === 'Escape') { e.preventDefault(); bp.cancelRename() }
+            }}
+            onBlur={() => {
+              setTimeout(() => {
+                if (bp.renameId === node.id) bp.cancelRename()
+              }, 0)
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="ns-label" title={node.label}>
+            {node.label}
+            {node.isEntry && (
+              <span
+                className="ns-entry-badge"
+                aria-label="入口"
+              >
+                入口
+              </span>
+            )}
+          </span>
+        )}
+        {rowActions && (
+          <span className="ns-row-actions" onClick={(e) => e.stopPropagation()}>
+            {rowActions}
+          </span>
+        )}
+        {addChild}
       </div>
-      {hasChildren && isExpanded && node.children!.map((child) => (
-        <NsRow
-   key={child.id}
-          node={child}
-      depth={depth + 1}
-        expanded={expanded}
-          activeId={activeId}
-onToggle={onToggle}
-          onSelect={onSelect}
-          onAddChild={onAddChild}
-        onRename={onRename}
-    onDelete={onDelete}
-        />
-      ))}
+      {hasChildren && isExpanded && (
+        <>
+          {node.children!.map((child, i) => (
+            <Fragment key={child.id}>
+              {node.id === 'graph' && bp.composing && i === 0 && (
+                <div
+                  className="ns-row is-editing"
+                  style={{ paddingLeft: (depth + 1) * 8 }}
+                >
+                  <input
+                    ref={bp.composeInputRef}
+                    className="ns-inline-edit"
+                    aria-label="新建蓝图名称"
+                    aria-invalid={!!bp.composeError}
+                    value={bp.draftName ?? ''}
+                    placeholder="新建蓝图名称"
+                    onChange={(e) => {
+                      bp.setDraftName(e.target.value)
+                      if (bp.composeError) bp.clearComposeError()
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); bp.confirmCompose() }
+                      else if (e.key === 'Escape') { e.preventDefault(); bp.cancelCompose() }
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => {
+                        if (bp.composing) bp.cancelCompose()
+                      }, 0)
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </div>
+              )}
+              <NsRow
+                node={child}
+                depth={depth + 1}
+                expanded={expanded}
+                activeId={activeId}
+                mainId={mainId}
+                bp={bp}
+                onToggle={onToggle}
+                onSelect={onSelect}
+                onMockAddChild={onMockAddChild}
+                onMockRename={onMockRename}
+                onMockDelete={onMockDelete}
+              />
+            </Fragment>
+          ))}
+        </>
+      )}
     </>
   )
 }
 
-/**
- * NewSidebar —— 新版左侧栏（树形层级导航）。
- *
- * 顶层入口（有 view）点击：调用 setView 跳转主区视图。
- * 其余节点点击：仅本地选中态。展开/折叠、新增/重命名/删除：mock。
- */
-export function NewSidebar(): JSX.Element {
+export function NewSidebar({ uiNavMode = 'standalone' }: { uiNavMode?: 'left' | 'standalone' }): JSX.Element {
   injectStyleOnce('new-sidebar', NEW_SIDEBAR_CSS)
   const view = useGraphView((s) => s.view)
   const setView = useGraphView((s) => s.setView)
-  // 读一下节点数，保持与 scenario 的订阅（未来可用于显示统计），当前不渲染。
-  useGraphScenario((s) => s.graph?.nodes?.length ?? 0)
+  const setAssetLocation = useAssetNav((s) => s.setLocation)
+  const selectRule = useRuleSelection((s) => s.select)
+  const gameId = useGraphScenario((s) => s.game)
+  const { entries: assetEntries, directory: assetDirectory } = useAssetBrowser(gameId)
+  const blueprints = useGraphScenario((s) => s.blueprints)
+  const mainId = useGraphScenario((s) => s.mainBlueprintId)
+  const activeBlueprintId = useGraphScenario((s) => s.activeBlueprintId)
+  const selectBlueprint = useGraphScenario((s) => s.selectBlueprint)
+  const ruleMeta = useGraphScenario((s) => s.meta)
+  const meta = useGraphScenario((s) => (uiNavMode === 'left' ? null : s.meta))
+  const remoteSnapshot = useUiNavMirror((s) => s.snapshot)
+  const selectedTreeNodeId = useUiSelection((s) => s.selectedTreeNodeId)
+  const selectUiNode = useUiSelection((s) => s.selectUiNode)
+  const bp = useBlueprintNavActions()
 
-  // 初始默认展开全部可展开节点（对齐设计稿的展开态）。
-  const [expanded, setExpanded] = useState<Set<string>>(() => collectExpandableIds(NAV_TREE))
-  // 当前选中节点 id：默认高亮与当前主区视图对应的顶层入口。
-  const initialActive = useMemo(() => {
-    const hit = NAV_TREE.find((n) => n.view === view)
-return hit?.id ?? null
-  }, [view])
-  const [activeId, setActiveId] = useState<string | null>(initialActive)
+  const localOverlays = meta?.ui?.overlays ?? {}
+  const overlays = uiNavMode === 'left'
+    ? Object.fromEntries(Object.entries(remoteSnapshot?.overlays ?? {}).map(([id, overlay]) => [
+      id,
+      { ...overlay, children: [] },
+    ]))
+    : localOverlays
+  const uiTree = uiNavMode === 'left'
+    ? ensureUiTree(remoteSnapshot?.uiTree, overlays)
+    : ensureUiTree(meta?.uiTree, localOverlays)
+  const uiNodes = toViewNodes(uiTree.root)
+  const overlayUsage = uiNavMode === 'left'
+    ? (remoteSnapshot?.usage ?? {})
+    : countOverlayReferences(Object.values(blueprints ?? {}).map((doc) => doc.graph))
+
+  const navTree = useMemo(
+    () => buildNavTree(blueprints, mainId, buildAssetNavNode(assetDirectory, assetEntries), buildRuleNavNode({
+      entities: ruleMeta.entities,
+      variables: ruleMeta.variables,
+      formulas: ruleMeta.formulas as Record<string, { id: string, name?: string }> | undefined,
+    })),
+    [assetDirectory, assetEntries, blueprints, mainId, ruleMeta.entities, ruleMeta.formulas, ruleMeta.variables],
+  )
+
+  // 目录默认全部收起。展开状态只由用户点箭头（或明确的新建操作）改变；
+  // 不能在资产/规则数据刷新时把已收起的分支重新打开。
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+
+  const activeId = view === 'graph'
+    ? (activeBlueprintId || 'graph')
+    : (navTree.find((n) => n.view === view)?.id ?? null)
 
   const onToggle = (id: string): void => {
     setExpanded((cur) => {
@@ -529,26 +779,73 @@ return hit?.id ?? null
   }
 
   const onSelect = (node: NavNode): void => {
-    setActiveId(node.id)
-    // 顶层入口带 view → 跳转主区；其余仅本地选中态（mock）。
-    if (node.view) setView(node.view)
+    if (node.id === 'assets') {
+      // “资产库”是浏览器根入口，不是上一次选中的分类或文件夹。
+      setAssetLocation({ root: null })
+      setView('assets')
+      return
+    }
+    if (node.assetLocation) {
+      setView('assets')
+      setAssetLocation(node.assetLocation)
+      return
+    }
+    if (node.ruleTarget) {
+      selectRule(node.ruleTarget.section, node.ruleTarget.itemId)
+      setView('rule')
+      return
+    }
+    if (node.blueprint) {
+      selectBlueprint(node.id)
+      setView('graph')
+      return
+    }
+    if (node.view) {
+      setView(node.view)
+      if (node.view === 'graph' && activeBlueprintId) {
+        // 点「蓝图」入口：保持当前蓝图选中
+        return
+      }
+    }
   }
 
-  const onAddChild = (node: NavNode): void => {
-    // mock：新增子项。等接入真实能力再实现，先 console 留痕并保证展开。
+  const onMockAddChild = (node: NavNode): void => {
     setExpanded((cur) => new Set(cur).add(node.id))
+    if (node.id === 'ui') {
+      // 未进入文件夹时先创建根文件夹；选中可编辑文件夹后，顶层加号新建方案；
+      // 选中方案时则在其父文件夹继续新建方案。
+      // 文件夹行尾只保留重命名 / 删除，与其它导航树分支一致。
+      setView('ui')
+      const selectedNode = selectedTreeNodeId ? findUiTreeNode(uiTree, selectedTreeNodeId) : undefined
+      let targetFolderId = selectedNode?.kind === 'folder' ? selectedNode.id : null
+      if (selectedNode?.kind === 'scheme') {
+        const findParentFolderId = (nodes: readonly UiTreeViewNode[], targetId: string, parentId: string | null = null): string | null => {
+          for (const item of nodes) {
+            if (item.id === targetId) return parentId
+            if (item.kind === 'folder') {
+              const found = findParentFolderId(item.children ?? [], targetId, item.id)
+              if (found) return found
+            }
+          }
+          return null
+        }
+        targetFolderId = findParentFolderId(uiNodes, selectedNode.id)
+      }
+      if (targetFolderId && targetFolderId !== BASIC_UI_FOLDER_ID) {
+        sendUiNavCommand({ type: 'add-scheme', parentId: targetFolderId }, uiNavMode)
+      } else {
+        sendUiNavCommand({ type: 'add-root-folder' }, uiNavMode)
+      }
+      return
+    }
     // eslint-disable-next-line no-console
     console.log('[NewSidebar] add child for', node.id)
   }
-
-  const onRename = (node: NavNode): void => {
-    // mock：重命名。等接入真实能力再实现。
+  const onMockRename = (node: NavNode): void => {
     // eslint-disable-next-line no-console
- console.log('[NewSidebar] rename', node.id)
+    console.log('[NewSidebar] rename', node.id)
   }
-
-  const onDelete = (node: NavNode): void => {
-    // mock：删除。等接入真实能力再实现。
+  const onMockDelete = (node: NavNode): void => {
     // eslint-disable-next-line no-console
     console.log('[NewSidebar] delete', node.id)
   }
@@ -556,21 +853,66 @@ return hit?.id ?? null
   return (
     <aside className="ns-sidebar" aria-label="视频游戏工坊（新版侧栏）">
       <div className="ns-scroll" role="tree" aria-label="工坊导航树">
-        {NAV_TREE.map((node) => (
-   <NsRow
-            key={node.id}
-          node={node}
-        depth={0}
-            expanded={expanded}
-   activeId={activeId}
-            onToggle={onToggle}
-        onSelect={onSelect}
-  onAddChild={onAddChild}
-  onRename={onRename}
-    onDelete={onDelete}
-       />
-      ))}
+        {navTree.map((node) => (
+          <Fragment key={node.id}>
+            <NsRow
+              node={node}
+              depth={0}
+              expanded={expanded}
+              activeId={activeId}
+              mainId={mainId}
+              bp={bp}
+              onToggle={onToggle}
+              onSelect={onSelect}
+              onMockAddChild={onMockAddChild}
+              onMockRename={onMockRename}
+              onMockDelete={onMockDelete}
+            />
+            {node.id === 'ui' && view === 'ui' && expanded.has(node.id) ? (
+              <div className="ns-ui-tree" role="group" aria-label="界面子项">
+                <UiTreeView
+                  nodes={uiNodes}
+                  overlays={overlays}
+                  usageByOverlay={overlayUsage}
+                  selectedTreeNodeId={selectedTreeNodeId}
+                  baseDepth={1}
+                  onSelect={(treeNode) => {
+                    const overlayId = treeNode.kind === 'scheme' ? (treeNode.overlayId ?? null) : null
+                    selectUiNode(treeNode.id, overlayId)
+                    sendUiNavCommand({ type: 'select', treeNodeId: treeNode.id, overlayId }, uiNavMode)
+                  }}
+                  onRename={(nodeId, name) => sendUiNavCommand({ type: 'rename', nodeId, name }, uiNavMode)}
+                  onDelete={(treeNode) => {
+                    if (!treeNode.readOnly) sendUiNavCommand({ type: 'remove', nodeId: treeNode.id }, uiNavMode)
+                  }}
+                />
+              </div>
+            ) : null}
+          </Fragment>
+        ))}
       </div>
+      {bp.pendingDeleteId && bp.deletePopStyle && bp.deletePopSide && typeof document !== 'undefined'
+        ? createPortal(
+          <div
+            ref={bp.deletePopRef}
+            className="ns-pop-confirm"
+            data-side={bp.deletePopSide}
+            role="dialog"
+            aria-label="删除蓝图"
+            style={bp.deletePopStyle}
+          >
+            <span className="ns-pop-arrow" aria-hidden />
+            <div className="ns-pop-confirm-msg">
+              确定删除「{bp.pendingTitle}」？
+            </div>
+            <div className="ns-pop-confirm-actions">
+              <button type="button" onClick={bp.cancelDelete}>取消</button>
+              <button type="button" className="is-danger" onClick={bp.confirmDelete}>确认</button>
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
     </aside>
   )
 }

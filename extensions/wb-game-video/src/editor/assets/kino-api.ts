@@ -1,7 +1,9 @@
 /**
- * Browser-safe Kino video resource API client.
+ * Browser-safe projection of the Workbench Host media API.
  * Standalone DTOs — must not import server/private packages.
  */
+
+import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
 
 export interface KinoEnvelope<T> {
   code: number
@@ -83,6 +85,8 @@ export interface DirectUploadInstruction {
   url: string
   headers: Record<string, string>
   expires_at: string
+  chunk_size: number
+  chunk_count: number
 }
 
 export interface DirectUploadResponse {
@@ -159,6 +163,14 @@ export interface KinoRequestOptions {
   signal?: AbortSignal
 }
 
+export interface KinoEnvelopeRequestOptions extends KinoRequestOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  query?: Record<string, string | number | boolean | undefined>
+  json?: unknown
+  /** Test seam; production callers use the same-origin global fetch. */
+  fetch?: KinoFetch
+}
+
 export interface KinoVideoClient {
   capabilities(options?: KinoRequestOptions): Promise<KinoProviderCapabilities>
   prepareUpload(input: PrepareUploadInput, options?: KinoRequestOptions): Promise<DirectUploadResponse>
@@ -172,12 +184,19 @@ export interface KinoVideoClient {
 }
 
 export interface CreateKinoVideoClientOptions {
-  fetch?: typeof fetch
+  fetch?: KinoFetch
   baseUrl?: string
 }
 
-const DEFAULT_BASE_URL = '/api/v1/kino'
+export type KinoFetch = (input: string, init?: RequestInit) => Promise<Response>
+
+const DEFAULT_BASE_URL = '/media'
 const MAX_ERROR_MESSAGE_LENGTH = 512
+
+/** Shared sentinel text so downstream callers can detect a plain (non-business) 404 by message. */
+export const KINO_PLAIN_HTTP_404_MESSAGE = 'Request failed with HTTP 404'
+/** Shared sentinel text so downstream callers can detect a browser-level connection failure by message. */
+export const KINO_NETWORK_FAILURE_MESSAGE = 'Network request failed'
 
 /** Kino `/resources` 服务端分页协议的单页上限。 */
 export const MAX_KINO_RESOURCE_PAGE_SIZE = 100
@@ -199,7 +218,7 @@ function truncateMessage(message: string): string {
 
 function appendQuery(
   path: string,
-  params: Record<string, string | number | undefined>,
+  params: Record<string, string | number | boolean | undefined>,
 ): string {
   const parts: string[] = []
   for (const [key, value] of Object.entries(params)) {
@@ -215,11 +234,25 @@ function appendQuery(
 async function readJsonPayload(response: Response): Promise<unknown> {
   const text = await response.text()
   if (!text.trim()) {
+    if (!response.ok) {
+      throw new KinoClientError(
+        response.status === 404 ? KINO_PLAIN_HTTP_404_MESSAGE : `Request failed with HTTP ${response.status}`,
+        response.status,
+        response.status === 404 ? 'not_found' : 'http_error',
+      )
+    }
     throw new KinoClientError('Upstream returned an empty response', 502, 'upstream_unavailable')
   }
   try {
     return JSON.parse(text) as unknown
   } catch {
+    if (!response.ok) {
+      throw new KinoClientError(
+        response.status === 404 ? KINO_PLAIN_HTTP_404_MESSAGE : `Request failed with HTTP ${response.status}`,
+        response.status,
+        response.status === 404 ? 'not_found' : 'http_error',
+      )
+    }
     throw new KinoClientError('Upstream returned malformed JSON', 502, 'upstream_unavailable')
   }
 }
@@ -274,7 +307,7 @@ function parseEnvelope<T>(response: Response, payload: unknown): T {
 }
 
 async function requestJson<T>(
-  fetchImpl: typeof fetch,
+  fetchImpl: KinoFetch,
   baseUrl: string,
   path: string,
   options?: Pick<RequestInit, 'method' | 'body' | 'signal'>,
@@ -289,11 +322,31 @@ async function requestJson<T>(
       },
     })
   } catch {
-    throw new KinoClientError('Network request failed', 502, 'network_error')
+    throw new KinoClientError(KINO_NETWORK_FAILURE_MESSAGE, 502, 'network_error')
   }
 
   const payload = await readJsonPayload(response)
   return parseEnvelope<T>(response, payload)
+}
+
+/**
+ * Shared browser-side Kino envelope transport for endpoints outside the resource client.
+ * It keeps credentials, query encoding, JSON serialization and error normalization in one place.
+ */
+export async function requestKinoEnvelope<T>(
+  path: string,
+  options: KinoEnvelopeRequestOptions = {},
+): Promise<T> {
+  if (!path.startsWith('/') || path.startsWith('//')) {
+    throw new Error('Kino request path must be same-origin and absolute')
+  }
+  const fetchImpl = options.fetch ?? pluginFetch
+  const requestPath = options.query ? appendQuery(path, options.query) : path
+  return requestJson<T>(fetchImpl, '', requestPath, {
+    method: options.method,
+    body: options.json === undefined ? undefined : JSON.stringify(options.json),
+    signal: options.signal,
+  })
 }
 
 function resourcePath(resourceId: string, gameId: string, suffix = ''): string {
@@ -306,8 +359,9 @@ function resourcePath(resourceId: string, gameId: string, suffix = ''): string {
 export function createKinoVideoClient(
   options: CreateKinoVideoClientOptions = {},
 ): KinoVideoClient {
-  const fetchImpl = options.fetch ?? fetch.bind(globalThis)
+  const fetchImpl = options.fetch ?? pluginFetch
   const baseUrl = normalizeBaseUrl(options.baseUrl)
+  const hostTransport = options.fetch === undefined && options.baseUrl === undefined
 
   return {
     async capabilities(options) {
@@ -385,7 +439,8 @@ export function createKinoVideoClient(
     },
 
     playbackUrl(resourceId, gameId) {
-      return `${baseUrl}${resourcePath(resourceId, gameId, '/content')}`
+      const path = `${baseUrl}${resourcePath(resourceId, gameId, '/content')}`
+      return hostTransport ? pluginUrl(path) : path
     },
   }
 }

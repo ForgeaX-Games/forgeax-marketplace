@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "wb-game-video:generate-video-clip args",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["prompt"],
+  "properties": {
+    "prompt": { "type": "string", "minLength": 1, "maxLength": 4000, "description": "User-authored video prompt, passed through verbatim." },
+    "durationSeconds": { "type": "number", "minimum": 1, "maximum": 15, "description": "Clip duration in seconds (default 8). >15s segmented generation is out of scope for this tool." },
+    "generateAudio": { "type": "boolean", "description": "Ask the provider to synthesize audio (default false)." },
+    "mode": { "type": "string", "enum": ["strict", "firstref", "ref", "t2v"], "description": "UI generation mode; server only uses it to validate reference combination." },
+    "firstFrameAssetId": { "type": "string", "description": "Registry image asset id used as first_frame." },
+    "lastFrameAssetId": { "type": "string", "description": "Registry image asset id used as last_frame (strict mode only)." },
+    "referenceImageAssetIds": { "type": "array", "items": { "type": "string" }, "maxItems": 9, "description": "Registry image asset ids used as reference_image (ref mode only)." },
+    "label": { "type": "string", "maxLength": 120, "description": "Display label for the produced video_clip asset." },
+    "requestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Optional opaque client correlation token, persisted in asset metadata without affecting authorization or generation inputs." }
+  }
+}
