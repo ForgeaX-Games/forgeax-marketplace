@@ -19,6 +19,7 @@ import { bootEditorSkins } from '../init'
 import { resolveMediaSrc } from './media'
 import { BgmPlayer, GameStage, PlaybackClockProvider, useClipPerformanceEnd, useControlledPlaybackTimeout, VideoAudioToggle } from '../../runtime/play'
 import { useGraphScenario } from '../persist/graphScenarioStore'
+import { getGameSlug } from '../persist/gameScope'
 import { useRevealOnScopeChange } from './useRevealOnScopeChange'
 import { getSubFlowPack, getSubProcess } from '../../runtime/schema/graph-schema'
 import {
@@ -79,9 +80,11 @@ function DraggablePanel({ title, initial, onClose, children }: { title: ReactNod
   )
 }
 
-export function GraphPlaySurface({ scenario: _scenario }: { scenario: GameScenario }): JSX.Element {
+export function GraphPlaySurface({ scenario }: { scenario: GameScenario }): JSX.Element {
   bootEditorSkins()
-  const game = useGraphScenario((s) => s.game)
+  // 宿主 iframe 传 `?slug=`（见 gameScope.ts）；勿只读 `?game=`，否则会落到默认 demo 命名空间。
+  const game = useMemo(() => getGameSlug() ?? 'game-nodia-fighting', [])
+  const ensureBoot = useGraphScenario((s) => s.ensureBoot)
   const graph = useGraphScenario((s) => s.graph)
   const blueprints = useGraphScenario((s) => s.blueprints)
   const mainBlueprintId = useGraphScenario((s) => s.mainBlueprintId)
@@ -89,6 +92,7 @@ export function GraphPlaySurface({ scenario: _scenario }: { scenario: GameScenar
   const entities = useGraphScenario((s) => s.meta.entities)
   const variables = useGraphScenario((s) => s.meta.variables)
   const ready = graph.nodes.length > 0
+  useEffect(() => { ensureBoot(game, scenario) }, [game, scenario, ensureBoot])
 
   const [restartKey, setRestartKey] = useState(0)
   const [auto, setAuto] = useState(false)

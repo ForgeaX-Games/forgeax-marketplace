@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MaterialTimeline } from '../MaterialTimeline'
-import { FLOAT_TEXT_TIMELINE_WIDTH_PX, TIMELINE_LAYER_STEP } from '../materialTimelineShared'
+import { FLOAT_TEXT_TIMELINE_WIDTH_PX } from '../materialTimelineShared'
 
 afterEach(cleanup)
 
@@ -148,10 +148,9 @@ describe('MaterialTimeline · 结算选中联动', () => {
     const first = screen.getByRole('slider', { name: /ent-player\.attack add 0/ })
     const second = screen.getByRole('slider', { name: /ent-boss\.attack add 0/ })
     const viewport = container.querySelector('.gc-mtimeline-viewport')!
-    const laneLabel = screen.getByText('时间轴结算')
+    const laneLabel = screen.getByText('结算')
     expect(container.querySelectorAll('.gc-mtrackline')).toHaveLength(6)
-    // 视口地板高度 = 6 轨；有 flex 定界的宿主里还会继续生长占满剩余空间。
-    expect(getComputedStyle(viewport).minHeight).toBe('264px')
+    expect(getComputedStyle(viewport).height).toBe('264px')
     expect(laneLabel).toBeTruthy()
     expect(getComputedStyle(laneLabel).left).toBe('50%')
     expect(first).toHaveStyle({ left: '9px' })
@@ -215,7 +214,7 @@ describe('MaterialTimeline · 结算选中联动', () => {
     expect(container.querySelectorAll('.gc-mtrackline')).toHaveLength(7)
     expect(getComputedStyle(viewport).overflow).toBe('auto')
     expect(Number.parseFloat(getComputedStyle(canvas).height)).toBeGreaterThan(
-      Number.parseFloat(getComputedStyle(viewport).minHeight),
+      Number.parseFloat(getComputedStyle(viewport).height),
     )
   })
 
@@ -343,12 +342,7 @@ describe('MaterialTimeline · 结算选中联动', () => {
           { id: 'life:0', ms: 800, kind: 'derived', draggable: false, label: 'n_door 出现 → 效果' },
         ]}
         conditionMarkers={[
-          {
-            id: 'life:1',
-            label: 'ent-player.hp 减少 → 沿边推进',
-            conditionChips: ['ent-player.hp', '减少'],
-            actionChips: ['沿边推进'],
-          },
+          { id: 'life:1', label: 'ent-player.hp 减少 → 沿边推进' },
         ]}
         selectedPointMarkerId="life:1"
         onSelectPointMarker={onSelectPointMarker}
@@ -367,34 +361,6 @@ describe('MaterialTimeline · 结算选中联动', () => {
     expect(condition).toHaveClass('is-selected')
     fireEvent.pointerDown(condition)
     expect(onSelectPointMarker).toHaveBeenLastCalledWith('life:1')
-    expect(container.querySelector('.gc-condition-band')).toBeTruthy()
-  })
-
-  it('条件结算每增加一个就独占一行轨道，行内是 ↻ 条件 chips → 动作 chips', () => {
-    const { container } = render(
-      <MaterialTimeline
-        materials={[]}
-        maxMs={3_000}
-        playheadMs={0}
-        selectedMaterialKey={null}
-        onSelectMaterial={vi.fn()}
-        onPatchMaterial={vi.fn()}
-        conditionMarkers={[
-          { id: 'life:0', label: '分数 增加 → 变量一 add 5', conditionChips: ['分数', '增加'], actionChips: ['变量一 add 5'] },
-          { id: 'life:1', label: '满足 2 项条件 → 未配置动作', conditionChips: ['满足 2 项条件'], actionChips: ['未配置动作'] },
-        ]}
-        onSelectPointMarker={vi.fn()}
-      />,
-    )
-
-    const bands = Array.from(container.querySelectorAll<HTMLElement>('.gc-condition-band'))
-    expect(bands).toHaveLength(2)
-    const [first, second] = bands as [HTMLElement, HTMLElement]
-    const topOf = (el: HTMLElement) => Number(el.style.top.replace('px', ''))
-    // 两行恰好相差一个轨距：每个条件结算新起一行。
-    expect(topOf(second) - topOf(first)).toBe(TIMELINE_LAYER_STEP)
-    // 首行 = 2 个条件 chip + 1 个动作 chip。
-    expect(first.querySelectorAll('.gc-cond-chip')).toHaveLength(3)
-    expect(second.querySelectorAll('.gc-cond-chip')).toHaveLength(2)
+    expect(container.querySelector('.gc-condition-lane')).toBeTruthy()
   })
 })

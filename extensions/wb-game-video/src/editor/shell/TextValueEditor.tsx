@@ -130,7 +130,6 @@ export function TextValueEditor({
   createVariable,
   createFormula,
   stackControls = false,
-  propertyLayout = false,
   onChange,
 }: {
   value: TextOrRef | undefined
@@ -144,7 +143,6 @@ export function TextValueEditor({
   createVariable?: ValueExprVariableCreateConfig
   createFormula?: ValueExprFormulaCreateConfig
   stackControls?: boolean
-  propertyLayout?: boolean
   onChange: (next: TextOrRef) => void
 }): JSX.Element {
   const [createDraft, setCreateDraft] = useState<EntityCreateDraft | null>(null)
@@ -283,6 +281,17 @@ export function TextValueEditor({
             label: `配置「${draft.label.trim() || attrId || defaultAttrId}」属性`,
             children: [
               {
+                key: `detail:${actionKey}:id`,
+                label: '属性 ID',
+                editor: {
+                  value: draft.attrId,
+                  ariaLabel: `${entityDisplayName(source, entity.id)}的新属性 ID`,
+                  pattern: '[A-Za-z_][A-Za-z0-9_-]*',
+                  invalid: !ATTR_ID_PATTERN.test(attrId) || attributeIdOccupied(source, attrId),
+                  onChange: (value: string) => patch({ attrId: value }),
+                },
+              },
+              {
                 key: `detail:${actionKey}:label`,
                 label: '显示名',
                 editor: {
@@ -324,6 +333,17 @@ export function TextValueEditor({
         presentation: 'create' as const,
         label: `配置「${createEntityTemplate.name}」实体`,
         children: [
+          {
+            key: `detail:${createEntityKey}:id`,
+            label: '实体 ID',
+            editor: {
+              value: entityDraft.entityId,
+              ariaLabel: '新实体 ID',
+              invalid: !entityDraft.entityId.trim()
+                || catalogIdOccupied(entities, entityDraft.entityId.trim()),
+              onChange: (entityId: string) => setCreateDraft({ ...entityDraft, entityId }),
+            },
+          },
           {
             key: `detail:${createEntityKey}:name`,
             label: '显示名',
@@ -391,6 +411,16 @@ export function TextValueEditor({
             presentation: 'create' as const,
             label: `配置「${draft.name.trim() || variableId || defaultId}」变量`,
             children: [
+              {
+                key: `detail:${actionKey}:id`,
+                label: '变量 ID',
+                editor: {
+                  value: draft.variableId,
+                  ariaLabel: '新变量 ID',
+                  invalid: !variableId || catalogIdOccupied(variables, variableId),
+                  onChange: (value: string) => patch({ variableId: value }),
+                },
+              },
               {
                 key: `detail:${actionKey}:name`,
                 label: '显示名',
@@ -472,11 +502,21 @@ export function TextValueEditor({
             label: `配置「${draft.name.trim() || formulaId || defaultId}」公式`,
             children: [
               {
+                key: `detail:${actionKey}:id`,
+                label: '公式 ID',
+                editor: {
+                  value: draft.formulaId,
+                  ariaLabel: '新公式 ID',
+                  invalid: !formulaId || catalogIdOccupied(formulas, formulaId),
+                  onChange: (value: string) => patch({ formulaId: value }),
+                },
+              },
+              {
                 key: `detail:${actionKey}:name`,
-                label: '公式名',
+                label: '显示名',
                 editor: {
                   value: draft.name,
-                  ariaLabel: '新公式名',
+                  ariaLabel: '新公式显示名',
                   onChange: (value: string) => patch({ name: value }),
                 },
               },
@@ -486,18 +526,12 @@ export function TextValueEditor({
                 editor: {
                   value: draft.content,
                   ariaLabel: '新公式内容',
-                  placeholder: '公式详情，或发送给agent的公式描述\n如：max(?攻击力 * ?倍率 - ?防御力, 0)',
+                  placeholder: '如：max(?攻击力 * ?倍率 - ?防御力, 0)',
                   multiline: true,
                   invalid: !formulaAst,
                   error: formulaError,
                   onChange: (value: string) => patch({ content: value }),
                 },
-              },
-              {
-                key: `${actionKey}:agent`,
-                label: '发送agent',
-                presentation: 'agent' as const,
-                disabled: true,
               },
               {
                 key: actionKey,
@@ -569,9 +603,8 @@ export function TextValueEditor({
   }
 
   return (
-    <div data-text-value-editor style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', minWidth: 0 }}>
       <div
-        data-text-value-controls
         style={stackControls
           ? { ...row, flexDirection: 'column', alignItems: 'stretch' }
           : row}
@@ -583,7 +616,7 @@ export function TextValueEditor({
           placeholder="文本：我方 · 状态：entity.hero.name / var.qi · 公式：伤害公式"
           options={pickerOptions}
           onSelect={selectContent}
-          narrowSafe={stackControls || propertyLayout}
+          narrowSafe={stackControls}
         />
         {selected === 'literal' ? (
           <input
@@ -591,7 +624,7 @@ export function TextValueEditor({
             value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
             placeholder="输入固定文本"
             onChange={(event) => onChange(event.target.value)}
-            style={stackControls || propertyLayout
+            style={stackControls
               ? { flex: 'none', width: '100%', minWidth: 0, boxSizing: 'border-box' }
               : { flex: '0 1 40%', minWidth: 120, boxSizing: 'border-box' }}
           />
@@ -606,7 +639,6 @@ export function TextValueEditor({
           variables={variables}
           onChange={onChange}
           showFormulaPicker={false}
-          propertyLayout={propertyLayout}
           createAttribute={createAttribute}
           createEntity={createEntity}
           createVariable={createVariable}

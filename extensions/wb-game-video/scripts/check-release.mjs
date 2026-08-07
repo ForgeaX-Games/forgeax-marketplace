@@ -6,40 +6,10 @@ import {
 } from 'node:fs/promises'
 import { extname, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import {
-  ASSET_CANVAS_DIRECTORY,
-  ASSET_CANVAS_DEV_SPEC,
-  ASSET_CANVAS_PACKAGE,
-  validateGenerationPackage,
-} from './asset-canvas-generation-package.mjs'
 
 const PACKAGE_NAME = '@forgeax-extension/wb-game-video'
 const PLATFORM_PACKAGE = '@forgeax/extension-platform'
-const PLATFORM_VERSION = '0.0.3'
-const WORKBENCH_HOST_PACKAGE = '@forgeax/workbench-host'
-const WORKBENCH_HOST_VERSION = '0.2.6'
-const HOST_BACKEND_ENTRY = './dist/server/host.js'
-const VIDEO_GENERATION_TOOL_IDS = [
-  'wb-game-video:generate-video',
-  'wb-game-video:generate-node-video',
-]
-const REQUIRED_VIDEO_CAPABILITY = { id: 'media.video.generate', version: 1 }
-const FORBIDDEN_PROVIDER_INTEGRATION_TEXT = [
-  'arrival-kino',
-  '__video-upload-proxy',
-]
-const PUBLISHED_TEXT_PATHS = [
-  'dist',
-  'forgeax-extension.json',
-  'package.json',
-  'schemas',
-  'README.md',
-  'SKILL.md',
-]
-const REQUIRED_PACKAGE_EXPORTS = {
-  '.': './dist/index.js',
-  './host': HOST_BACKEND_ENTRY,
-}
+const PLATFORM_VERSION = '0.0.2'
 const TEXT_EXTENSIONS = new Set([
   '.css',
   '.env',
@@ -246,78 +216,18 @@ async function findOldActiveIdentities(root, errors) {
   }
 }
 
-function hasLocalAbsolutePath(value) {
-  if (typeof value === 'string') {
-    return (
-      value.startsWith('/')
-      || /^file:\/(?!\.?\/vendor\/)/.test(value)
-      || /\/(?:Users|private|var\/folders)\//.test(value)
-      || /^[A-Za-z]:[\\/]/.test(value)
-    )
-  }
-  if (Array.isArray(value)) return value.some(hasLocalAbsolutePath)
-  if (value && typeof value === 'object') {
-    return Object.values(value).some(hasLocalAbsolutePath)
-  }
-  return false
-}
-
-async function validateNoLocalAbsolutePaths(packageRoot, pkg, errors) {
-  if (hasLocalAbsolutePath(pkg)) {
-    errors.push('package.json contains a local absolute path')
-  }
-
-  try {
-    const lockSource = await readFile(resolve(packageRoot, 'bun.lock'), 'utf8')
-    if (hasLocalAbsolutePath(lockSource)) {
-      errors.push('bun.lock contains a local absolute path')
-    }
-  } catch {
-    errors.push('bun.lock is not readable')
-  }
-}
-
 function validatePackage(pkg, errors) {
   if (pkg.name !== PACKAGE_NAME) {
     errors.push(`package name must be ${PACKAGE_NAME}; received ${JSON.stringify(pkg.name)}`)
   }
 
-  for (const [dependencyPackage, dependencyVersion] of [
-    [PLATFORM_PACKAGE, PLATFORM_VERSION],
-    [WORKBENCH_HOST_PACKAGE, WORKBENCH_HOST_VERSION],
-  ]) {
-    for (const dependencyKind of ['peerDependencies', 'devDependencies']) {
-      const actual = pkg[dependencyKind]?.[dependencyPackage]
-      if (actual !== dependencyVersion) {
-        errors.push(
-          `${dependencyKind}.${dependencyPackage} must be exactly ${dependencyVersion}; received ${JSON.stringify(actual)}`,
-        )
-      }
-    }
-  }
-
-  for (const [exportName, expectedPath] of Object.entries(REQUIRED_PACKAGE_EXPORTS)) {
-    const actual = pkg.exports?.[exportName]
-    if (actual !== expectedPath) {
+  for (const dependencyKind of ['peerDependencies', 'devDependencies']) {
+    const actual = pkg[dependencyKind]?.[PLATFORM_PACKAGE]
+    if (actual !== PLATFORM_VERSION) {
       errors.push(
-        `exports[${JSON.stringify(exportName)}] must be exactly ${expectedPath}; received ${JSON.stringify(actual)}`,
+        `${dependencyKind}.${PLATFORM_PACKAGE} must be exactly ${PLATFORM_VERSION}; received ${JSON.stringify(actual)}`,
       )
     }
-  }
-
-  const assetCanvasRuntimeSpec = pkg.dependencies?.[ASSET_CANVAS_PACKAGE]
-  const assetCanvasDevSpec = pkg.devDependencies?.[ASSET_CANVAS_PACKAGE]
-  if (assetCanvasRuntimeSpec !== undefined) {
-    errors.push(`${ASSET_CANVAS_PACKAGE} must remain build-time-only in devDependencies`)
-  }
-  if (assetCanvasDevSpec !== ASSET_CANVAS_DEV_SPEC) {
-    errors.push(
-      `devDependencies.${ASSET_CANVAS_PACKAGE} must be ${ASSET_CANVAS_DEV_SPEC}; received ${JSON.stringify(assetCanvasDevSpec)}`,
-    )
-  }
-
-  if (!Array.isArray(pkg.files) || !pkg.files.includes('dist') || pkg.files.includes('vendor')) {
-    errors.push('package files must include dist and exclude vendor')
   }
 }
 
@@ -326,10 +236,6 @@ async function validateManifest(packageRoot, manifest, errors) {
     errors.push(
       `manifest ID must be ${PACKAGE_NAME}; received ${JSON.stringify(manifest.id)}`,
     )
-  }
-
-  if (manifest.entry?.backend !== HOST_BACKEND_ENTRY) {
-    errors.push(`entry.backend must be exactly ${HOST_BACKEND_ENTRY}; received ${JSON.stringify(manifest.entry?.backend)}`)
   }
 
   const backendPath = await checkPackagePath(
@@ -345,102 +251,51 @@ async function validateManifest(packageRoot, manifest, errors) {
     errors,
   )
 
-  const skills = Array.isArray(manifest.provides?.skills)
-    ? manifest.provides.skills
+  const skills = Array.isArray(manifest.contributes?.skills)
+    ? manifest.contributes.skills
     : []
   for (const [index, skill] of skills.entries()) {
     await checkPackagePath(
       packageRoot,
-      `provides.skills[${index}].entry`,
+      `contributes.skills[${index}].entry`,
       skill?.entry,
       errors,
     )
   }
 
-  const tools = Array.isArray(manifest.provides?.tools)
-    ? manifest.provides.tools
+  const tools = Array.isArray(manifest.contributes?.tools)
+    ? manifest.contributes.tools
     : []
   for (const [index, tool] of tools.entries()) {
     await checkPackagePath(
       packageRoot,
-      `provides.tools[${index}].args`,
+      `contributes.tools[${index}].args`,
       tool?.args,
       errors,
     )
     await checkPackagePath(
       packageRoot,
-      `provides.tools[${index}].returns`,
+      `contributes.tools[${index}].returns`,
       tool?.returns,
       errors,
     )
   }
 
-  for (const requiredToolId of VIDEO_GENERATION_TOOL_IDS) {
-    const index = tools.findIndex((tool) => tool?.id === requiredToolId)
-    if (index === -1) {
-      errors.push(`provides.tools must include required video generation tool ${JSON.stringify(requiredToolId)}`)
-      continue
-    }
-    const actual = tools[index]?.requiresCapabilities
-    if (
-      !Array.isArray(actual)
-      || actual.length !== 1
-      || actual[0]?.id !== REQUIRED_VIDEO_CAPABILITY.id
-      || actual[0]?.version !== REQUIRED_VIDEO_CAPABILITY.version
-    ) {
-      errors.push(
-        `provides.tools[${index}].requiresCapabilities must be exactly ${JSON.stringify([REQUIRED_VIDEO_CAPABILITY])}`,
-      )
-    }
-  }
-
   if (backendPath) {
     try {
       const backend = await import(/* @vite-ignore */ pathToFileURL(backendPath).href)
+      const handlerKeys = Object.keys(backend.default ?? {})
       const manifestToolIds = tools.map((tool) => tool?.id)
-      if (backend.host === undefined) {
-        errors.push('compiled backend must export named host')
-      }
-      const handlerKeys = Object.keys(backend.tools ?? {})
       if (
         handlerKeys.length !== manifestToolIds.length ||
         handlerKeys.some((key, index) => key !== manifestToolIds[index])
       ) {
         errors.push(
-          `compiled backend named tools keys ${JSON.stringify(handlerKeys)} must equal manifest tool IDs in order ${JSON.stringify(manifestToolIds)}`,
+          `compiled backend handler keys ${JSON.stringify(handlerKeys)} must equal manifest tool IDs in order ${JSON.stringify(manifestToolIds)}`,
         )
       }
     } catch (error) {
       errors.push(`entry.backend could not be imported as ESM: ${error.message}`)
-    }
-  }
-}
-
-async function findForbiddenProviderIntegrationText(packageRoot, errors) {
-  const pending = [...PUBLISHED_TEXT_PATHS]
-  while (pending.length > 0) {
-    const packagePath = pending.pop()
-    const absolutePath = resolve(packageRoot, packagePath)
-    let info
-    try {
-      info = await stat(absolutePath)
-    } catch {
-      continue
-    }
-    if (info.isDirectory()) {
-      const entries = await readdir(absolutePath, { withFileTypes: true })
-      for (const entry of entries) {
-        pending.push(`${packagePath}/${entry.name}`)
-      }
-      continue
-    }
-    if (!info.isFile() || !isTextFile(packagePath)) continue
-    const source = await readFile(absolutePath, 'utf8')
-    const forbidden = FORBIDDEN_PROVIDER_INTEGRATION_TEXT.find((text) => source.includes(text))
-    if (forbidden) {
-      errors.push(
-        `forbidden provider integration text ${JSON.stringify(forbidden)} in published file ${packagePath}`,
-      )
     }
   }
 }
@@ -455,16 +310,8 @@ export async function validateRelease(root) {
     errors,
   )
 
-  errors.push(...await validateGenerationPackage(
-    resolve(packageRoot, ASSET_CANVAS_DIRECTORY),
-  ))
-
-  if (pkg) {
-    validatePackage(pkg, errors)
-    await validateNoLocalAbsolutePaths(packageRoot, pkg, errors)
-  }
+  if (pkg) validatePackage(pkg, errors)
   if (manifest) await validateManifest(packageRoot, manifest, errors)
-  await findForbiddenProviderIntegrationText(packageRoot, errors)
   if (pkg && manifest) {
     const expectedTag = `v${pkg.version}`
     if (manifest.version !== pkg.version) {

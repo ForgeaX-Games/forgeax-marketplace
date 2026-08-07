@@ -1,30 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { GameScenario } from '../../../runtime/schema/graph-schema'
 import { GraphPlayer } from '../GraphPlayer'
-import { useGraphScenario } from '../../persist/graphScenarioStore'
-
-const hostClient = vi.hoisted(() => ({
-  context: {
-    gameId: 'test-game',
-    endpoints: { gamePackage: 'https://host.test/__workbench__/v1/games/test-game/package' },
-  },
-  extension: {
-    fetch: vi.fn(),
-    url: vi.fn((path: string) => `https://host.test/extension/runtime/${path.replace(/^\//, '')}`),
-  },
-  tool: { call: vi.fn() },
-}))
-
-vi.mock('../../../lib/workbench-host', () => ({
-  getWorkbenchHost: () => hostClient,
-  ExtensionResponseError: class ExtensionResponseError extends Error {
-    constructor(readonly status: number, message: string) {
-      super(message)
-    }
-  },
-  readExtensionJson: vi.fn(),
-}))
 
 const SCENARIO: GameScenario = {
   version: 'wb-game-video.graph.v1',
@@ -46,7 +23,6 @@ const SCENARIO: GameScenario = {
 
 describe('GraphPlayer missing video handling', () => {
   it('retries once before showing the stable id and clears it on loadedmetadata', () => {
-    useGraphScenario.setState({ game: 'test-game' })
     const { container } = render(<GraphPlayer scenario={SCENARIO} />)
     const video = container.querySelector('video')
     expect(video).toBeTruthy()

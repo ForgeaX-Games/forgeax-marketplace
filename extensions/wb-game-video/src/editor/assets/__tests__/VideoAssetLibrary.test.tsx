@@ -144,7 +144,7 @@ describe('VideoAssetLibrary', () => {
     expect(screen.getByRole('button', { name: 'Delete Clip one' })).toHaveTextContent('Delete')
   })
 
-  it('groups generation, local upload, and external import before library status', () => {
+  it('orders header controls as title, upload, status, count, refresh', () => {
     const controller = makeController({
       uploadProgress: 42,
       uploadError: 'Failed to finalize upload',
@@ -164,17 +164,13 @@ describe('VideoAssetLibrary', () => {
     expect(head).toBeTruthy()
     const children = [...head!.children]
     const title = head!.querySelector('.gc-list-title')
-    const sources = head!.querySelector('.val-library-sources')
     const upload = head!.querySelector('.val-head-upload')
     const status = head!.querySelector('.val-head-status')
     const count = head!.querySelector('.gc-list-count')
     const refresh = head!.querySelector('.val-head-refresh')
 
-    expect(children.indexOf(sources!)).toBe(children.indexOf(title!) + 1)
-    expect(within(sources as HTMLElement).getByRole('button', { name: '生成' })).toBeTruthy()
-    expect(within(sources as HTMLElement).getByRole('button', { name: '外部视频导入' })).toBeDisabled()
-    expect(sources as HTMLElement).toContainElement(upload as HTMLElement)
-    expect(children.indexOf(status!)).toBeGreaterThan(children.indexOf(sources!))
+    expect(children.indexOf(upload!)).toBe(children.indexOf(title!) + 1)
+    expect(children.indexOf(status!)).toBeGreaterThan(children.indexOf(upload!))
     expect(children.indexOf(count!)).toBeGreaterThan(children.indexOf(status!))
     expect(children.indexOf(refresh!)).toBeGreaterThan(children.indexOf(count!))
   })
@@ -203,26 +199,8 @@ describe('VideoAssetLibrary', () => {
     expect(input).toHaveClass('val-head-upload-input')
     expect(label).toHaveClass('val-head-upload')
     expect(label).toContainElement(input)
-    expect(container.querySelector('.gc-list-title')?.nextElementSibling).toHaveClass('val-library-sources')
+    expect(container.querySelector('.gc-list-title')?.nextElementSibling).toBe(label)
     expect(input.tabIndex).toBe(0)
-  })
-
-  it('opens the host-owned external import entry when supplied', () => {
-    const onOpenExternalImport = vi.fn()
-    render(
-      <VideoAssetLibrary
-        gameId="demo"
-        scenario={EMPTY_SCENARIO}
-        bundledEntries={[]}
-        controller={makeController()}
-        selectedId=""
-        onSelect={() => {}}
-        onOpenExternalImport={onOpenExternalImport}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '外部视频导入' }))
-    expect(onOpenExternalImport).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the upload input above a 30 by 28 pixel hit area', async () => {

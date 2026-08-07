@@ -132,7 +132,9 @@ describe('numberExpr dropdown labels', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '新增变量' }))
     expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
     expect(screen.getByRole('button', { name: '确认' })).toBeDisabled()
-    expect(screen.queryByRole('textbox', { name: '新变量 ID' })).toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: '新变量 ID' }), {
+      target: { value: 'combo' },
+    })
     fireEvent.change(screen.getByRole('textbox', { name: '新变量显示名' }), {
       target: { value: '连击' },
     })
@@ -142,15 +144,15 @@ describe('numberExpr dropdown labels', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     expect(onCreate).toHaveBeenCalledWith({
-      variableId: 'var0',
+      variableId: 'combo',
       name: '连击',
       initialValue: 3,
     })
     expect(onChange).toHaveBeenCalledWith({
-      expr: 'var.var0',
+      expr: 'var.combo',
       pick: {
         mode: 'pick',
-        terms: [{ op: '+', source: 'var', refId: 'var0' }],
+        terms: [{ op: '+', source: 'var', refId: 'combo' }],
       },
     })
   })
@@ -173,7 +175,7 @@ describe('numberExpr dropdown labels', () => {
 
     expect(screen.getByRole('menuitem', { name: '怒气' })).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: '新增变量' }))
-    expect(screen.queryByRole('textbox', { name: '新变量 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新变量 ID' })).toBeTruthy()
     expect(screen.getByRole('textbox', { name: '新变量初始值' })).toHaveValue('')
 
     fireEvent.click(screen.getByRole('menuitem', { name: '怒气' }))
@@ -215,14 +217,14 @@ describe('numberExpr dropdown labels', () => {
 
     expect(screen.getByRole('menuitem', { name: '主角' })).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: '新增实体' }))
-    expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('enemy')
 
     fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
     const hpOption = screen.getByRole('menuitem', { name: '生命值' })
     expect(hpOption).toHaveAttribute('title', '生命值：100')
     expect(hpOption.querySelector('.gc-cascade-item-secondary')).toHaveTextContent('100')
     fireEvent.click(screen.getByRole('menuitem', { name: '新增属性' }))
-    expect(screen.queryByRole('textbox', { name: '主角的新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('hp2')
 
     fireEvent.click(screen.getByRole('menuitem', { name: '生命值' }))
     expect(onChange).toHaveBeenCalledWith({
@@ -250,11 +252,11 @@ describe('numberExpr dropdown labels', () => {
     fireEvent.click(screen.getByRole('combobox', { name: '数值内容' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '实体属性' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '新增实体' }))
-    expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('entity1')
 
     fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '新增属性' }))
-    expect(screen.queryByRole('textbox', { name: '主角的新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('attr0')
     expect(screen.getByRole('textbox', { name: '主角的新属性初始值' })).toHaveValue('0')
 
     unmount()
@@ -273,11 +275,11 @@ describe('numberExpr dropdown labels', () => {
     fireEvent.click(screen.getByRole('combobox', { name: '文本内容' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '实体' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '新增实体' }))
-    expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('entity1')
 
     fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '新增属性' }))
-    expect(screen.queryByRole('textbox', { name: '主角的新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('attr0')
     expect(screen.getByRole('textbox', { name: '主角的新属性初始值' })).toHaveValue('0')
   })
 
@@ -298,18 +300,14 @@ describe('numberExpr dropdown labels', () => {
     fireEvent.click(screen.getByRole('combobox', { name: '数值内容' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '公式' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '新增公式' }))
-    expect(screen.getByRole('textbox', { name: '新公式内容' })).toHaveAttribute(
-      'placeholder',
-      '公式详情，或发送给agent的公式描述\n如：max(?攻击力 * ?倍率 - ?防御力, 0)',
-    )
-    expect(screen.queryByRole('textbox', { name: '新公式 ID' })).toBeNull()
-    fireEvent.change(screen.getByRole('textbox', { name: '新公式名' }), {
+    expect(screen.getByRole('textbox', { name: '新公式内容' })).toBeTruthy()
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式 ID' }), {
+      target: { value: 'damage-new' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '新公式显示名' }), {
       target: { value: '新伤害' },
     })
     const confirm = screen.getByRole('button', { name: '确认' })
-    const sendAgent = screen.getByRole('button', { name: '发送agent' })
-    expect(sendAgent).toBeDisabled()
-    expect(sendAgent.nextElementSibling).toBe(confirm)
     expect(screen.getByRole('textbox', { name: '新公式内容' })).toHaveAttribute('aria-invalid', 'true')
     expect(confirm).toBeDisabled()
     fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
@@ -323,7 +321,7 @@ describe('numberExpr dropdown labels', () => {
     fireEvent.click(confirm)
 
     expect(onCreate).toHaveBeenCalledWith({
-      formulaId: 'formula-0',
+      formulaId: 'damage-new',
       name: '新伤害',
       ast: {
         t: 'bin',
@@ -337,7 +335,7 @@ describe('numberExpr dropdown labels', () => {
       expr: '10 + 5',
       pick: {
         mode: 'formula',
-        formulaId: 'formula-0',
+        formulaId: 'damage-new',
         holeBindings: {},
       },
     })
@@ -393,11 +391,6 @@ describe('numberExpr dropdown labels', () => {
       '公式',
       '新增公式',
     )
-    expect(screen.getByRole('textbox', { name: '新公式内容' })).toHaveAttribute(
-      'placeholder',
-      '公式详情，或发送给agent的公式描述\n如：max(?攻击力 * ?倍率 - ?防御力, 0)',
-    )
-    expect(screen.getByRole('button', { name: '发送agent' })).toBeDisabled()
     fireEvent.change(screen.getByRole('textbox', { name: '新公式内容' }), {
       target: { value: '7' },
     })
@@ -447,12 +440,12 @@ describe('numberExpr dropdown labels', () => {
 
     expect(screen.getByRole('menuitem', { name: '主角' })).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: '新增实体' }))
-    expect(screen.queryByRole('textbox', { name: '新实体 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '新实体 ID' })).toHaveValue('enemy')
 
     fireEvent.click(screen.getByRole('menuitem', { name: '主角' }))
     expect(screen.getByRole('menuitem', { name: '生命值' })).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: '新增属性' }))
-    expect(screen.queryByRole('textbox', { name: '主角的新属性 ID' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('hp2')
 
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
     expect(onCreateAttribute).toHaveBeenCalledWith({

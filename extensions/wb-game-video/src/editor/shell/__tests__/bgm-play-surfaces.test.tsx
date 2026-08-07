@@ -19,24 +19,6 @@ vi.mock('../../assets/kinoVideoCacheStore', () => ({ useKinoVideoResources }))
 // 本件只问「有没有出声」；素材查询（视频/音频）都是别处的事，异步 hydration 留在这儿只会
 // 变成 act(...) 警告。
 vi.mock('../../assets/projectAssetCacheStore', () => ({ useProjectAssets }))
-vi.mock('../../../lib/workbench-host', () => ({
-  getWorkbenchHost: () => ({
-    context: {
-      gameId: 'game-nodia-fighting',
-      endpoints: { gamePackage: 'https://host.test/__workbench__/v1/games/game-nodia-fighting/package' },
-    },
-    extension: {
-      fetch: vi.fn(),
-      url: (path: string) => `https://host.test/extension/runtime/${path.replace(/^\/+/, '')}`,
-    },
-  }),
-  ExtensionResponseError: class ExtensionResponseError extends Error {
-    constructor(readonly status: number, message: string) {
-      super(message)
-    }
-  },
-  readExtensionJson: vi.fn(),
-}))
 
 const BED = 'a-aud-story'
 
@@ -102,7 +84,7 @@ describe('试玩表面挂载床轨', () => {
   it('GraphPlaySurface：整表面即试玩，进场就起文档床', () => {
     render(<GraphPlaySurface scenario={SCENARIO} />)
     expect(decks().map((el) => el.getAttribute('src'))).toEqual([
-      'https://host.test/extension/runtime/media/resources/a-aud-story/content?game_id=game-nodia-fighting',
+      '/__gva__/media/a-aud-story?game=game-nodia-fighting',
     ])
     const deck = decks()[0] as HTMLAudioElement
     expect(deck.muted).toBe(true)
@@ -120,7 +102,7 @@ describe('试玩表面挂载床轨', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
     expect(decks().map((el) => el.getAttribute('src'))).toEqual([
-      'https://host.test/extension/runtime/media/resources/a-aud-story/content?game_id=game-nodia-fighting',
+      '/__gva__/media/a-aud-story?game=game-nodia-fighting',
     ])
     const deck = decks()[0] as HTMLAudioElement
     expect(deck.muted).toBe(true)
