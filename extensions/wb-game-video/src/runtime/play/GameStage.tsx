@@ -143,6 +143,7 @@ export function GameStage({
   const activePlayback = activeSlot?.playback
   const { contentRect, recomputeRect } = useVideoContentRect(activeVideoRef, [activePlayback?.key])
   const [missingVideoId, setMissingVideoId] = useState<string | null>(null)
+  const displayedMissingVideoId = missingVideoId ?? (clip?.mediaId && !videoSrc ? clip.mediaId : null)
 
   useEffect(() => {
     for (const element of Object.values(slotElements.current)) {
@@ -154,7 +155,7 @@ export function GameStage({
   }, [paused, playbackRate])
 
   useEffect(() => {
-    setMissingVideoId(null)
+    setMissingVideoId(clip?.mediaId && !videoSrc ? clip.mediaId : null)
   }, [clip?.nodeId, clip?.mediaId, videoSrc])
 
   useEffect(() => {
@@ -405,17 +406,17 @@ export function GameStage({
               />
             )
           })}
-          {missingVideoId ? (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.72)', padding: 16, zIndex: 2 }}>
-              <MissingVideoNotice resourceId={missingVideoId} />
-            </div>
-          ) : null}
         </>
       ) : (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.7, color: 'rgba(255,255,255,0.6)' }}>
           {placeholder ?? clip?.name ?? '（无演出）'}
         </div>
       )}
+      {displayedMissingVideoId ? (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.72)', padding: 16, zIndex: 2 }}>
+          <MissingVideoNotice resourceId={displayedMissingVideoId} />
+        </div>
+      ) : null}
 
       <VideoOverlayStage contentRect={contentRect}>
         <style>{'.gv-playback-layer.is-paused,.gv-playback-layer.is-paused *,.gv-playback-layer.is-paused *::before,.gv-playback-layer.is-paused *::after{animation-play-state:paused!important}'}</style>

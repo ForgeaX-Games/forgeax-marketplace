@@ -55,10 +55,62 @@ test('stores inspectorEl and onNodeSelect for the GraphStudio external panel', a
 
   const handle = mountInto({ inspectorEl, onNodeSelect })
 
-  expect(getInspectorMountOptions()).toEqual({ inspectorEl, onNodeSelect })
+  expect(getInspectorMountOptions()).toEqual({
+    inspectorEl,
+    onNodeSelect,
+    previewEl: undefined,
+    onPreviewOpenChange: undefined,
+    onInspectorTabChange: undefined,
+  })
   act(() => handle.unmount())
   expect(getInspectorMountOptions()).toEqual({
     inspectorEl: undefined,
+    previewEl: undefined,
     onNodeSelect: undefined,
+    onPreviewOpenChange: undefined,
+    onInspectorTabChange: undefined,
   })
+})
+
+test('stores previewEl and clears both host slots on unmount', async () => {
+  const { getInspectorMountOptions } = await import('../host-init')
+  const inspectorEl = document.createElement('div')
+  const previewEl = document.createElement('div')
+  previewEl.append(document.createElement('span'))
+  document.body.append(inspectorEl, previewEl)
+  const onPreviewOpenChange = vi.fn()
+
+  const handle = mountInto({ inspectorEl, previewEl, onPreviewOpenChange })
+
+  expect(getInspectorMountOptions()).toMatchObject({ previewEl, onPreviewOpenChange })
+  act(() => handle.unmount())
+  expect(previewEl.childNodes.length).toBe(0)
+  expect(getInspectorMountOptions().previewEl).toBeUndefined()
+})
+
+test('openDocument sets document nav and graph view', async () => {
+  const { useDocumentNav } = await import('../editor/persist/documentNavStore')
+  const { useGraphView } = await import('../editor/persist/graphViewStore')
+  useDocumentNav.setState({ documentType: 'intake' })
+  useGraphView.setState({ view: 'graph' })
+
+  const handle = mountInto({})
+  act(() => handle.openDocument('pillar'))
+  expect(useDocumentNav.getState().documentType).toBe('pillar')
+  expect(useGraphView.getState().view).toBe('documents')
+  act(() => handle.unmount())
+})
+
+test('stores docActionSlotEl and clears it on unmount', async () => {
+  const { getDocumentMountOptions } = await import('../host-init')
+  const docActionSlotEl = document.createElement('div')
+  docActionSlotEl.textContent = 'HOST_BAR'
+  document.body.append(docActionSlotEl)
+
+  const handle = mountInto({ docActionSlotEl })
+
+  expect(getDocumentMountOptions()).toEqual({ docActionSlotEl })
+  act(() => handle.unmount())
+  expect(docActionSlotEl.childNodes.length).toBe(0)
+  expect(getDocumentMountOptions()).toEqual({ docActionSlotEl: undefined })
 })

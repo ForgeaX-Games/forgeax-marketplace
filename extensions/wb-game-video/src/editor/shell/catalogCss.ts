@@ -970,7 +970,7 @@ ${PREVIEW_CLOCK_CSS}
 .gc-fx { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .gc-fx-editor {
   position: relative; width: 100%; min-width: 0;
-  border-radius: 7px; background: rgba(0,0,0,.28);
+  border-radius: 7px; background: rgba(26,26,26,1);
 }
 .gc-fx-highlight, .gc-fx-input {
   width: 100%; min-width: 0; box-sizing: border-box; margin: 0;
@@ -987,12 +987,12 @@ ${PREVIEW_CLOCK_CSS}
   border: 1px solid var(--gc-line); background: transparent;
   color: transparent; caret-color: var(--gc-text); -webkit-text-fill-color: transparent;
 }
-.gc-fx-input:focus { border-color: var(--gc-accent); outline: none; box-shadow: 0 0 0 2px rgba(240,136,64,.18); }
+.gc-fx-input:focus { outline: none; border-color: var(--gc-line); box-shadow: none; }
 .gc-fx-input.is-err { border-color: var(--gc-danger, #e0795f); }
 .gc-fx-input::selection { background: rgba(240,136,64,.34); -webkit-text-fill-color: transparent; }
 .gc-fx-hole-tag {
   color: var(--gc-accent); background: var(--gc-accent-soft);
-  border-radius: 3px; box-shadow: inset 0 0 0 1px var(--gc-accent-line);
+  border-radius: 6px; box-shadow: inset 0 0 0 1px var(--gc-accent-line);
   box-decoration-break: clone; -webkit-box-decoration-break: clone;
 }
 /* 结构摘要行：引用/参数概览 + ≈值（不复述公式串） */
@@ -1025,6 +1025,7 @@ ${PREVIEW_CLOCK_CSS}
   border: 1px solid var(--gc-line); background: rgba(0,0,0,.28); color: var(--gc-text);
   border-radius: 6px; padding: 4px 6px; font-size: 12px; text-align: right;
 }
+.gc-fx-trial-input:focus { outline: none; border-color: var(--gc-line); box-shadow: none; }
 .gc-fx-hint { color: var(--gc-faint); font-size: 11px; line-height: 1.4; }
 /* 插入工具条 */
 .gc-fx-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
@@ -1051,6 +1052,18 @@ ${PREVIEW_CLOCK_CSS}
   --rule-text: #fff;
   --rule-muted: rgba(255,255,255,.4);
   --rule-divider: rgba(255,255,255,.1);
+  /* 公式编辑器（gc-fx-*）等 gc-* 组件复用 --gc-* token；规则页不在 .gc-tab 作用域，
+     这里补齐，否则 caret-color/border 等会解析失败（光标不可见、边框色丢失）。 */
+  --gc-bg: var(--rule-surface);
+  --gc-text: var(--rule-text);
+  --gc-muted: var(--rule-muted);
+  --gc-faint: var(--rule-muted);
+  --gc-line: var(--rule-divider);
+  --gc-line-soft: var(--rule-divider);
+  --gc-panel: var(--rule-input);
+  --gc-accent: #f08840;
+  --gc-accent-soft: rgba(240,136,64,.16);
+  --gc-accent-line: rgba(240,136,64,.42);
   flex: 1; min-width: 0; min-height: 0; overflow: auto;
   background: var(--rule-surface);
   color: var(--rule-text);
@@ -1067,7 +1080,7 @@ ${PREVIEW_CLOCK_CSS}
   position: sticky; top: 0; z-index: 2;
   display: flex; align-items: center; justify-content: flex-end; gap: 12px;
   min-height: 48px;
-  margin: -24px -24px 16px;
+  margin: -24px -24px 0;
   padding: 12px 24px;
   border-bottom: 1px solid var(--rule-divider);
   background: var(--rule-surface);
@@ -1119,4 +1132,48 @@ ${PREVIEW_CLOCK_CSS}
   transform: translateY(-50%); pointer-events: none;
 }
 .gc-rule-search-icon img { display: block; width: 16px; height: 16px; opacity: .72; }
+.gc-rule-accordion { border-bottom: 1px solid var(--rule-divider); }
+.gc-rule-accordion-head { box-sizing:border-box; display:flex; align-items:center; gap:8px; min-height:44px; padding:8px; border-bottom:1px solid var(--rule-divider); }
+.gc-rule-accordion-toggle { width:20px; height:20px; border:0; padding:0; background:transparent; color:var(--rule-text); font-size:20px; cursor:pointer; transform:rotate(0deg); }
+.gc-rule-accordion-toggle.is-open { transform:rotate(90deg); }
+.gc-rule-accordion-name { box-sizing:border-box; flex:0 1 auto; field-sizing:content; min-width:6ch; max-width:calc(100% - 9rem); border:0 !important; background:transparent !important; color:var(--rule-text); font:400 16px/24px "PingFang SC",sans-serif; }
+.gc-rule-accordion-id { color:var(--rule-muted); font-size:16px; }
+.gc-rule-accordion-id-input { box-sizing:border-box; flex:0 1 8ch; width:8ch; min-width:4ch; padding:0; border:0 !important; outline:0; background:transparent !important; color:var(--rule-muted); font:400 16px/24px "PingFang SC",sans-serif; }
+.gc-rule-accordion-head.is-display-empty .gc-rule-accordion-id { color:rgba(255,255,255,.32); }
+.gc-rule-accordion-head.is-display-empty .gc-rule-accordion-id-input { color:rgba(255,255,255,.32); }
+.gc-rule-overflow { position:relative; display:inline-flex; margin-left:auto; }
+.gc-rule-icon-button { width:14px; height:14px; padding:0; border:0; background:transparent; color:var(--rule-text); cursor:pointer; line-height:14px; }
+.gc-rule-menu { position:absolute; z-index:3; right:0; top:20px; width:128px; padding:8px; border:1px solid var(--rule-divider); border-radius:8px; background:#141414; }
+.gc-rule-menu button { width:100%; min-height:40px; padding:8px; border:0; border-radius:8px; background:transparent; color:#fff; font:500 16px/24px "PingFang SC",sans-serif; cursor:pointer; }
+.gc-rule-menu button:hover { background:rgba(255,255,255,.1); }
+.gc-rule-accordion-body { display:flex; flex-direction:column; gap:16px; padding:8px 0 16px; }
+.gc-rule-grid-head,.gc-rule-attribute-row { display:grid; grid-template-columns:minmax(0,1fr) repeat(3,minmax(0,1fr)) 14px; align-items:center; gap:10px; padding:0 8px; }
+.gc-rule-grid-head { min-height:27px; padding:0 8px; color:var(--rule-text); font:400 11px/16px Inter,sans-serif; }
+.gc-rule-attribute-row { min-height:27px; }
+.gc-rule-variable-head { margin:12px 0; padding-bottom:12px; border-bottom:1px solid var(--rule-divider); }
+.gc-rule-variable-row { min-height:44px; margin:0 0 16px; padding-bottom:16px; border-bottom:1px solid var(--rule-divider); }
+.gc-rule-id-pair { display:flex; align-items:center; justify-content:flex-start; gap:4px; min-width:0; }
+.gc-rule-id-pair input { min-width:0; min-height:27px; padding:5px 0; border:0 !important; background:transparent !important; color:var(--rule-text); }
+.gc-rule-id-pair input:first-child { flex:0 1 auto; field-sizing:content; min-width:6ch; max-width:calc(100% - 5em); }
+.gc-rule-id-pair input:last-child { flex:0 1 5em; color:var(--rule-muted); }
+.gc-rule-id-pair.is-display-empty input:last-child { color:rgba(255,255,255,.32); }
+.gc-rule-scalar-input { min-width:0; }
+.gc-rule-scalar-input input,.gc-rule-range-input { box-sizing:border-box; width:100%; min-width:0; height:27px; padding:4px 6px; border:1px solid rgba(255,255,255,.08); border-radius:8px; background:var(--rule-input); color:var(--rule-text); font:400 12px/17px "PingFang SC",sans-serif; }
+.gc-rule-dialog-backdrop { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:24px; background:rgba(0,0,0,.58); }
+.gc-rule-dialog { position:relative; box-sizing:border-box; display:flex; flex-direction:column; width:min(450px,100%); min-height:300px; padding:40px; border:1px solid rgba(255,255,255,.2); border-radius:16px; background:#141414; color:#fff; }
+.gc-rule-dialog h2 { margin:0; text-align:center; font:600 24px/36px "PingFang SC",sans-serif; }
+.gc-rule-dialog p { flex:1; margin:28px 0; text-align:center; font:400 16px/24px "PingFang SC",sans-serif; }
+.gc-rule-dialog p span { color:#ff9c2a; }
+.gc-rule-dialog-close { position:absolute; top:18px; right:20px; width:32px; height:32px; border:0; background:transparent; color:#fff; font-size:30px; line-height:1; cursor:pointer; }
+.gc-rule-dialog-input { width:100%; box-sizing:border-box; margin:28px 0 auto; padding:8px 12px; border:1px solid rgba(255,255,255,.2); border-radius:8px; outline:0; background:#333; color:#fff; font:400 16px/24px "PingFang SC",sans-serif; }
+.gc-rule-dialog-actions { display:flex; justify-content:center; gap:16px; margin-top:32px; }
+.gc-rule-dialog-actions button { display:flex; align-items:center; justify-content:center; box-sizing:border-box; width:120px; height:32px; padding:1px 28px; border:0; border-radius:8px; background:#fff; color:#000; font:600 16px/24px "PingFang SC",sans-serif; cursor:pointer; }
+.gc-rule-dialog-actions button.is-danger { background:linear-gradient(90deg,#ff7001,#ff9c2a); }
+.gc-rule-dialog-actions button:disabled { cursor:not-allowed; opacity:.5; }
+.gc-rule-new-entity-dialog { min-height:340px; }
+.gc-rule-new-entity-dialog > label { display:grid; gap:8px; margin-top:16px; color:#fff; font:400 16px/24px "PingFang SC",sans-serif; }
+.gc-rule-new-entity-dialog > label > input { box-sizing:border-box; width:100%; height:40px; padding:0 16px; border:1px solid rgba(255,255,255,.6); border-radius:8px; outline:0; background:transparent; color:#fff; font:400 14px/21px "PingFang SC",sans-serif; }
+.gc-rule-new-entity-dialog > label > input::placeholder { color:rgba(255,255,255,.4); }
+.gc-rule-new-entity-dialog .gc-rule-dialog-actions { margin-top:auto; }
+.gc-rule-empty { padding:16px 0; color:var(--rule-muted); text-align:center; }
 `

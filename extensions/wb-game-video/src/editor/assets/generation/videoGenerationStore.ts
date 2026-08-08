@@ -1,9 +1,12 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import type { KinoRequestOptions } from '../kino-api'
-import { getRegistryAsset, listRegistryAssets } from '../../shell/media'
-import type { MediaAsset } from '../registry-types'
-import type { VideoGenerationTask, VideoGenerationStatus } from './generation-api'
+import type { VideoGenerationTask } from './generation-api'
+import {
+  getKinoGeneration,
+  isActiveGenerationStatus,
+  listActiveKinoGenerations,
+} from './kino-generation-client'
 
 export const VIDEO_GENERATION_POLL_INTERVAL_MS = 3_000
 
@@ -16,7 +19,6 @@ export interface VideoGenerationStoreEntry {
   revision: number
   completionRevision: number
 }
-
 interface VideoGenerationStore {
   byGame: Record<string, VideoGenerationStoreEntry | undefined>
   refresh: (gameSlug: string, options?: KinoRequestOptions) => Promise<void>
@@ -32,18 +34,15 @@ const EMPTY_ENTRY: VideoGenerationStoreEntry = {
 }
 
 /**
- * Reads Workbench-owned durable placeholders. Generation continues inside the
- * host when the page unmounts, while this app-level store recovers prompt and
- * status from the same asset registry used by the extension backend.
+ * Kino 是生成任务的权威：任务在 Kino 侧继续推进，页面卸载或刷新后由这个
+ * app 级 store 从同一个同源端点恢复提示词与状态，不依赖宿主 placeholder。
  */
 export async function listActiveVideoGenerationTasks(
   gameSlug: string,
   options: KinoRequestOptions = {},
 ): Promise<VideoGenerationTask[]> {
-  const assets = await listRegistryAssets(gameSlug, 'video', { signal: options.signal })
-  return assets
-    .filter((asset) => asset.productionType === 'video_clip' && isActiveStatus(asset.status))
-    .map(toTask)
+  const tasks = await listActiveKinoGenerations(gameSlug, options)
+  return tasks.filter((task) => isActiveGenerationStatus(task.status))
 }
 
 export async function getVideoGenerationTask(
@@ -51,12 +50,7 @@ export async function getVideoGenerationTask(
   generationId: string,
   options: KinoRequestOptions = {},
 ): Promise<VideoGenerationTask> {
-  if (options.signal?.aborted) throw options.signal.reason
-  const asset = await getRegistryAsset(gameSlug, generationId)
-  if (!asset || asset.productionType !== 'video_clip') {
-    throw new Error('Video generation task was not found')
-  }
-  return toTask(asset)
+  return getKinoGeneration(generationId, gameSlug, options)
 }
 
 export const useVideoGenerationStore = create<VideoGenerationStore>((set, get) => ({
@@ -153,29 +147,4 @@ export function useGlobalVideoGenerationTracker(gameSlug: string): void {
       window.clearInterval(timer)
     }
   }, [gameSlug, refresh])
-}
-
-function toTask(asset: MediaAsset): VideoGenerationTask {
-  const status = taskStatus(asset.status)
-  return {
-    generationId: asset.id,
-    status,
-    ...(asset.prompt ? { prompt: asset.prompt } : {}),
-    ...(typeof asset.meta?.model === 'string' ? { model: asset.meta.model } : {}),
-    ...(typeof asset.meta?.taskId === 'string' ? { providerTaskId: asset.meta.taskId } : {}),
-    ...(asset.status === 'ready' ? { resourceId: asset.provider?.upstreamResourceId ?? asset.id } : {}),
-    ...(asset.error ? { errorMessage: asset.error } : {}),
-    createdAt: asset.createdAt,
-  }
-}
-
-function isActiveStatus(status: MediaAsset['status']): boolean {
-  return status === 'placeholder' || status === 'generating'
-}
-
-function taskStatus(status: MediaAsset['status']): VideoGenerationStatus {
-  if (status === 'placeholder') return 'pending'
-  if (status === 'generating') return 'polling'
-  if (status === 'ready') return 'succeeded'
-  return 'failed'
 }

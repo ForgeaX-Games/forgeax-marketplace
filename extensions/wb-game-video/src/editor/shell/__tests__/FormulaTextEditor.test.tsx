@@ -30,6 +30,47 @@ describe('FormulaTextEditor hole guidance', () => {
     expect(highlight?.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(2)
     expect(container.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(2)
   })
+
+  it('highlights function names as ref tags when followed by (', () => {
+    const { container } = render(
+      <FormulaTextEditor
+        ast={{ t: 'num', id: 'n0', v: 0 }}
+        onChange={vi.fn()}
+      />,
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '公式表达式' }), {
+      target: { value: 'max(?攻击力, 0) + floor(?倍率)' },
+    })
+    const highlight = container.querySelector('.gc-fx-highlight')
+    // max(...) / floor(...) 各被包成一个 .gc-fx-fn-tag（含括号及内部内容），?参数 仍是 hole tag。
+    const fnTags = highlight?.querySelectorAll('.gc-fx-fn-tag')
+    expect(fnTags?.length).toBe(2)
+    expect(fnTags?.[0]?.textContent).toBe('max(?攻击力, 0)')
+    expect(fnTags?.[1]?.textContent).toBe('floor(?倍率)')
+    // 括号内的 ?参数 仍单独高亮成 hole tag
+    expect(highlight?.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(2)
+  })
+
+  it('nests function tags with descending background opacity', () => {
+    const { container } = render(
+      <FormulaTextEditor ast={{ t: 'num', id: 'n0', v: 0 }} onChange={vi.fn()} />,
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: '公式表达式' }), {
+      target: { value: 'max(floor(?x), 1)' },
+    })
+    const fnTags = container.querySelectorAll('.gc-fx-fn-tag')
+    // 外层 max(...) + 内层 floor(...)，两层嵌套
+    expect(fnTags.length).toBe(2)
+    const outer = fnTags[0]! as HTMLElement
+    const inner = fnTags[1]! as HTMLElement
+    expect(outer.textContent).toBe('max(floor(?x), 1)')
+    expect(inner.textContent).toBe('floor(?x)')
+    // 外层透明度高（0.18），内层减半（0.09）
+    const outerAlpha = parseFloat(outer.style.background.match(/[\d.]+(?=\))/)?.[0] ?? '0')
+    const innerAlpha = parseFloat(inner.style.background.match(/[\d.]+(?=\))/)?.[0] ?? '0')
+    expect(outerAlpha).toBeGreaterThan(innerAlpha)
+    expect(outerAlpha).toBeCloseTo(0.18, 2)
+  })
 })
 
 describe('FormulaTextEditor input state', () => {
@@ -76,6 +117,26 @@ describe('FormulaTextEditor input state', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ t: 'num', v: 25 }))
   })
 
+  it('clearing the input calls onEmpty instead of falling back to a 0 ast', () => {
+    const onChange = vi.fn()
+    const onEmpty = vi.fn()
+    render(
+      <FormulaTextEditor
+        ast={{ t: 'num', id: 'n0', v: 25 }}
+        onEmpty={onEmpty}
+        onChange={onChange}
+      />,
+    )
+
+    const input = screen.getByRole('textbox', { name: '公式表达式' }) as HTMLTextAreaElement
+    // 编辑后删空 → 应走 onEmpty（保持空），不应回退 onChange({t:'num',v:0}) 让 "0" 复活。
+    fireEvent.change(input, { target: { value: '' } })
+    fireEvent.blur(input)
+
+    expect(onEmpty).toHaveBeenCalled()
+    expect(onChange).not.toHaveBeenCalledWith(expect.objectContaining({ t: 'num', v: 0 }))
+  })
+
   it('reports parsing errors without duplicating the short error or parameter count', async () => {
     const onChange = vi.fn()
     const onParseFailureChange = vi.fn()
@@ -101,7 +162,8 @@ describe('FormulaTextEditor input state', () => {
     expect(input).toHaveAttribute('aria-invalid', 'true')
     expect(screen.queryByText('无法解析')).toBeNull()
     expect(screen.queryByText(/^错误详情：/)).toBeNull()
-    expect(screen.getByText(/可用：数字/)).toBeTruthy()
+    // 编辑器在解析失败时仍正常渲染（输入框可见，未卸载）。
+    expect(screen.getByRole('textbox', { name: '公式表达式' })).toBeTruthy()
     expect(onChange).not.toHaveBeenCalled()
 
     fireEvent.change(input, { target: { value: 'max(1, 2)' } })

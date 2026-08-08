@@ -119,6 +119,7 @@ export function CatalogShell({
   renderPreview,
   headAction,
   renderRowActions,
+  className,
 }: {
   icon: string
   title: string
@@ -130,6 +131,8 @@ export function CatalogShell({
   headAction?: ReactNode
   /** 每行右侧的行内动作（hover/选中才显）；返回 null 则该行无动作。 */
   renderRowActions?: (id: string) => ReactNode
+  /** 仅供调用方附加领域皮肤，不改变 CatalogShell 的交互契约。 */
+  className?: string
 }): JSX.Element {
   injectStyleOnce('graph-catalog', CATALOG_CSS)
   const leaves = leavesOf(items)
@@ -158,7 +161,7 @@ export function CatalogShell({
   }
 
   return (
-    <div className="gc-tab">
+    <div className={`gc-tab${className ? ` ${className}` : ''}`}>
       <aside className="gc-list" aria-label={title}>
         <div className="gc-list-head">
           <span className="gc-list-ico" aria-hidden>{icon}</span>

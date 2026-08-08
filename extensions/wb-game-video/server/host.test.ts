@@ -163,6 +163,11 @@ const manifestTools = [
   ['wb-game-video:get-asset', 'getAsset', { id: 'missing' }],
   ['wb-game-video:import-character-refs', 'importCharacterRefs', {}],
   ['wb-game-video:import-scene-refs', 'importSceneRefs', {}],
+  ['wb-game-video:upsert-document', 'upsertDocument', {
+    documentType: 'intake',
+    slug: 'demo',
+    content: '# Intake',
+  }],
 ] as const
 
 describe('wb-game-video host module', () => {

@@ -12,7 +12,7 @@ describe('WB_GAME_VIDEO_HTTP_ROUTES', () => {
       'GET assets/:id',
       'GET documents',
       'GET documents/:id',
-      'POST documents/selection',
+      'POST documents/upsert',
       'GET media/bundled/:name',
       'GET style-axes',
       'POST style-axes',
@@ -38,6 +38,7 @@ describe('WB_GAME_VIDEO_HTTP_ROUTES', () => {
 
   it('keeps POST service dispatch map aligned with the declaration table', () => {
     expect([...WB_GAME_VIDEO_POST_SERVICE_ROUTES.entries()]).toEqual([
+      ['documents/upsert', 'upsertDocument'],
       ['references/characters/import', 'importCharacterRefs'],
       ['references/scenes/import', 'importSceneRefs'],
       ['generation/shot-script', 'generateShotScript'],

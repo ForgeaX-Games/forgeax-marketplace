@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   applyHostInit,
+  getDocumentMountOptions,
   releaseHostInit as releaseAll,
   resetHostInjectionForTests,
 } from '../host-init'
+import { getPendingDocumentTypes } from '../editor/persist/pendingDocumentsStore'
 import {
   forgeaxHttp,
   releaseHostInit,
@@ -77,5 +79,50 @@ describe('applyHostInit', () => {
     expect(() =>
       applyHostInit({ rewrite: [{ from: /x/, to: 1 as unknown as string }] }),
     ).toThrow(/rewrite/i)
+  })
+})
+
+describe('applyHostInit document options across panes', () => {
+  afterEach(() => {
+    resetHostInitForTests()
+    resetHostInjectionForTests()
+  })
+
+  it('keeps the center pane docActionSlotEl when the left pane omits it', () => {
+    const slot = document.createElement('div')
+    applyHostInit({ docActionSlotEl: slot })
+
+    applyHostInit({ pane: 'left' })
+
+    expect(getDocumentMountOptions().docActionSlotEl).toBe(slot)
+  })
+
+  it('keeps pending document types when the left pane omits them', () => {
+    applyHostInit({ pendingDocumentTypes: ['core'] })
+
+    applyHostInit({ pane: 'left' })
+
+    expect(getPendingDocumentTypes()).toEqual(['core'])
+  })
+
+  it('clears document options once every mount releases', () => {
+    const slot = document.createElement('div')
+    applyHostInit({ docActionSlotEl: slot, pendingDocumentTypes: ['core'] })
+    applyHostInit({ pane: 'left' })
+
+    releaseAll()
+    expect(getDocumentMountOptions().docActionSlotEl).toBe(slot)
+
+    releaseAll()
+    expect(getDocumentMountOptions().docActionSlotEl).toBeUndefined()
+    expect(getPendingDocumentTypes()).toEqual([])
+  })
+
+  it('still allows an explicit empty pending list to clear badges', () => {
+    applyHostInit({ pendingDocumentTypes: ['core'] })
+
+    applyHostInit({ pendingDocumentTypes: [] })
+
+    expect(getPendingDocumentTypes()).toEqual([])
   })
 })

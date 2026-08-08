@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlueprintDoc, GameGraph } from '../../../runtime/schema/graph-schema'
 import { findUiTreeNode } from '../../persist/ui-tree'
@@ -33,7 +33,7 @@ const main: BlueprintDoc = { id: 'main', title: '主蓝图', entry: 'entry', gra
 
 beforeEach(() => {
   useGraphView.setState({ view: 'ui' })
-  useDocumentNav.setState({ documentType: 'proposal' })
+  useDocumentNav.setState({ documentType: 'intake' })
   useRuleSelection.setState({ section: 'entities', itemId: null })
   useUiSelection.getState().clearUiSelection()
   useGraphScenario.setState({
@@ -83,10 +83,16 @@ describe('NewSidebar interface tree', () => {
     expect(sidebar).toBeTruthy()
     expect(document.querySelector('style[data-reel-style="new-sidebar"]')?.textContent).toContain('width: 196px')
     expect(sidebar.querySelector('.ns-label[title="蓝图"]')?.textContent).toContain('蓝图')
+    expect(sidebar.querySelector('.ns-label[title="试玩"]')?.textContent).toContain('试玩')
     expect(sidebar.querySelector('.ns-label[title="视频"]')?.textContent).toContain('视频')
     expect(sidebar.querySelector('.ns-label[title="界面"]')?.textContent).toContain('界面')
     expect(sidebar.querySelector('.ns-label[title="文档"]')?.textContent).toContain('文档')
     expect(sidebar.querySelector('.ns-label[title="控件"]')?.textContent).toContain('控件')
+    // Top-level order: 文档 → 蓝图 → 试玩 → 界面 → …
+    const topLabels = [...sidebar.querySelectorAll('[role="tree"] > [role="treeitem"] .ns-label')]
+      .map((el) => el.getAttribute('title'))
+    expect(topLabels.indexOf('蓝图')).toBeLessThan(topLabels.indexOf('试玩'))
+    expect(topLabels.indexOf('试玩')).toBeLessThan(topLabels.indexOf('界面'))
   })
 
   it('reserves the disclosure icon column for top-level leaves', () => {
@@ -100,10 +106,38 @@ describe('NewSidebar interface tree', () => {
   it('opens the fixed document category even when the project has no documents', () => {
     render(<NewSidebar />)
     fireEvent.click(screen.getByRole('button', { name: '展开 文档' }))
-    fireEvent.click(screen.getByText('剧本'))
+    expect(screen.getByText('需求')).toBeTruthy()
+    expect(screen.getByText('核心')).toBeTruthy()
+    expect(screen.getByText('问询')).toBeTruthy()
+    expect(screen.getByText('支柱')).toBeTruthy()
+    fireEvent.click(screen.getByText('核心'))
 
     expect(useGraphView.getState().view).toBe('documents')
-    expect(useDocumentNav.getState().documentType).toBe('script')
+    expect(useDocumentNav.getState().documentType).toBe('core')
+  })
+
+  it('setPendingDocumentTypes marks sidebar leaf', async () => {
+    const { setPendingDocumentTypes, resetPendingDocumentTypes } = await import(
+      '../../persist/pendingDocumentsStore'
+    )
+    act(() => resetPendingDocumentTypes())
+    render(<NewSidebar />)
+    fireEvent.click(screen.getByRole('button', { name: '展开 文档' }))
+
+    expect(
+      screen.getByText('核心').closest('[role="treeitem"]')?.getAttribute('data-pending'),
+    ).toBeNull()
+
+    act(() => setPendingDocumentTypes(['core']))
+    expect(
+      screen.getByText('核心').closest('[role="treeitem"]')?.getAttribute('data-pending'),
+    ).toBe('true')
+
+    act(() => setPendingDocumentTypes([]))
+    expect(
+      screen.getByText('核心').closest('[role="treeitem"]')?.getAttribute('data-pending'),
+    ).toBeNull()
+    act(() => resetPendingDocumentTypes())
   })
 
   it('renders the real recursive tree and publishes scheme selection', () => {

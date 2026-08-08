@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { forgeaxHttp, resetHostInitForTests } from '../forgeax-http'
-import { pluginFetch, pluginUrl } from '../plugin-http'
+import { pluginFetch, pluginUrl, productFetch } from '../plugin-http'
 
 vi.mock('../workbench-host', () => ({
   getWorkbenchHost: () => ({
@@ -68,6 +68,20 @@ describe('pluginFetch + forgeaxHttp', () => {
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       '/__wb__/media/resources?gameId=demo&page=1&page_size=100',
+    )
+  })
+
+  it('dispatches rewritten product routes directly without the extension endpoint', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    forgeaxHttp.defaults.rewrite = [
+      { from: /^\/api\/v1\/kino(\/.*)?$/, to: 'https://box.example/api/v1/kino$1' },
+    ]
+
+    await productFetch('/api/v1/kino/resources?game_id=demo')
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      'https://box.example/api/v1/kino/resources?game_id=demo',
     )
   })
 })

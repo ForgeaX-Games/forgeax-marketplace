@@ -29,3 +29,13 @@ export async function pluginFetch(input: string, init?: RequestInit): Promise<Re
   await host.ready()
   return fetch(pluginUrl(rewritten), init)
 }
+
+/** Resolves a product-owned same-origin route without routing it through the extension backend. */
+export function productUrl(path: string): string {
+  return rewriteUrl(path, getActiveRewriteRules())
+}
+
+/** Fetches a product-owned route directly from the browser, after host-specific URL rewriting. */
+export async function productFetch(input: string, init?: RequestInit): Promise<Response> {
+  return fetch(productUrl(input), init)
+}

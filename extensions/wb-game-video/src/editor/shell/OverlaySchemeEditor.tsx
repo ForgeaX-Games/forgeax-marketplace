@@ -6,6 +6,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import { createPortal } from 'react-dom'
+import { getInspectorMountOptions } from '../../host-init'
 import type { Entity, Layout, Overlay, OverlayReaction, Variable } from '../../runtime/schema/graph-schema'
 import { OverlayCatalogPreview } from './OverlayCatalogPreview'
 import { ComponentLibrary } from './ComponentLibrary'
@@ -249,6 +251,31 @@ export function OverlaySchemeEditor({
     [keyConflicts, overlayId],
   )
   const selectedChild = overlay.children.find((child) => child.id === selectedChildId)
+  const { inspectorEl, onInspectorTabChange } = getInspectorMountOptions()
+  // 插槽 tab 用当前选中对象命名——没选中组件时退回方案名，和蓝图的「节点编辑」平级。
+  const inspectorTabLabel = selectedChild
+    ? componentTypeLabel(selectedChild.component)
+    : overlay.title || overlayId
+  useEffect(() => {
+    if (!onInspectorTabChange) return
+    try {
+      onInspectorTabChange({ label: inspectorTabLabel, selected: !!selectedChild })
+    } catch (err) {
+      console.error('[wb-game-video] onInspectorTabChange failed', err)
+    }
+  }, [inspectorTabLabel, selectedChild, onInspectorTabChange])
+  // 离开界面视图时交还页签，否则宿主留着一个点进去空白的死页签。
+  const releaseInspectorTabRef = useRef(onInspectorTabChange)
+  useEffect(() => {
+    releaseInspectorTabRef.current = onInspectorTabChange
+  }, [onInspectorTabChange])
+  useEffect(() => () => {
+    try {
+      releaseInspectorTabRef.current?.({ label: '', selected: false })
+    } catch (err) {
+      console.error('[wb-game-video] onInspectorTabChange failed', err)
+    }
+  }, [])
 
   useEffect(() => {
     setBottomTab(locked || overlay.children.length > 0 ? 'layers' : 'library')
@@ -283,6 +310,31 @@ export function OverlaySchemeEditor({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [selectedChildId, onRemoveChild, locked])
+
+  const propertyPanel = (
+    <ComponentPropertyPanel
+      overlay={overlay}
+      overlays={overlayCatalog}
+      selectedChild={selectedChild}
+      entities={entities}
+      variables={variables}
+      formulas={formulas}
+      itemIds={itemIds}
+      locked={locked}
+      onRemoveChild={(childId) => {
+        onRemoveChild(childId)
+        if (selectedChildId === childId) setSelectedChildId('')
+      }}
+      onPatchChild={onPatchChild}
+      onReactionsChange={onReactionsChange}
+      onCreateEntityAttribute={onCreateEntityAttribute}
+      onCreateEntity={onCreateEntity}
+      onCreateVariable={onCreateVariable}
+      onCreateFormula={onCreateFormula}
+      keyConflicts={keyConflicts}
+      keyConflictFocusRequest={keyConflictFocusRequest}
+    />
+  )
 
   return (
     <div className="ose-root">
@@ -435,28 +487,15 @@ export function OverlaySchemeEditor({
           )}
         </section>
       </main>
-      <ComponentPropertyPanel
-        overlay={overlay}
-        overlays={overlayCatalog}
-        selectedChild={selectedChild}
-        entities={entities}
-        variables={variables}
-        formulas={formulas}
-        itemIds={itemIds}
-        locked={locked}
-        onRemoveChild={(childId) => {
-          onRemoveChild(childId)
-          if (selectedChildId === childId) setSelectedChildId('')
-        }}
-        onPatchChild={onPatchChild}
-        onReactionsChange={onReactionsChange}
-        onCreateEntityAttribute={onCreateEntityAttribute}
-        onCreateEntity={onCreateEntity}
-        onCreateVariable={onCreateVariable}
-        onCreateFormula={onCreateFormula}
-        keyConflicts={keyConflicts}
-        keyConflictFocusRequest={keyConflictFocusRequest}
-      />
+      {/* 宿主给了 inspectorEl 时，参数面板搬到 Agent 右侧那个通用插槽里（本视图自己命名 tab）；
+          没有宿主 slot 的形态（standalone / dev host）仍留在中栏右侧。
+          宿主自己管页签时没选中组件页签会消失，此时不塞内容，免得留下点不到的死 DOM。 */}
+      {inspectorEl
+        ? createPortal(
+          onInspectorTabChange && !selectedChild ? null : propertyPanel,
+          inspectorEl,
+        )
+        : propertyPanel}
     </div>
   )
 }

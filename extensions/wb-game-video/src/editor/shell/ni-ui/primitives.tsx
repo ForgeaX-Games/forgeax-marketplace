@@ -825,7 +825,15 @@ export function NiSlider({
     <span className="ni-slider-wrap">
       {/* 气泡在 disabled 下也留着：它同时是「有没有设过值」的读数（未设置 / 66%），不只是拖动提示。 */}
       {bubble != null ? (
-        <span className="ni-slider-bubble" style={{ left: `calc(${percent}% + ${(0.5 - percent / 100) * 12}px)` }}>
+        // translateX 随进度从 0 走到 -100%：固定 -50% 时两端的气泡会探出轨道，
+        // 100% 那一档把配置面板撑出横向滚动条。这样气泡始终贴着拇指又不越界。
+        <span
+          className="ni-slider-bubble"
+          style={{
+            left: `calc(${percent}% + ${(0.5 - percent / 100) * 12}px)`,
+            transform: `translateX(-${percent}%)`,
+          }}
+        >
           {bubble}
         </span>
       ) : null}

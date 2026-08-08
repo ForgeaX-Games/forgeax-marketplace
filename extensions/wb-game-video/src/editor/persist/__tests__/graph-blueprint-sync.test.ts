@@ -11,6 +11,7 @@ import {
 } from '../graphBlueprintSync'
 import { NODIA_DEMO_PROJECT } from '../../demo/demo'
 import { emptyBlueprintDoc } from '../blueprint-project'
+import { __resetGameScopeForTest, setHostGameSlug, setSyncGameId } from '../gameScope'
 
 type Handler = (e: MessageEvent) => void
 
@@ -53,6 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetGraphBlueprintSyncForTests()
+  __resetGameScopeForTest()
   globalThis.BroadcastChannel = OriginalBroadcastChannel
 })
 
@@ -124,5 +126,35 @@ describe('graphBlueprintSync', () => {
 
   it('broadcastBlueprintIntent is no-op without install', () => {
     expect(() => broadcastBlueprintIntent({ type: 'select', id: 'x' })).not.toThrow()
+  })
+
+  /**
+   * 同源多开不同 game 的 workspace 时，频道名必须带 game 后缀，否则一个 tab
+   * 选蓝图会被别的 game 的 tab 收到（BroadcastChannel 作用域是整个 origin）。
+   * 后缀取自 boot 后注入的权威 game id，所以必须在 install 时才求值。
+   */
+  it('scopes the channel name by the injected sync game id', () => {
+    setSyncGameId('019fdd3c-a')
+    const disposeA = installGraphBlueprintSync()
+    const nameA = MockBroadcastChannel.instances.at(-1)!.name
+    disposeA()
+
+    setSyncGameId('019fdd3c-b')
+    const disposeB = installGraphBlueprintSync()
+    const nameB = MockBroadcastChannel.instances.at(-1)!.name
+    disposeB()
+
+    expect(nameA).toContain('019fdd3c-a')
+    expect(nameB).toContain('019fdd3c-b')
+    expect(nameA).not.toBe(nameB)
+  })
+
+  /** 未注入权威 id 时回落到 URL/宿主 slug，保持历史行为。 */
+  it('falls back to the host slug when no sync id is set', () => {
+    setHostGameSlug('game-fallback')
+    const dispose = installGraphBlueprintSync()
+    const name = MockBroadcastChannel.instances.at(-1)!.name
+    dispose()
+    expect(name).toContain('game-fallback')
   })
 })

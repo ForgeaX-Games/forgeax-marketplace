@@ -6,19 +6,26 @@
  * 完全不依赖旧 FMV（scenarioStore / shellStore）。
  */
 import { create } from 'zustand'
+import { gameKeySuffix } from './gameScope'
 
 export type GraphView = 'documents' | 'graph' | 'video' | 'video-generate' | 'assets' | 'ui' | 'rule' | 'play'
 const VIEWS: readonly GraphView[] = ['documents', 'graph', 'video', 'video-generate', 'assets', 'ui', 'rule', 'play']
 
-const LS_KEY = 'wb-game-video:graph:view'
-const CHANNEL = 'wb-game-video:graph:view-sync'
+// 按 game 隔离键 / 频道，避免同源多开不同 game 时跨 tab 串台。
+// 后缀惰性求值：进程内挂载的 game 标识由宿主注入，晚于本模块求值。
+const LS_KEY_BASE = 'wb-game-video:graph:view'
+const CHANNEL_BASE = 'wb-game-video:graph:view-sync'
 
-function readInitial(): GraphView {
+function lsKey(): string {
+  return `${LS_KEY_BASE}${gameKeySuffix()}`
+}
+
+function readStored(): GraphView | null {
   try {
-    const v = localStorage.getItem(LS_KEY)
+    const v = localStorage.getItem(lsKey())
     if (v && (VIEWS as readonly string[]).includes(v)) return v as GraphView
   } catch { /* sandbox / SSR */ }
-  return 'graph'
+  return null
 }
 
 interface GraphViewStore {
@@ -27,11 +34,11 @@ interface GraphViewStore {
 }
 
 export const useGraphView = create<GraphViewStore>((set) => ({
-  view: readInitial(),
+  view: readStored() ?? 'graph',
   setView: (v) =>
     set((s) => {
       if (s.view === v) return s
-      try { localStorage.setItem(LS_KEY, v) } catch { /* best-effort */ }
+      try { localStorage.setItem(lsKey(), v) } catch { /* best-effort */ }
       broadcast(v)
       return { view: v }
     }),
@@ -53,14 +60,17 @@ function broadcast(v: GraphView): void {
  * 独立运行（pane=null）不需要，也就不开 channel、零开销。
  */
 export function installGraphViewSync(): () => void {
+  // 模块求值时宿主可能还没注入 game 标识，此刻的键才是最终的，补一次 hydrate。
+  const stored = readStored()
+  if (stored) useGraphView.setState({ view: stored })
   if (typeof BroadcastChannel === 'undefined') return () => {}
-  channel = new BroadcastChannel(CHANNEL)
+  channel = new BroadcastChannel(`${CHANNEL_BASE}${gameKeySuffix()}`)
   channel.onmessage = (e: MessageEvent) => {
     const v = e.data
     if (!(VIEWS as readonly string[]).includes(v)) return
     applyingRemote = true
     try {
-      try { localStorage.setItem(LS_KEY, v) } catch { /* best-effort */ }
+      try { localStorage.setItem(lsKey(), v) } catch { /* best-effort */ }
       useGraphView.setState({ view: v as GraphView })
     } finally {
       applyingRemote = false

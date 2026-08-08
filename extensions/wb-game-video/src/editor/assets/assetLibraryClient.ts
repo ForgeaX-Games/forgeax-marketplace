@@ -130,13 +130,12 @@ function bytes(resource: KinoResourceDTO): number | undefined {
 function toManagedAsset(
   resource: KinoResourceDTO,
   kind: ManagedAssetKind,
-  client: KinoVideoClient,
 ): ManagedAsset {
   return {
     id: resource.resource_id,
     kind,
     name: resource.name || resource.resource_id,
-    url: client.playbackUrl(resource.resource_id, resource.game_id),
+    url: resource.url,
     mime: resource.source_meta?.mime_type,
     bytes: bytes(resource),
     updatedAt: resource.updated_at,
@@ -146,7 +145,7 @@ function toManagedAsset(
 
 /**
  * Production adapter for assets in Kino's provider-backed resource API.
- * Resources are always previewed through its authenticated content endpoint.
+ * Kino's resource DTO owns the HTTPS CDN URL used for browser preview.
  */
 export function createKinoAssetLibraryClient(
   options: CreateKinoAssetLibraryClientOptions = {},
@@ -168,7 +167,7 @@ export function createKinoAssetLibraryClient(
           page_size: MAX_KINO_RESOURCE_PAGE_SIZE,
         }, requestOptions)
         for (const resource of response.items) {
-          resources.set(resource.resource_id, toManagedAsset(resource, kind, client))
+          resources.set(resource.resource_id, toManagedAsset(resource, kind))
         }
         if (response.items.length === 0 || resources.size >= response.total) break
       }
@@ -190,7 +189,7 @@ export function createKinoAssetLibraryClient(
           sourceMeta: { extra: { bytes: file.size } },
           signal: requestOptions?.signal,
         })
-        return toManagedAsset(resource, kind, client)
+        return toManagedAsset(resource, kind)
       } catch (error) {
         if (!(error instanceof VideoUploadError)) throw error
         const policy = BROWSER_UPLOAD_POLICIES[kind]
@@ -225,7 +224,7 @@ export function createKinoAssetLibraryClient(
       if (updated.media_type !== 'image' && updated.media_type !== 'audio' && updated.media_type !== 'font') {
         throw new AssetLibraryUploadError('只能重命名图片、音频或字体资产')
       }
-      return toManagedAsset(updated, updated.media_type, client)
+      return toManagedAsset(updated, updated.media_type)
     },
 
     async remove(gameId, id, requestOptions) {

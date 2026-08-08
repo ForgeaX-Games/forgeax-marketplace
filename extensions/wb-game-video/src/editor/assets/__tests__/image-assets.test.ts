@@ -22,7 +22,7 @@ afterEach(() => {
 describe('gvaImageUrl', () => {
   it('builds a same-origin, revisioned image URL', () => {
     expect(gvaImageUrl('a-img-1/2', 'demo game', 42)).toBe(
-      'https://host.test/extension/runtime/media/resources/a-img-1%2F2/content?game_id=demo%20game&v=42',
+      '/api/v1/kino/resources/a-img-1%2F2/content?game_id=demo%20game&v=42',
     )
   })
 })
@@ -38,7 +38,7 @@ describe('deleteReferenceImage', () => {
     await deleteReferenceImage('demo game', 'a-img-1')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://host.test/extension/runtime/media/resources/a-img-1?game_id=demo%20game',
+      '/api/v1/kino/resources/a-img-1?game_id=demo%20game',
       expect.objectContaining({ method: 'DELETE' }),
     )
   })

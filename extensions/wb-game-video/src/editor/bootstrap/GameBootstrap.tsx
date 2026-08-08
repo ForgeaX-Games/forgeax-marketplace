@@ -10,6 +10,12 @@ type PackageError = { code?: string; target?: string; hint?: string; retryable?:
 export interface GameBootstrapProps {
   gameId?: string
   onBoot: (gameId: string) => void | Promise<void>
+  /**
+   * When true, an `uninitialized` package is initialized silently instead of
+   * showing the "从模板新建" guide. Hosts opt in per mount (e.g. Arrival's
+   * in-process video-game surface); the default keeps the manual confirmation.
+   */
+  autoInitialize?: boolean
   children: ReactNode
 }
 
@@ -65,7 +71,7 @@ function isWorkbenchBoundaryError(cause: unknown): boolean {
   return /hostOrigin is required|document\.referrer is unavailable|Workbench handshake/i.test(cause.message)
 }
 
-export function GameBootstrap({ gameId, onBoot, children }: GameBootstrapProps): JSX.Element | null {
+export function GameBootstrap({ gameId, onBoot, autoInitialize = false, children }: GameBootstrapProps): JSX.Element | null {
   const t = useT()
   const [state, setState] = useState<BootstrapState>({ kind: 'loading' })
   const onBootRef = useRef(onBoot)
@@ -91,6 +97,23 @@ export function GameBootstrap({ gameId, onBoot, children }: GameBootstrapProps):
     if (isCurrent()) setState({ kind: 'ready' })
   }, [])
 
+  const initialize = useCallback(async () => {
+    if (!mountedRef.current) return
+    setState({ kind: 'loading' })
+    try {
+      const host = getWorkbenchHost()
+      const context = await host.ready()
+      const status = statusOf(await host.gamePackage.initialize())
+      if (!mountedRef.current) return
+      if (status?.state === 'initialized') await bootExisting(gameId ?? context.gameId)
+      else if (status?.state === 'inconsistent') setState({ kind: 'inconsistent', missing: status.missing ?? [] })
+      else setState({ kind: 'error', retry: 'initialize', error: { target: 'package', hint: 'Invalid package status', retryable: true } })
+    } catch (cause) {
+      if (!mountedRef.current) return
+      setState({ kind: 'error', retry: 'initialize', error: packageError(cause, 'package') })
+    }
+  }, [bootExisting, gameId])
+
   const readStatus = useCallback(async () => {
     if (!mountedRef.current) return
     const statusRun = ++statusRunRef.current
@@ -108,32 +131,18 @@ export function GameBootstrap({ gameId, onBoot, children }: GameBootstrapProps):
         await bootExisting(gameId ?? context.gameId, isCurrentRun)
       }
       else if (status?.state === 'inconsistent') setState({ kind: 'inconsistent', missing: status.missing ?? [] })
-      else if (status?.state === 'uninitialized') setState({ kind: 'guide' })
+      else if (status?.state === 'uninitialized') {
+        if (autoInitialize) await initialize()
+        else setState({ kind: 'guide' })
+      }
       else setState({ kind: 'error', retry: 'status', error: { target: 'package status', hint: 'Invalid package status', retryable: true } })
     } catch (cause) {
       if (!isCurrentRun()) return
       setState({ kind: 'error', retry: 'status', error: packageError(cause, errorTarget) })
     }
-  }, [bootExisting, gameId])
+  }, [autoInitialize, bootExisting, gameId, initialize])
 
   useEffect(() => { void readStatus() }, [readStatus])
-
-  const initialize = async () => {
-    if (!mountedRef.current) return
-    setState({ kind: 'loading' })
-    try {
-      const host = getWorkbenchHost()
-      const context = await host.ready()
-      const status = statusOf(await host.gamePackage.initialize())
-      if (!mountedRef.current) return
-      if (status?.state === 'initialized') await bootExisting(gameId ?? context.gameId)
-      else if (status?.state === 'inconsistent') setState({ kind: 'inconsistent', missing: status.missing ?? [] })
-      else setState({ kind: 'error', retry: 'initialize', error: { target: 'package', hint: 'Invalid package status', retryable: true } })
-    } catch (cause) {
-      if (!mountedRef.current) return
-      setState({ kind: 'error', retry: 'initialize', error: packageError(cause, 'package') })
-    }
-  }
 
   if (state.kind === 'ready') return <>{children}</>
   if (state.kind === 'loading') return <section className="ga-bootstrap" aria-live="polite"><p>{t('bootstrap.checking')}</p></section>

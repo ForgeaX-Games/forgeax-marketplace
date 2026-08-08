@@ -65,6 +65,7 @@ const TEXT_FILENAMES = new Set([
 ])
 const SCAN_EXCLUDED_DIRS = new Set([
   '.git',
+  '.worktrees',
   'node_modules',
 ])
 const SCAN_EXCLUDED_FILES = new Set([

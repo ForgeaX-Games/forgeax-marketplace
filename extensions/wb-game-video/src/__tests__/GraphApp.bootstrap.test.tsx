@@ -16,6 +16,7 @@ const mockScenarioState = vi.hoisted(() => {
   }
   return {
     graph: { nodes: [] as never[] },
+    game: 'demo-game',
     ensureBoot,
     blueprints,
     mainBlueprintId: 'bp-main',
@@ -87,7 +88,12 @@ vi.mock('../editor/persist/uiSelectionStore', () => ({
 vi.mock('../editor/persist/graphBlueprintSync', () => ({
   installGraphBlueprintSync: () => vi.fn(),
 }))
-vi.mock('../editor/persist/gameScope', () => ({ getGameSlug: () => 'demo' }))
+vi.mock('../editor/persist/gameScope', () => ({
+  getGameSlug: () => 'demo',
+  gameKeySuffix: () => ':game:demo',
+  setHostGameSlug: vi.fn(),
+  setSyncGameId: vi.fn(),
+}))
 vi.mock('../styles/injectStyle', () => ({ injectStyleOnce: vi.fn() }))
 vi.mock('../editor/persist/tipSyncPolling', () => ({
   installTipSyncPolling: vi.fn(() => () => {}),

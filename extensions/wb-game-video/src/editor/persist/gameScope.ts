@@ -21,6 +21,29 @@
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
 
 let _cached: string | null | undefined
+/**
+ * 宿主进程内挂载（`mount()` / `applyHostInit({ slug })`）时 game 走 props 注入，
+ * URL 上没有 slug。它优先于 URL：URL 只是 iframe 形态的来源。
+ */
+let _hostSlug: string | null = null
+
+/** 由 `applyHostInit` 调用；进程内挂载的 game 标识归口。 */
+export function setHostGameSlug(slug: string | null | undefined): void {
+  _hostSlug = slug?.trim() || null
+}
+
+/**
+ * 跨 tab 同步频道的作用域 id —— 权威来源是 boot 后拿到的真实 game（center 走
+ * 宿主握手的 `context.gameId`，left 走 `ensureBoot`）。它只影响 BroadcastChannel /
+ * storage 键的 game 后缀，**不影响** `getGameSlug()`（磁盘/接口 `?game=` 仍按 slug）。
+ * 未设置时 `gameKeySuffix()` 回落到 URL slug，保持历史行为。
+ */
+let _syncGameId: string | null = null
+
+/** 由 `GraphApp` 在拿到真实 game 后调用，作为同步频道命名的权威 id。 */
+export function setSyncGameId(id: string | null | undefined): void {
+  _syncGameId = id?.trim() || null
+}
 
 function readGameSlug(): string | null {
   if (typeof window === 'undefined') return null
@@ -34,8 +57,9 @@ function readGameSlug(): string | null {
   }
 }
 
-/** 当前 game slug；无（全局库）时为 null。结果缓存（iframe 重载才会变）。 */
+/** 当前 game slug；无（全局库）时为 null。URL 结果缓存（iframe 重载才会变）。 */
 export function getGameSlug(): string | null {
+  if (_hostSlug) return _hostSlug
   if (_cached !== undefined) return _cached
   _cached = readGameSlug()
   return _cached
@@ -51,13 +75,18 @@ export function gameQuery(prefix: '?' | '&' = '?'): string {
   return slug ? `${prefix}game=${encodeURIComponent(slug)}` : ''
 }
 
-/** localStorage key 的 per-game 后缀（全局库时为空串）。 */
+/**
+ * 跨 tab 同步频道 / storage 键的 per-game 后缀（全局库时为空串）。
+ * 优先用 `setSyncGameId` 注入的权威 game（boot 后的真实 id），回落到 URL slug。
+ */
 export function gameKeySuffix(): string {
-  const slug = getGameSlug()
-  return slug ? `:game:${slug}` : ''
+  const id = _syncGameId ?? getGameSlug()
+  return id ? `:game:${id}` : ''
 }
 
 /** 仅测试用：清缓存让下次重新读 URL。 */
 export function __resetGameScopeForTest(): void {
   _cached = undefined
+  _hostSlug = null
+  _syncGameId = null
 }

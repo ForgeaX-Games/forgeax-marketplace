@@ -4,8 +4,12 @@
  */
 import type { BlueprintDoc } from '../../runtime/schema/graph-schema'
 import { useGraphScenario } from './graphScenarioStore'
+import { gameKeySuffix } from './gameScope'
 
-const CHANNEL = 'wb-game-video:graph:blueprint-sync'
+// 按 game 隔离频道：BroadcastChannel 作用域是整个 origin，不加后缀会让同源里
+// 多开的不同 game workspace 共用一条频道，一个 tab 选蓝图会串到别的 game 的 tab。
+// 后缀在 install 时才求值：进程内挂载的 game 标识由宿主注入，晚于本模块求值。
+const CHANNEL_BASE = 'wb-game-video:graph:blueprint-sync'
 
 export type BlueprintSyncMsg =
   | { type: 'select'; id: string }
@@ -93,7 +97,7 @@ function applyRemote(msg: BlueprintSyncMsg): void {
  */
 export function installGraphBlueprintSync(): () => void {
   if (typeof BroadcastChannel === 'undefined') return () => {}
-  channel = new BroadcastChannel(CHANNEL)
+  channel = new BroadcastChannel(`${CHANNEL_BASE}${gameKeySuffix()}`)
   channel.onmessage = (e: MessageEvent) => {
     if (!isSyncMsg(e.data)) return
     applyingRemote = true

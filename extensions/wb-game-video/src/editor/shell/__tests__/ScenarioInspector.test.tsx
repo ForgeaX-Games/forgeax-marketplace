@@ -9,7 +9,7 @@ function renderInspector(value: ScenarioMeta, section: 'variables' | 'entities' 
 }
 
 describe('ScenarioInspector rules editing', () => {
-  it('keeps the section add action sticky and blocks duplicate variable IDs', () => {
+  it('keeps the shared variable toolbar sticky and blocks duplicate IDs', () => {
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
     const { onRename } = renderInspector({
       variables: {
@@ -17,8 +17,8 @@ describe('ScenarioInspector rules editing', () => {
         rage: { id: 'rage', initial: 0 },
       },
     }, 'variables')
-    const heading = screen.getByText('变量').parentElement
-    expect(heading).toHaveStyle({ position: 'sticky', top: '0px' })
+    const toolbar = screen.getByRole('button', { name: '＋ 新建变量' }).closest('.gc-rule-toolbar')
+    expect(toolbar).toHaveStyle({ position: 'sticky', top: '0px' })
     const idInput = screen.getAllByLabelText('变量 ID')[0]!
     fireEvent.change(idInput, { target: { value: 'rage' } })
     expect(idInput).toHaveAttribute('aria-invalid', 'true')
@@ -39,34 +39,31 @@ describe('ScenarioInspector rules editing', () => {
     expect(value).toHaveValue('')
     fireEvent.blur(value)
     expect(onChange).toHaveBeenLastCalledWith({
-      entities: { hero: { id: 'hero', attrs: { hp: 0 } } },
+      entities: { hero: { id: 'hero', attrs: { hp: 0 }, attrMeta: { hp: { initial: 0 } } } },
     })
   })
 
-  it('exposes advanced settings', () => {
+  it('renders numeric limits in the shared rule table columns', () => {
     renderInspector({
       variables: {
         qi: { id: 'qi', name: '气力', initial: 8, min: 0, max: 10 },
       },
     }, 'variables')
 
-    fireEvent.click(screen.getByRole('button', { name: /高级设置/ }))
-    expect(screen.getByLabelText('qi min')).toHaveValue('0')
-    expect(screen.getByLabelText('qi max')).toHaveValue('10')
-    expect(screen.getByLabelText('qi initial')).toHaveValue('8')
+    expect(screen.getByLabelText('qi 的最小值')).toHaveValue('0')
+    expect(screen.getByLabelText('qi 的最大值')).toHaveValue('10')
+    expect(screen.getByLabelText('qi 的初值')).toHaveValue('8')
   })
 
-  it('switches a variable to a stored string and hides its advanced settings', () => {
+  it('does not render the removed variable type switcher', () => {
     const { onChange } = renderInspector({
       variables: { title: { id: 'title', initial: 1, min: 0, max: 10 } },
     }, 'variables')
-    fireEvent.change(screen.getByLabelText('title 的初值类型'), { target: { value: 'string' } })
-    expect(onChange).toHaveBeenLastCalledWith({
-      variables: { title: { id: 'title', initial: '', min: 0, max: 10 } },
-    })
+    expect(screen.queryByLabelText('title 的初值类型')).toBeNull()
+    expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('hides variable advanced settings for a stored string', () => {
+  it('does not render a legacy advanced-settings control for a stored string', () => {
     renderInspector({ variables: { title: { id: 'title', initial: '', min: 0, max: 10 } } }, 'variables')
     expect(screen.getByLabelText('title 的初值')).toHaveValue('')
     expect(screen.queryByRole('button', { name: /高级设置/ })).toBeNull()

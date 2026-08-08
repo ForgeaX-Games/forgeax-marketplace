@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { GameScenario } from '../../../runtime/schema/graph-schema'
 import { GraphPlayer } from '../GraphPlayer'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
+import { useKinoVideoCache } from '../../assets/kinoVideoCacheStore'
 
 const hostClient = vi.hoisted(() => ({
   context: {
@@ -45,14 +46,34 @@ const SCENARIO: GameScenario = {
 }
 
 describe('GraphPlayer missing video handling', () => {
-  it('retries once before showing the stable id and clears it on loadedmetadata', () => {
+  it('reports a failed native CDN URL and clears it on loadedmetadata', () => {
     useGraphScenario.setState({ game: 'test-game' })
+    useKinoVideoCache.setState({
+      byGame: {
+        'test-game': {
+          items: [{
+            resource_id: 'stable-video-id',
+            game_id: 'test-game',
+            media_type: 'video',
+            name: 'stable-video.mp4',
+            type: 'UPLOAD',
+            url: 'https://cdn.test/stable-video.mp4',
+            source: 'upload',
+            source_meta: {},
+            created_at: 1,
+            updated_at: 1,
+          }],
+          total: 1,
+          loading: false,
+          error: null,
+          generation: 1,
+        },
+      },
+    })
     const { container } = render(<GraphPlayer scenario={SCENARIO} />)
     const video = container.querySelector('video')
     expect(video).toBeTruthy()
 
-    fireEvent.error(video!)
-    expect(screen.queryByRole('status')).toBeNull()
     fireEvent.error(video!)
     expect(screen.getByRole('status')).toHaveTextContent('stable-video-id')
 

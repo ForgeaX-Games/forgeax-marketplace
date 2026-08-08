@@ -5,14 +5,18 @@
  * 右：试玩面板（演出/HUD/交互/结局），与画布共享**同一个 GraphSession**，所以执行到哪、画布就亮哪。
  * 编辑图后可从节点「从此试玩」打开浮层；浮层内「重开」用最新图重建 session。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { GameGraph, GameScenario, SubFlowPackDef } from '../../runtime/schema/graph-schema'
 import { getSubFlowPack, getSubProcess } from '../../runtime/schema/graph-schema'
 import { GraphSession, type SessionSnapshot } from '../../runtime/engine/session'
 import { createSessionSeed } from '../../runtime/play/sessionSeed'
-import { getInspectorMountOptions } from '../../host-init'
+import {
+  getInspectorActive,
+  getInspectorMountOptions,
+  subscribeInspectorActive,
+} from '../../host-init'
 import { GraphCanvas } from '../../graph/canvas/GraphCanvas'
 import { NodeInspector, type VideoOption } from './NodeInspector'
 import { NodePanelTabBar, type NodePanelTab } from './NodePanelTabBar'
@@ -100,6 +104,10 @@ function ensureToolbarStyle(): void {
 const FORM_W_MIN = 280
 const PREVIEW_OPEN_KEY = 'wb-game-video.nodePanel.previewOpen'
 const PREVIEW_DRAWER_MOTION_MS = 220
+/** 开关拉片的宽度；贴画布右内缘时，右上角的浮层要按它让位。 */
+const PREVIEW_TOGGLE_PILL_W = 34
+/** 画布顶栏高度（面包屑 + 右侧三按钮）；右上角的浮层要落在它下方。 */
+const CANVAS_TOP_BAR_H = 58
 
 /**
  * 预览区开关拉片（Figma 14597:20050）：#2C2C2C 左尖拉片 + 向左渐亮的白描边 + 视频库图标，
@@ -107,7 +115,16 @@ const PREVIEW_DRAWER_MOTION_MS = 220
  * 展开态随面板左扩贴着预览区左缘（Figma 14597:20310）。矢量数据取自 Figma 导出 SVG。
  * 预览弹出时图标与描边高亮：白 40% → 全白（Figma 14597:20069）。
  */
-function PreviewTogglePill({ open, onToggle }: { open: boolean, onToggle: () => void }): JSX.Element {
+function PreviewTogglePill({ open, onToggle, anchor = 'panel-edge' }: {
+  open: boolean
+  onToggle: () => void
+  /**
+   * `panel-edge` 骑在节点面板左缘外侧（面板内两列形态）。
+   * `canvas-edge` 贴画布右内缘——宿主拆走预览列后拉片必须悬空压在画布上，
+   * 否则收起态要给它留一条导轨，会吃掉画布宽度、挡住底下的蓝图节点。
+   */
+  anchor?: 'panel-edge' | 'canvas-edge'
+}): JSX.Element {
   const highlight = open ? 1 : 0.4
   return (
     <button
@@ -118,7 +135,7 @@ function PreviewTogglePill({ open, onToggle }: { open: boolean, onToggle: () => 
       title={open ? '收起左侧预览区' : '展开左侧预览区'}
       style={{
         position: 'absolute',
-        left: -34,
+        ...(anchor === 'canvas-edge' ? { right: 0 } : { left: -34 }),
         top: 58,
         width: 34,
         height: 103,
@@ -173,8 +190,21 @@ function PreviewTogglePill({ open, onToggle }: { open: boolean, onToggle: () => 
 export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Element {
   bootEditorSkins()
   ensureToolbarStyle()
-  const { inspectorEl, onNodeSelect } = getInspectorMountOptions()
+  const {
+    inspectorEl,
+    previewEl,
+    onNodeSelect,
+    onPreviewOpenChange,
+    onInspectorTabChange,
+  } = getInspectorMountOptions()
   const externalInspector = !!inspectorEl
+  // 预览拆分只在宿主同时给出两个 slot 时生效；只给 inspectorEl 的宿主保持原两列形态。
+  const externalPreview = externalInspector && !!previewEl
+  const inspectorActive = useSyncExternalStore(
+    subscribeInspectorActive,
+    getInspectorActive,
+    getInspectorActive,
+  )
   const playRootRef = useRef<HTMLDivElement | null>(null)
   const [playRootEl, setPlayRootEl] = useState<HTMLElement | null>(null)
   const bindPlayRoot = (el: HTMLDivElement | null) => {
@@ -329,6 +359,75 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
       return next
     })
   }, [])
+  // 试玩浮层可拖动：默认贴画布右上，拖过一次后改用 left/top 记住位置。
+  // 调试时经常要把它挪开看底下的蓝图树，所以位置只存在会话里，不落盘。
+  const playOverlayRef = useRef<HTMLDivElement | null>(null)
+  const playDragRef = useRef<{ dx: number, dy: number } | null>(null)
+  /**
+   * 位置只存 ref + 直接写 DOM，完全不进 state：GraphStudio 每重渲染一次，
+   * ReactFlow 就要把所有节点重新度量一遍（期间 visibility:hidden），整张图会闪一下。
+   * 拖拽是高频操作，走 state 等于每帧闪一次。
+   */
+  const playPosRef = useRef<{ x: number, y: number } | null>(null)
+  const writePlayPos = useCallback((pos: { x: number, y: number }) => {
+    const overlay = playOverlayRef.current
+    if (!overlay) return
+    overlay.style.left = `${pos.x}px`
+    overlay.style.top = `${pos.y}px`
+    overlay.style.right = 'auto'
+  }, [])
+  /** 夹在画布可视区内：拖出去就再也抓不回来了。 */
+  const clampPlayPos = useCallback((x: number, y: number): { x: number, y: number } => {
+    const host = canvasHostRef.current
+    const overlay = playOverlayRef.current
+    if (!host || !overlay) return { x, y }
+    const maxX = Math.max(0, host.clientWidth - overlay.offsetWidth)
+    const maxY = Math.max(0, host.clientHeight - overlay.offsetHeight)
+    return {
+      x: Math.min(Math.max(0, x), maxX),
+      y: Math.min(Math.max(0, y), maxY),
+    }
+  }, [])
+  const beginPlayDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    // 标题栏上的暂停/倍速/重开/关闭仍要能点，不能被拖拽吞掉。
+    if ((event.target as HTMLElement).closest('button, select, input')) return
+    const host = canvasHostRef.current
+    const overlay = playOverlayRef.current
+    if (!host || !overlay) return
+    const hostRect = host.getBoundingClientRect()
+    const rect = overlay.getBoundingClientRect()
+    playDragRef.current = { dx: event.clientX - rect.left, dy: event.clientY - rect.top }
+    // 首次拖拽把右上角锚点换算成 left/top，之后跟手不跳。
+    const start = clampPlayPos(rect.left - hostRect.left, rect.top - hostRect.top)
+    playPosRef.current = start
+    writePlayPos(start)
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault()
+  }, [clampPlayPos, writePlayPos])
+  const movePlayDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = playDragRef.current
+    const host = canvasHostRef.current
+    if (!drag || !host) return
+    const hostRect = host.getBoundingClientRect()
+    const next = clampPlayPos(
+      event.clientX - hostRect.left - drag.dx,
+      event.clientY - hostRect.top - drag.dy,
+    )
+    playPosRef.current = next
+    writePlayPos(next)
+  }, [clampPlayPos, writePlayPos])
+  const endPlayDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    playDragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }, [])
+  // 位置不在 state 里，重渲染会把 style 打回默认右上角锚点——每次提交后补写回去。
+  // 用 layout effect 在绘制前落笔，看不到中间态。
+  useLayoutEffect(() => {
+    if (playPosRef.current) writePlayPos(playPosRef.current)
+  })
   const panelRef = useRef<HTMLDivElement | null>(null)
   const [panelW, setPanelW] = useState(0)
   const canvasHostRef = useRef<HTMLDivElement | null>(null)
@@ -443,8 +542,37 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const selectedCanConfigurePerformance = !!selectedNode
     && !getSubProcess(selectedNode.data)
     && !getSubFlowPack(selectedNode.data)
+  /**
+   * 拉片是否悬在画布右内缘。它 z-index 高于画布浮层，右上角的试玩浮层得据此让位，
+   * 否则被压掉右边一条（浮层自身仍要能开，所以不是把拉片藏掉）。
+   */
+  const canvasEdgePillVisible = externalPreview
+    && selectedCanConfigurePerformance
+    && inspectorActive
+  /** 一级页签文案（Figma 14947:80051 的「节点名称1调试面板」），内嵌与宿主插槽共用。 */
+  const nodeConfigLabel = selectedNode
+    ? `${selectedNode.data.name || selectedNode.id}调试面板`
+    : '节点调试面板'
+  // 宿主的插槽页签是通用的，蓝图得自己报名字——否则只能拿到 handleNodeSelect 的兜底
+  // 文案「节点编辑」。改节点名时也要跟着变，所以依赖 label 本身而不是选中 id。
+  // 挂载时本来就没选中，不上报：那不是一次「取消选中」，别去动宿主页签。
+  const reportedTabRef = useRef(false)
+  useEffect(() => {
+    if (!onInspectorTabChange) return
+    if (!selected && !reportedTabRef.current) return
+    reportedTabRef.current = true
+    try {
+      onInspectorTabChange({ label: nodeConfigLabel, selected: !!selected })
+    } catch (err) {
+      console.error('[wb-game-video] onInspectorTabChange failed', err)
+    }
+  }, [nodeConfigLabel, selected, onInspectorTabChange])
   // 试玩浮层与节点预览互斥显示，但不改 previewOpen：关闭试玩后恢复用户原有预览状态。
-  const effectivePreviewOpen = previewOpen && !playOpen && selectedCanConfigurePerformance
+  // 宿主切到 Agent 页签时同理：节点面板不可见，抽屉与拉片一起收起，切回来再恢复。
+  const effectivePreviewOpen = previewOpen
+    && !playOpen
+    && selectedCanConfigurePerformance
+    && inspectorActive
   // 关闭时让预览内容保留到抽屉动画结束再卸载；只控制视觉生命周期，不改变预览业务状态。
   const [previewDrawerMounted, setPreviewDrawerMounted] = useState(effectivePreviewOpen)
   useEffect(() => {
@@ -463,6 +591,58 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   useEffect(() => {
     if (!effectivePreviewOpen) setSettlementInsertTimeMs(null)
   }, [effectivePreviewOpen])
+  // 宿主预览列是画布的兄弟列，开合会把画布挤窄/放宽，选中节点可能就此落到视口外。
+  // 内嵌形态靠 panelRatio 变化顺带重定位，外置形态 ratio 恒为 0，得显式发信号。
+  // 抽屉一开始动就发：画布跟着它逐帧重定位，两者一起滑，而不是末尾跳一下。
+  // 抽屉开合会改画布宽度，拖到右侧的试玩浮层可能因此半个身子在视口外。
+  // 等动画结束夹一次；相等就返回原对象，免得 setState 自己把自己叫醒。
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const current = playPosRef.current
+      if (!current) return
+      const next = clampPlayPos(current.x, current.y)
+      if (next.x === current.x && next.y === current.y) return
+      playPosRef.current = next
+      writePlayPos(next)
+    }, PREVIEW_DRAWER_MOTION_MS)
+    return () => window.clearTimeout(timer)
+  }, [effectivePreviewOpen, clampPlayPos, writePlayPos])
+  const [previewRevealSignal, setPreviewRevealSignal] = useState(0)
+  // 挂载那一次不算「抽屉开合」，跳过：否则一进画布就先被平移一下。
+  const previewOpenSettledRef = useRef(false)
+  useEffect(() => {
+    if (!externalPreview) return
+    if (!previewOpenSettledRef.current) {
+      previewOpenSettledRef.current = true
+      return
+    }
+    setPreviewRevealSignal((value) => value + 1)
+  }, [effectivePreviewOpen, externalPreview])
+  // 宿主拥有 previewEl 时由它控列宽，所以展开态必须回报出去；拉片本身仍归本组件。
+  useEffect(() => {
+    if (!onPreviewOpenChange) return
+    try {
+      onPreviewOpenChange(effectivePreviewOpen)
+    } catch (err) {
+      console.error('[wb-game-video] onPreviewOpenChange failed', err)
+    }
+  }, [effectivePreviewOpen, onPreviewOpenChange])
+  // 离开蓝图（切到界面/规则等视图）时把插槽交还给宿主：预览列否则带着上次的展开
+  // 宽度留在那挤窄别的视图，页签否则变成点进去空白的死页签。
+  // 用 ref 拿回调，避免依赖变化时误触发释放。
+  const releaseHostSlotsRef = useRef({ onPreviewOpenChange, onInspectorTabChange })
+  useEffect(() => {
+    releaseHostSlotsRef.current = { onPreviewOpenChange, onInspectorTabChange }
+  }, [onPreviewOpenChange, onInspectorTabChange])
+  useEffect(() => () => {
+    const { onPreviewOpenChange: reportPreview, onInspectorTabChange: reportTab } = releaseHostSlotsRef.current
+    try {
+      reportPreview?.(false)
+      reportTab?.({ label: '', selected: false })
+    } catch (err) {
+      console.error('[wb-game-video] host slot release failed', err)
+    }
+  }, [])
   /** 预览台读投影场景：canvasGraph（下钻时为包内图）+ 目录 overlays + 实体/变量（meta 缺省回落 demo）。 */
   const previewScenario = useMemo<GameScenario>(
     () => ({
@@ -491,21 +671,25 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     [canvasGraph, selected, setCanvasGraph],
   )
   // 面板实际宽度跟随测量（clamp 宽度 + 窗口缩放都会变），用于夹住预览区上限。
+  // 外置模式下面板不压画布、panelRatio 恒为 0，这两个测量只会在抽屉动画的每一帧
+  // 触发 setState → 整棵画布逐帧重渲染（节点看起来在闪），所以直接不订阅。
   useEffect(() => {
+    if (externalInspector) return
     const el = panelRef.current
     if (!el) return
     const ro = new ResizeObserver(() => setPanelW(el.clientWidth))
     ro.observe(el)
     return () => ro.disconnect()
-  }, [selected])
+  }, [selected, externalInspector])
   // 画布容器宽度跟随测量，用于算 panelRatio（选中节点平移可见区偏移用）。
   useEffect(() => {
+    if (externalInspector) return
     const el = canvasHostRef.current
     if (!el) return
     const ro = new ResizeObserver(() => setCanvasW(el.clientWidth))
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [externalInspector])
   /** 面板宽度 ÷ 画布容器宽度（0~1），传给 GraphCanvas 让选中节点平移到左侧可见区中心。 */
   const [canvasW, setCanvasW] = useState(0)
   const panelRatio = externalInspector
@@ -687,12 +871,13 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             ⚠ 未保存草稿
           </span>
         ) : null}
-        {videoOptionsError ? (
-          <span role="alert" style={{ color: '#ff8f8f', fontSize: 11 }}>
-            Kino 视频素材加载失败：{videoOptionsError}
-          </span>
-        ) : null}
       </div>
+
+      {videoOptionsError ? (
+        <div role="alert" style={{ flex: 'none', padding: '6px 10px', color: '#ff8f8f', fontSize: 11 }}>
+          Kino 视频素材加载失败：{videoOptionsError}
+        </div>
+      ) : null}
 
       {/* 主体：画布命中区必须裁在本层内（WebKit 上 RF transform 层会把 hit-test 渗到工具条） */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative', zIndex: 0, overflow: 'hidden', isolation: 'isolate' }}>
@@ -702,7 +887,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   右侧三按钮由 GraphCanvas 的 .gv-canvas-chrome 用 CSS 定位到本 bar 右侧对齐。 */}
         <div
   style={{
-            position: 'absolute', top: 0, left: 0, right: 0, height: 58, zIndex: 5,
+            position: 'absolute', top: 0, left: 0, right: 0, height: CANVAS_TOP_BAR_H, zIndex: 5,
             display: 'flex', gap: 8, alignItems: 'center', padding: '0 10px',
      background: '#2C2C2C',
    fontSize: 14, pointerEvents: 'none',
@@ -733,6 +918,16 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             })}
           </span>
         </div>
+        {/* 宿主接管预览列后拉片挂在画布右内缘：收起态画布右缘就是聊天栏左缘，
+            展开态预览列入流把画布顶窄、右缘正好变成预览左缘——两种状态都自动对位，
+            且拉片纯悬浮，不占布局宽度。 */}
+        {canvasEdgePillVisible ? (
+          <PreviewTogglePill
+            open={effectivePreviewOpen}
+            onToggle={togglePreviewSurface}
+            anchor="canvas-edge"
+          />
+        ) : null}
         <GraphCanvas
           // 切蓝图 remount：清掉画布本地 selectedIds（store 已清 selectedNodeId，本地不跟会残留旧 id）。
           // 节点剪贴板在 GraphCanvas 模块级，不跟 remount 走，故主↔子蓝图可粘贴。
@@ -753,10 +948,15 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           keyboardDeleteEnabled={!selected}
           fitSignal={fitSignal + layoutEpoch}
           drillFitKey={drillFitKey}
-          // 试玩浮层宽 320 + 边距；传稳定 number，避免每帧新 object 触发反复 fitView。
-          fitReserveRightPx={playOpen ? 340 : 0}
-          revealNodeId={playRevealNodeId ?? selected}
+          // 试玩浮层宽 320 + 边距（拉片在时浮层整体左移，预留也跟着让）；
+          // 传稳定 number，避免每帧新 object 触发反复 fitView。
+          fitReserveRightPx={playOpen ? (canvasEdgePillVisible ? 340 + PREVIEW_TOGGLE_PILL_W : 340) : 0}
+          // 内嵌形态选中就自动居中（面板会盖住画布右半边）；宿主外置形态下面板在聊天栏、
+          // 选中不改画布尺寸，再平移整张图只会让人失去方位感，所以只留试玩跳转。
+          revealNodeId={externalPreview ? playRevealNodeId ?? null : playRevealNodeId ?? selected}
+          revealFollowNodeId={playRevealNodeId ?? selected}
           revealPanelRatio={panelRatio}
+          revealSignal={previewRevealSignal}
           onJump={(nodeId) => {
             if (!showingForeignPlayGraph) {
               setSelected(nodeId)
@@ -776,9 +976,36 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
         />
 
         {/* 试玩浮层：画布右上角（原独立试玩面板搬来） */}
+        {/* 试玩浮层落在顶栏下方、并给拉片让开一条：否则会压住
+            「新建节点 / 定位当前节点 / 自适应」和预览开关拉片。 */}
         {playOpen && (
-          <div style={{ position: 'absolute', top: 8, right: 8, width: 320, zIndex: 6, borderRadius: 10, overflow: 'hidden', border: '1px solid #403830', background: 'rgba(27,23,19,0.94)', boxShadow: '0 8px 28px rgba(0,0,0,0.55)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: '#252019', borderBottom: '1px solid #2e2924', fontSize: 11, color: '#c9d1e0', gap: 8 }}>
+          <div
+            ref={playOverlayRef}
+            data-testid="play-overlay"
+            style={{
+              position: 'absolute',
+              zIndex: 6,
+              width: 320,
+              borderRadius: 10,
+              overflow: 'hidden',
+              border: '1px solid #403830',
+              background: 'rgba(27,23,19,0.94)',
+              boxShadow: '0 8px 28px rgba(0,0,0,0.55)',
+              // 默认锚点；拖过之后由 layout effect 覆写成 left/top。
+              top: CANVAS_TOP_BAR_H + 8,
+              right: canvasEdgePillVisible ? PREVIEW_TOGGLE_PILL_W + 8 : 8,
+            }}
+          >
+            {/* 标题栏兼作拖拽把手：调试时能把浮层挪开去看底下的蓝图树。
+                按钮/下拉排除在外，否则拖拽会吃掉它们的点击。 */}
+            <div
+              data-testid="play-overlay-handle"
+              onPointerDown={beginPlayDrag}
+              onPointerMove={movePlayDrag}
+              onPointerUp={endPlayDrag}
+              onPointerCancel={endPlayDrag}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', background: '#252019', borderBottom: '1px solid #2e2924', fontSize: 11, color: '#c9d1e0', gap: 8, cursor: 'move', touchAction: 'none', userSelect: 'none' }}
+            >
               <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={snap.currentNodeId ? `${snap.phase} · ${playNameOf(snap.currentNodeId)}` : snap.phase}>
                 试玩 · {snap.phase}
                 {snap.currentNodeId ? ` · ${snap.clip?.name || playNameOf(snap.currentNodeId)}` : ''}
@@ -852,15 +1079,38 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           左预览（NodePreviewStage：视频+覆盖物+时间轴，可编辑）｜右表单（NodeInspector 原样）。
           宿主传入 inspectorEl 时改为 portal 到外部 slot，画布内不再嵌面板。 */}
       {(() => {
+        // 拉片与预览台在「面板内两列」和「宿主双 slot」两种形态下是同一份内容，
+        // 只有外层容器不同，抽出来避免两处各写一遍。
+        const previewToggle = selectedCanConfigurePerformance ? (
+          <PreviewTogglePill open={effectivePreviewOpen} onToggle={togglePreviewSurface} />
+        ) : null
+        const previewStage = selectedNode && selectedCanConfigurePerformance && previewDrawerMounted ? (
+          <NodePreviewStage
+            scenario={previewScenario}
+            node={selectedNode}
+            game={game}
+            muted={isNodePreviewMuted}
+            focusedMountId={focusedMountId}
+            focusedLifecycleIndex={focusedLifecycleIndex}
+            onEditScenario={editPreviewScenario}
+            onMutedChange={setIsNodePreviewMuted}
+            onSelectedTimeChange={(_ms, selection) => setSettlementInsertTimeMs(selection.settlementInsertMs)}
+            onFocusMount={focusMountFromPreview}
+            onFocusLifecycle={focusLifecycleFromPreview}
+          />
+        ) : null
+
         const nodePanel = selected ? (
           <div
             ref={panelRef}
             className="gv-node-panel"
             data-testid="node-inspector-root"
             data-preview-open={effectivePreviewOpen}
+            data-external-preview={externalPreview ? 'true' : undefined}
             style={{
               // 宽度 = 配置列 + 预览列，两者由 .gv-node-panel 的 CSS 变量给出：
               // 满宽时是 Figma 14597:20310 的 711 + 500 = 1211，窄屏两列同比缩小。
+              // 宿主接管预览后本板只剩配置列，宽度整个交给宿主容器（可拖拽）。
               maxWidth: externalInspector ? '100%' : '90%',
               width: externalInspector ? '100%' : undefined,
               height: externalInspector ? '100%' : undefined,
@@ -872,10 +1122,9 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
             }}
           >
             {/* 预览区开关拉片：始终贴面板左缘——收起态即配置列左缘，展开态面板左扩后
-                自然落在预览区左缘（Figma 14597:20310）；展开时图标与描边高亮（14597:20069）。 */}
-            {selectedCanConfigurePerformance ? (
-              <PreviewTogglePill open={effectivePreviewOpen} onToggle={togglePreviewSurface} />
-            ) : null}
+                自然落在预览区左缘（Figma 14597:20310）；展开时图标与描边高亮（14597:20069）。
+                宿主接管预览列时拉片跟着预览走，不再留在配置表单这一侧。 */}
+            {externalPreview ? null : previewToggle}
             {/* 展开态固定 711:500（Figma 14597:20310 预览区:配置列），窄屏同比缩放。 */}
             <div
               data-testid="node-panel-columns"
@@ -884,8 +1133,8 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
               style={{
                 flex: 1,
                 minHeight: 0,
-                display: selectedCanConfigurePerformance ? 'grid' : 'flex',
-                gridTemplateColumns: selectedCanConfigurePerformance
+                display: selectedCanConfigurePerformance && !externalPreview ? 'grid' : 'flex',
+                gridTemplateColumns: selectedCanConfigurePerformance && !externalPreview
                   ? externalInspector
                     ? 'minmax(0, var(--gv-preview-w)) minmax(0, 1fr)'
                     : 'minmax(0, var(--gv-preview-w)) minmax(0, var(--gv-form-w))'
@@ -893,7 +1142,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                 overflowX: 'hidden',
               }}
             >
-              {selectedNode && selectedCanConfigurePerformance && previewDrawerMounted ? (
+              {!externalPreview && previewStage ? (
                 <div
                   data-testid="node-preview-column"
                   className="gv-node-preview-column"
@@ -918,19 +1167,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                       background: '#2C2C2C',
                     }}
                   >
-                    <NodePreviewStage
-                      scenario={previewScenario}
-                      node={selectedNode}
-                      game={game}
-                      muted={isNodePreviewMuted}
-                      focusedMountId={focusedMountId}
-                      focusedLifecycleIndex={focusedLifecycleIndex}
-                      onEditScenario={editPreviewScenario}
-                      onMutedChange={setIsNodePreviewMuted}
-                      onSelectedTimeChange={(_ms, selection) => setSettlementInsertTimeMs(selection.settlementInsertMs)}
-                      onFocusMount={focusMountFromPreview}
-                      onFocusLifecycle={focusLifecycleFromPreview}
-                    />
+                    {previewStage}
                   </div>
                 </div>
               ) : null}
@@ -939,14 +1176,18 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
                   长下拉文案会把表单撑到 ~880px，中等宽度也出现不必要的横向滚动。 */}
               <div
                 data-testid="node-inspector-column"
-                style={{ gridColumn: 2, flex: `1 0 ${FORM_W_MIN}px`, minWidth: FORM_W_MIN, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+                style={externalPreview
+                  // 宿主容器（vag-chat-panel）可拖拽，表单必须跟着它缩放，
+                  // 不能被 FORM_W_MIN 顶出横向滚动。
+                  ? { flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+                  : { gridColumn: 2, flex: `1 0 ${FORM_W_MIN}px`, minWidth: FORM_W_MIN, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
               >
                 {/* 一级页签栏（Figma 14597:21458）：Agent（预留空态）｜{节点名}调试面板，✕ 关闭右置。
                     宿主传入 inspectorEl 时由宿主 chrome 托管 Agent｜节点编辑，这里不再重复。 */}
                 {externalInspector ? null : (
                   <NodePanelTabBar
                     activeTab={nodePanelTab}
-                    configLabel={selectedNode ? `${selectedNode.data.name || selectedNode.id}调试面板` : '节点调试面板'}
+                    configLabel={nodeConfigLabel}
                     onTabChange={setNodePanelTab}
                     onClose={() => setSelected(null)}
                   />
@@ -1015,29 +1256,66 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
         ) : null
 
         if (externalInspector && inspectorEl) {
-          return createPortal(
-            selected
-              ? nodePanel
-              : (
-                <div
-                  data-testid="node-inspector-empty"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    height: '100%',
-                    minHeight: 120,
-                    padding: 24,
-                    color: 'rgba(246,241,233,0.55)',
-                    fontSize: 13,
-                    textAlign: 'center',
-                    background: '#1b1713',
-                  }}
-                >
-                  选择画布上的节点以编辑
-                </div>
-              ),
+          // 宿主自己管页签时（onInspectorTabChange），取消选中会把页签整个撤掉，
+          // 空态就没有入口了——此时不再往插槽塞内容，避免留下点不到的死 DOM。
+          const inspectorEmpty = onInspectorTabChange ? null : (
+            <div
+              data-testid="node-inspector-empty"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                minHeight: 120,
+                padding: 24,
+                color: 'rgba(246,241,233,0.55)',
+                fontSize: 13,
+                textAlign: 'center',
+                background: '#1b1713',
+              }}
+            >
+              选择画布上的节点以编辑
+            </div>
+          )
+          const inspectorPortal = createPortal(
+            selected ? nodePanel : inspectorEmpty,
             inspectorEl,
+          )
+          if (!externalPreview || !previewEl) return inspectorPortal
+          // 预览 slot 归宿主定位：它是配置表单的左兄弟，宽度由宿主按 onPreviewOpenChange 控。
+          // 拉片不在这里——它悬浮在画布右内缘，见上面的 canvas-edge 分支。
+          return (
+            <>
+              {inspectorPortal}
+              {createPortal(
+                previewStage ? (
+                  <div
+                    data-testid="node-preview-column"
+                    className="gv-node-preview-column"
+                    style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
+                  >
+                    <div
+                      data-testid="node-preview-content"
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                        // 收合动画期间内容保持目标宽度，只有裁切窗口在动——宽度值由宿主写在 slot 上。
+                        width: 'var(--gv-preview-external-w, 100%)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        // Figma 14597:20633：左侧预览是独立区域，底色与右列页签栏同色。
+                        background: '#2C2C2C',
+                      }}
+                    >
+                      {previewStage}
+                    </div>
+                  </div>
+                ) : null,
+                previewEl,
+              )}
+            </>
           )
         }
         return nodePanel

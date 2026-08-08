@@ -2,9 +2,10 @@
  * Resolves a node media reference to a playable URL.
  *  - Existing http/blob/data/absolute URLs pass through unchanged.
  *  - Bundled zhandou basenames resolve first, including legacy `m-` refs.
- *  - Shared-registry ids (`a-<tag>-*`, see makeAssetId) use the extension media route — **any kind**,
- *    audio included (BGM SPEC 决策 A: 床轨与 video/image 同 resolve, 引擎只抛 id).
- *  - Remaining stable ids use the Kino content endpoint (video-only service).
+ *  - Hydrated Kino video resources resolve to the native CDN URL from their DTO.
+ *  - Audio registry ids retain their product playback path until audio resources gain
+ *    the same URL cache. Unknown video ids stay unresolved instead of fabricating a
+ *    `/resources/:id/content` route that Kino does not provide.
  * Uploaded images use the shared resource API; image and generation registry operations
  * continue to use host-bound extension routes.
  */
@@ -16,6 +17,7 @@ import {
   type KinoVideoClient,
 } from '../assets/kino-api'
 import { fetchRegistryAssets } from '../assets/registry-assets'
+import { useKinoVideoCache } from '../assets/kinoVideoCacheStore'
 import type { MediaAsset, MediaKind, StyleAxes } from '../assets/registry-types'
 import { ExtensionResponseError, getWorkbenchHost, readExtensionJson } from '../../lib/workbench-host'
 import { pluginFetch, pluginUrl } from '../../lib/plugin-http'
@@ -38,7 +40,7 @@ export function kinoVideoContentUrl(resourceId: string, game?: string): string {
  * 解析器手里只有一个 id（引擎不传 kind），而 registry 里的 video / image / audio 播放地址同构
  * （extension media route）——所以别按 kind 过滤，否则床轨 id 会掉进只认视频的 Kino 端点。
  */
-const REGISTRY_ASSET_ID = /^a-[a-z]+-/
+const AUDIO_REGISTRY_ASSET_ID = /^a-aud-/
 
 export function resolveMediaSrc(ref: string | undefined, game?: string): string | undefined {
   if (!ref) return undefined
@@ -49,8 +51,12 @@ export function resolveMediaSrc(ref: string | undefined, game?: string): string 
   const local = zhandouUrl(bare)
   if (local) return local
   if (!game) return undefined
-  if (REGISTRY_ASSET_ID.test(ref)) return registryMediaUrl(ref, game)
-  return kinoVideoContentUrl(ref, game)
+  const kinoResource = useKinoVideoCache.getState().byGame[game]?.items.find(
+    (item) => item.resource_id === ref,
+  )
+  if (kinoResource?.url) return kinoResource.url
+  if (AUDIO_REGISTRY_ASSET_ID.test(ref)) return registryMediaUrl(ref, game)
+  return undefined
 }
 
 /**

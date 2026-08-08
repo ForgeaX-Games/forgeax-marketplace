@@ -9,6 +9,7 @@ import getGraphSchema from '../../schemas/get-graph.args.json'
 import importCharacterRefsSchema from '../../schemas/import-character-refs.args.json'
 import importSceneRefsSchema from '../../schemas/import-scene-refs.args.json'
 import listAssetsSchema from '../../schemas/list-assets.args.json'
+import upsertDocumentSchema from '../../schemas/upsert-document.args.json'
 import listVideosSchema from '../../schemas/list-videos.args.json'
 import patchGraphSchema from '../../schemas/patch-graph.args.json'
 import saveGraphSchema from '../../schemas/save-graph.args.json'
@@ -27,6 +28,7 @@ export type ServiceSchemaName =
   | 'generateVideo'
   | 'generateVideoClip'
   | 'generateNodeVideo'
+  | 'upsertDocument'
 
 const ajv = new Ajv2020({ allErrors: true, strict: true })
 const validators: Record<ServiceSchemaName, ValidateFunction> = {
@@ -43,6 +45,7 @@ const validators: Record<ServiceSchemaName, ValidateFunction> = {
   generateVideo: ajv.compile(generateVideoSchema),
   generateVideoClip: ajv.compile(generateVideoClipSchema),
   generateNodeVideo: ajv.compile(generateNodeVideoSchema),
+  upsertDocument: ajv.compile(upsertDocumentSchema),
 }
 
 function message(error: ErrorObject): string {

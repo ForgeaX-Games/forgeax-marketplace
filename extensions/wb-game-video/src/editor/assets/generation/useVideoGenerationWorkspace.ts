@@ -81,7 +81,7 @@ export function useVideoGenerationWorkspace(game: string, videoController: Video
       .slice(0, 5)
   }, [game, regAssets, videoController.items])
 
-  const clipGeneration = useClipGeneration(regAssets, {
+  const clipGeneration = useClipGeneration({
     gameSlug: game,
     onTerminal: videoController.refresh,
     restoredTask: selectedTask,

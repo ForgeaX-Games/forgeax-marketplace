@@ -68,6 +68,10 @@ const importSceneRefs: WorkbenchToolHandler = async (context, args) => (
   createWbGameVideoService(context).importSceneRefs(args)
 )
 
+const upsertDocument: WorkbenchToolHandler = async (context, args) => (
+  createWbGameVideoService(context).upsertDocument(args)
+)
+
 /** Ordered to exactly match `forgeax-extension.json`'s public tool contract. */
 export const tools: Record<string, WorkbenchToolHandler> = {
   'wb-game-video:get-graph': getGraph,
@@ -84,6 +88,7 @@ export const tools: Record<string, WorkbenchToolHandler> = {
   'wb-game-video:get-asset': getAsset,
   'wb-game-video:import-character-refs': importCharacterRefs,
   'wb-game-video:import-scene-refs': importSceneRefs,
+  'wb-game-video:upsert-document': upsertDocument,
 }
 
 export default tools

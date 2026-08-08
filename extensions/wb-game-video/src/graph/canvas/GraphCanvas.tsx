@@ -89,10 +89,17 @@ function ensureCanvasStyle(): void {
     /* Figma 15195_74435：三按钮横排，白 5% 底、无边框、8px 圆角、30px 高、14px 白字。 */
     /* Figma 15195_74423：三按钮定位到画布顶部 bar 右侧（bar 高 58，按钮高 30，top 14 垂直居中）。 */
     .gv-canvas-chrome{position:absolute;right:12px;top:14px;z-index:6;display:flex;gap:12px;pointer-events:none}
-    .gv-canvas-chrome button{pointer-events:auto;display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:rgba(255,255,255,0.05);border:none;color:#FFFFFF;border-radius:8px;font-size:14px;font-weight:400;font-family:'PingFang SC',system-ui,sans-serif;cursor:pointer}
+    /* flex:none + nowrap：预览抽屉展开后画布只剩两百多像素，按钮否则会被压扁、文案折行。 */
+    .gv-canvas-chrome button{pointer-events:auto;flex:none;white-space:nowrap;display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:rgba(255,255,255,0.05);border:none;color:#FFFFFF;border-radius:8px;font-size:14px;font-weight:400;font-family:'PingFang SC',system-ui,sans-serif;cursor:pointer}
     .gv-canvas-chrome button:hover{background:rgba(255,255,255,0.10)}
     .gv-canvas-chrome .gv-chrome-ico{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:rgba(255,255,255,0.80)}
     .gv-canvas-chrome .gv-chrome-ico svg{display:block}
+    /* 画布变窄（预览抽屉展开）时按钮收成纯图标；文案进 aria-label / title，可读性不丢。 */
+    .gv-canvas-host{container-type:inline-size}
+    @container (max-width: 520px){
+      .gv-canvas-chrome .gv-chrome-label{display:none}
+      .gv-canvas-chrome button{gap:0;padding:0 8px}
+    }
     .gv-bp-node{position:relative}
     /* 标题行右侧 ⋮：与文案同排垂直居中，无底色；hover ⋮ 才展开后插/复制/删除 */
     /* z-index 高于节点选中描边，避免蓝/橙框盖住右侧操作条 */
@@ -888,6 +895,17 @@ export interface GraphCanvasProps {
   revealNodeId?: string | null
   /** 面板占画布右侧的宽度比例（0~1）；revealNodeId 据此算可见区中心偏移。默认 0（不偏移）。 */
   revealPanelRatio?: number
+  /**
+   * 变化时对 revealFollowNodeId 重新定位。给「画布可视宽度变了但选中没变」的场景用
+   * （宿主预览列展开/收起会把画布挤窄，选中节点可能落到视口外）。
+   */
+  revealSignal?: number
+  /**
+   * revealSignal 跟随定位的目标；不传则退回 revealNodeId。
+   * 与 revealNodeId 分开是因为「选中就自动居中」和「画布变窄后把选中捞回可视区」
+   * 是两回事：宿主外置形态下选节点不改画布尺寸，不该平移整张图。
+   */
+  revealFollowNodeId?: string | null
   onJump?: (nodeId: string) => void
   /** 双击内嵌子流程容器节点（有 subProcess）时下钻。 */
   onDrill?: (containerId: string) => void
@@ -929,6 +947,8 @@ function GraphCanvasInner({
   fitSignal,
   drillFitKey,
   revealNodeId,
+  revealSignal,
+  revealFollowNodeId,
   revealPanelRatio,
   onJump,
   onDrill,
@@ -1171,33 +1191,38 @@ function GraphCanvasInner({
    * 与 fitSignal 互不干扰：fitSignal 框全图、revealNodeId 仅平移；关闭面板（null）不抢用户手动平移。
    * 切图后 RF 节点偶发尚未就绪 → 短延迟重试一次。
    */
+  const revealNodeInView = useCallback((nodeId: string, duration: number): boolean => {
+    const node = getNodes().find((n) => n.id === nodeId)
+    if (!node) return false
+    const el = rootRef.current
+    if (!el) return false
+    const rect = el.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return false
+    const ratio = typeof revealPanelRatio === 'number' && revealPanelRatio > 0 ? Math.min(0.85, revealPanelRatio) : 0
+    // 节点中心（flow 坐标）：未度量时退回 position（左上角）。
+    const cx = node.position.x + (node.measured?.width ?? node.width ?? 100) / 2
+    const cy = node.position.y + (node.measured?.height ?? node.height ?? 60) / 2
+    const vp = getViewport()
+    const zoom = vp.zoom || 1
+    // 左侧可见区中心（screen 坐标，相对画布容器）：画布宽 × (1 - ratio) / 2。
+    const targetScreenX = rect.width * (1 - ratio) / 2
+    const targetScreenY = rect.height / 2
+    // viewport.x = screenX - flowX * zoom
+    void setViewport(
+      { x: targetScreenX - cx * zoom, y: targetScreenY - cy * zoom, zoom },
+      duration > 0 ? { duration } : undefined,
+    )
+    return true
+  }, [getNodes, getViewport, revealPanelRatio, setViewport])
+
   useEffect(() => {
     if (!revealNodeId) return
     let cancelled = false
     const reveal = (attempt: number) => {
       if (cancelled) return
-      const node = getNodes().find((n) => n.id === revealNodeId)
-      if (!node) {
-        if (attempt < 1) window.setTimeout(() => reveal(attempt + 1), 40)
-        return
+      if (!revealNodeInView(revealNodeId, 220) && attempt < 1) {
+        window.setTimeout(() => reveal(attempt + 1), 40)
       }
-      const el = rootRef.current
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      if (rect.width <= 0 || rect.height <= 0) return
-      const ratio = typeof revealPanelRatio === 'number' && revealPanelRatio > 0 ? Math.min(0.85, revealPanelRatio) : 0
-      // 节点中心（flow 坐标）：未度量时退回 position（左上角）。
-      const cx = node.position.x + (node.measured?.width ?? node.width ?? 100) / 2
-      const cy = node.position.y + (node.measured?.height ?? node.height ?? 60) / 2
-      const vp = getViewport()
-      const zoom = vp.zoom || 1
-      // 左侧可见区中心（screen 坐标，相对画布容器）：画布宽 × (1 - ratio) / 2。
-      const targetScreenX = rect.width * (1 - ratio) / 2
-      const targetScreenY = rect.height / 2
-      // viewport.x = screenX - flowX * zoom
-      const nextX = targetScreenX - cx * zoom
-      const nextY = targetScreenY - cy * zoom
-      void setViewport({ x: nextX, y: nextY, zoom }, { duration: 220 })
     }
     const t = window.setTimeout(() => reveal(0), 0)
     return () => {
@@ -1206,6 +1231,34 @@ function GraphCanvasInner({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealNodeId, revealPanelRatio])
+
+  /**
+   * 画布可视宽度自己在动（宿主预览列开合），这里贴着每一帧即时重定位，让图和抽屉
+   * 一起平滑滑动。等动画结束再补一次的话会变成「先杵着、末尾跳一下」。
+   * 只在 revealSignal 变化后开一个短窗口，平时不抢用户手动平移。
+   */
+  useEffect(() => {
+    const followId = revealFollowNodeId ?? revealNodeId
+    if (!revealSignal || !followId) return
+    const el = rootRef.current
+    if (!el) return
+    let frame = 0
+    const follow = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => revealNodeInView(followId, 0))
+    }
+    follow()
+    const observer = new ResizeObserver(follow)
+    observer.observe(el)
+    const stop = window.setTimeout(() => observer.disconnect(), 600)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.clearTimeout(stop)
+    }
+    // 只跟 revealSignal 走：选中变化不该触发跟随（画布尺寸没变）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealSignal])
 
   useEffect(() => {
     const el = rootRef.current
@@ -1381,29 +1434,31 @@ function GraphCanvasInner({
               onAddNode({ x: c.x - 90 + Math.random() * 40, y: c.y - 40 + Math.random() * 40 })
             }}
             title="新建演出节点"
+            aria-label="新建节点"
           >
             <span className="gv-chrome-ico" aria-hidden>
               <svg width="12" height="12" viewBox="0 0 11 11" fill="none"><path d="M0 4.55046L0 6.00879L4.604 5.97917V10.5H6.06234V5.97917H10.5V4.52083H6.06234V0H4.604V4.52083L0 4.55046Z" fill="currentColor" /></svg>
             </span>
-            新建节点
+            <span className="gv-chrome-label">新建节点</span>
           </button>
         )}
         <button
           type="button"
           onClick={() => { void fitGraphInView({ duration: 200 }) }}
           title="把整张图框进视口正中（不改动节点位置）"
+          aria-label="定位当前节点"
         >
           <span className="gv-chrome-ico" aria-hidden>
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11.0832 6.99935C11.0832 9.25452 9.255 11.0827 6.99984 11.0827M11.0832 6.99935C11.0832 4.74419 9.255 2.91602 6.99984 2.91602M11.0832 6.99935H12.8332M6.99984 11.0827C4.74468 11.0827 2.9165 9.25452 2.9165 6.99935M6.99984 11.0827V12.8327M6.99984 2.91602C4.74468 2.91602 2.9165 4.74419 2.9165 6.99935M6.99984 2.91602V1.16602M2.9165 6.99935H1.1665" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /><path d="M7.58317 6.99935C7.58317 7.32152 7.32201 7.58268 6.99984 7.58268C6.67766 7.58268 6.4165 7.32152 6.4165 6.99935C6.4165 6.67717 6.67766 6.41602 6.99984 6.41602C7.32201 6.41602 7.58317 6.67717 7.58317 6.99935Z" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /></svg>
           </span>
-          定位当前节点
+          <span className="gv-chrome-label">定位当前节点</span>
         </button>
         {onFitLayout && (
-          <button type="button" onClick={onFitLayout} title="dagre 自动重排节点位置并框选">
+          <button type="button" onClick={onFitLayout} title="dagre 自动重排节点位置并框选" aria-label="自适应">
             <span className="gv-chrome-ico" aria-hidden>
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.2085 6.41732V3.20898H6.41683M10.7918 7.58398V10.7923H7.5835M5.25016 5.25065L3.70033 3.70082M10.3 10.3005L8.75016 8.75065M7.87516 6.12565L6.12516 7.87437" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /></svg>
             </span>
-            自适应
+            <span className="gv-chrome-label">自适应</span>
           </button>
         )}
       </div>

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "@forgeax-extension/wb-game-video",
-  "version": "0.6.3",
+  "version": "0.7.5",
   "kind": "workbench",
   "displayName": {
     "zh": "视频游戏",
@@ -214,6 +214,16 @@
           "zh": "跨模块只读拿料·读取场景模块发布到 textures/ 的贴图，通过宿主 media capability 持久化副本并登记成 scene_ref；不改场景源目录。生成视频前先备齐场景参考图。",
           "en": "Cross-module read-only intake: read scene textures from textures/, persist copies through the host media capability, and register them as scene_ref without modifying the source directory. Call before video generation to stock scene references."
         }
+      },
+      {
+        "id": "wb-game-video:upsert-document",
+        "args": "./schemas/upsert-document.args.json",
+        "returns": "./schemas/upsert-document.returns.json",
+        "exposedToAI": true,
+        "description": {
+          "zh": "原子写入或登记 docs/<slug>_<type>.md，并在 manifest 登记 doc-<type>。slug 必填且不从 project.json 推断，非法 slug 直接拒绝；content 省略时仅登记已有文件。",
+          "en": "Atomically write or register docs/<slug>_<type>.md and manifest doc-<type>. slug is required, never inferred from project.json, and an illegal slug is rejected. Omit content to register an existing file only."
+        }
       }
     ]
   },
@@ -234,6 +244,8 @@
     "fs:write:{gameRoot}/project.json",
     "fs:read:{gameRoot}/assets/**",
     "fs:write:{gameRoot}/assets/**",
+    "fs:read:{gameRoot}/docs/**",
+    "fs:write:{gameRoot}/docs/**",
     "fs:read:{gameRoot}/characters/**",
     "fs:read:{gameRoot}/textures/**",
     "model:text:reasoning",

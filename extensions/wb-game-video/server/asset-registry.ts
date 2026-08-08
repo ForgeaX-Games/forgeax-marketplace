@@ -29,7 +29,6 @@ import type {
 import type {
   AssetManifest,
   DocumentRecord,
-  DocumentSelection,
   DocumentType,
   MediaAsset,
   MediaKind,
@@ -70,16 +69,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isDocumentType(value: unknown): value is DocumentType {
-  return value === 'proposal' || value === 'outline' || value === 'script'
+  return value === 'intake' || value === 'core' || value === 'inquiry' || value === 'pillar'
 }
 
 /**
- * 文档只允许位于 assets/documents 下，且不可通过 manifest 引用任意游戏文件。
- * 文件名保留常规 Markdown 字符，路径结构固定为 documents/<name>.md。
+ * 文档只允许位于 docs/ 下，且不可通过 manifest 引用任意游戏文件。
  */
 function isDocumentPath(value: unknown): value is string {
   return typeof value === 'string'
-    && /^documents\/[A-Za-z0-9][A-Za-z0-9._-]*\.md$/i.test(value)
+    && /^docs\/[A-Za-z0-9][A-Za-z0-9._-]*\.md$/i.test(value)
 }
 
 export function isDocumentRecord(value: unknown): value is DocumentRecord {
@@ -415,54 +413,124 @@ export async function readHostDocument(
 ): Promise<{ document: DocumentRecord, content: string } | null> {
   const document = (await listHostDocuments(context)).find((entry) => entry.id === id)
   if (!document) return null
-  const bytes = await context.files.read(`assets/${document.provider.ref}`)
+  const bytes = await context.files.read(document.provider.ref)
   if (!bytes) return null
   return { document, content: textDecoder.decode(bytes) }
 }
 
-function documentSelection(manifest: AssetManifest): DocumentSelection | null {
-  const value = manifest.documentSelection
-  if (value === undefined) return null
-  if (!isRecord(value) || (value.proposalId !== undefined && typeof value.proposalId !== 'string')) {
-    throw new Error('Invalid project document selection')
+const SLUG_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+function defaultDocumentName(documentType: DocumentType): string {
+  switch (documentType) {
+    case 'intake': return '需求'
+    case 'core': return '核心'
+    case 'inquiry': return '问询'
+    case 'pillar': return '支柱'
   }
-  return value as DocumentSelection
 }
 
-/** 读取已采用策划案；选择指向失效记录时拒绝继续交给后续生成链路。 */
-export async function getHostDocumentSelection(
+async function upsertHostDocumentAtRef(
   context: WorkbenchExtensionContext,
-): Promise<DocumentSelection | null> {
-  const manifest = await readHostManifest(context.files)
-  const selection = documentSelection(manifest)
-  if (!selection?.proposalId) return selection
-  const selected = (await listHostDocuments(context)).find((entry) => entry.id === selection.proposalId)
-  if (!selected || selected.meta.documentType !== 'proposal') {
-    throw new Error('Selected proposal does not exist')
+  input: {
+    documentType: DocumentType
+    content?: string
+    name?: string
+  },
+  ref: string,
+): Promise<DocumentRecord> {
+  if (!isDocumentPath(ref)) throw new TypeError('Invalid document path')
+  const id = `doc-${input.documentType}`
+  const now = Date.now()
+  if (input.content !== undefined) {
+    await context.files.write(ref, textEncoder.encode(input.content))
+  } else {
+    const existing = await context.files.read(ref)
+    if (!existing) throw new Error(`Document file missing: ${ref}`)
   }
-  return selection
-}
-
-/** 原子采用一份已登记策划案；不提供替换/清空入口，避免覆盖已进入生成管线的输入。 */
-export async function selectHostProposal(
-  context: WorkbenchExtensionContext,
-  proposalId: string,
-): Promise<DocumentSelection> {
-  if (!proposalId) throw new TypeError('Proposal id is required')
   return context.files.withLocks([HOST_MANIFEST_LOCK], async () => {
     const manifest = await readHostManifest(context.files)
-    const current = documentSelection(manifest)
-    if (current?.proposalId && current.proposalId !== proposalId) {
-      throw new Error('A proposal has already been selected')
+    const previous = manifest.assets.find((asset): asset is DocumentRecord => (
+      isDocumentRecord(asset) && asset.meta.documentType === input.documentType
+    ))
+    const next: DocumentRecord = {
+      id,
+      kind: 'document',
+      name: input.name?.trim() || defaultDocumentName(input.documentType),
+      status: 'ready',
+      mimeType: 'text/markdown',
+      provider: { kind: 'local', ref },
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+      meta: { documentType: input.documentType },
     }
-    const selected = manifest.assets.find((entry) => isDocumentRecord(entry) && entry.id === proposalId)
-    if (!isDocumentRecord(selected) || selected.meta.documentType !== 'proposal') {
-      throw new Error('Selected document is not a proposal')
-    }
-    const nextSelection = { proposalId }
-    await writeHostManifest(context.files, { ...manifest, documentSelection: nextSelection })
-    return nextSelection
+    const assets = manifest.assets.filter((asset) => !(
+      isDocumentRecord(asset) && asset.meta.documentType === input.documentType
+    ))
+    assets.push(next)
+    await writeHostManifest(context.files, { ...manifest, assets })
+    return next
   })
+}
+
+/**
+ * Callers own the filename slug; it is never inferred from project.json so the
+ * on-disk document identity stays exactly what the author or agent asked for.
+ * An illegal slug is rejected instead of being rewritten into a lookalike path.
+ */
+export async function upsertHostDocument(
+  context: WorkbenchExtensionContext,
+  input: {
+    documentType: DocumentType
+    slug: string
+    content?: string
+    name?: string
+  },
+): Promise<DocumentRecord> {
+  const slug = typeof input.slug === 'string' ? input.slug.trim() : ''
+  if (!slug) throw new TypeError('slug is required')
+  if (!SLUG_SEGMENT_RE.test(slug)) throw new TypeError(`Invalid document slug: ${slug}`)
+  return upsertHostDocumentAtRef(
+    context,
+    input,
+    `docs/${slug}_${input.documentType}.md`,
+  )
+}
+
+export async function healMissingDocuments(
+  context: WorkbenchExtensionContext,
+): Promise<DocumentRecord[]> {
+  const existing = await listHostDocuments(context)
+  const present = new Set(existing.map((document) => document.meta.documentType))
+  let entries: string[]
+  try {
+    entries = await context.files.list('docs')
+  } catch {
+    entries = []
+  }
+
+  const orphanByType = new Map<DocumentType, string>()
+  for (const filename of [...entries].sort()) {
+    const match = /^(.+)_(intake|core|inquiry|pillar)\.md$/i.exec(filename)
+    if (!match) continue
+    // A filename we cannot register (spaces, unicode, …) must not take the
+    // whole document list down with it.
+    if (!isDocumentPath(`docs/${filename}`)) continue
+    const documentType = match[2]!.toLowerCase() as DocumentType
+    if (present.has(documentType)) continue
+    const selected = orphanByType.get(documentType)
+    if (selected) {
+      console.warn(
+        `Multiple orphan ${documentType} documents found; using ${selected} instead of ${filename}`,
+      )
+      continue
+    }
+    orphanByType.set(documentType, filename)
+  }
+
+  for (const [documentType, filename] of orphanByType) {
+    await upsertHostDocumentAtRef(context, { documentType }, `docs/${filename}`)
+  }
+  return listHostDocuments(context)
 }
 
 function isHostReclaimSource(value: unknown): value is HostReclaimSource {

@@ -155,6 +155,30 @@ test('boots the explicit in-process game id instead of the iframe handshake id',
   await waitFor(() => expect(boot).toHaveBeenCalledWith('arrival-game'))
 })
 
+test('auto-initializes an uninitialized package without showing the guide', async () => {
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
+  client.gamePackage.initialize.mockResolvedValueOnce({ state: 'initialized', missing: [], initialized: true })
+  const boot = vi.fn()
+
+  render(<GameBootstrap autoInitialize onBoot={boot}><div>workspace</div></GameBootstrap>)
+
+  await waitFor(() => expect(boot).toHaveBeenCalledTimes(1))
+  expect(screen.getByText('workspace')).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Create from template' })).toBeNull()
+  expect(client.gamePackage.status).toHaveBeenCalledTimes(1)
+  expect(client.gamePackage.initialize).toHaveBeenCalledTimes(1)
+})
+
+test('still shows the guide for an uninitialized package when autoInitialize is off', async () => {
+  client.gamePackage.status.mockResolvedValueOnce({ state: 'uninitialized', missing: [] })
+  const boot = vi.fn()
+
+  render(<GameBootstrap onBoot={boot}><div>workspace</div></GameBootstrap>)
+
+  expect(await screen.findByRole('button', { name: 'Create from template' })).toBeTruthy()
+  expect(client.gamePackage.initialize).not.toHaveBeenCalled()
+})
+
 test('boots after StrictMode replays the mount effect', async () => {
   client.ready.mockResolvedValue({ gameId: '猫' })
   client.gamePackage.status.mockResolvedValue({ state: 'initialized' })

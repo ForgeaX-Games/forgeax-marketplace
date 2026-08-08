@@ -36,7 +36,10 @@ vi.mock('../../../lib/workbench-host', () => ({
   readExtensionJson: vi.fn(),
 }))
 
-vi.mock('../../assets/kinoVideoCacheStore', () => ({ useKinoVideoResources }))
+vi.mock('../../assets/kinoVideoCacheStore', () => ({
+  useKinoVideoResources,
+  useKinoVideoCache: { getState: () => ({ byGame: {} }) },
+}))
 vi.mock('../../assets/projectAssetCacheStore', () => ({ useProjectAssets }))
 
 const SCENARIO: GameScenario = {

@@ -279,7 +279,7 @@ describe('NodePreviewStage overlay layout', () => {
     }
 
     const { container } = render(<Harness />)
-    const conditionMarker = screen.getByRole('button', { name: /entity\.bull\.attr\.rage 增加/ })
+    const conditionMarker = screen.getByRole('button', { name: /rage 增加/ })
     fireEvent.pointerDown(conditionMarker)
 
     await waitFor(() => {

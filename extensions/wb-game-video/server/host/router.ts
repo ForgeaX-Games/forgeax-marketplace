@@ -12,10 +12,8 @@ import type {
 import {
   createHostAssetRegistry,
   getHostStyleAxes,
-  getHostDocumentSelection,
-  listHostDocuments,
+  healMissingDocuments,
   readHostDocument,
-  selectHostProposal,
 } from '../asset-registry'
 import { bundledMediaResponse, type BundledMediaResolver } from './media-routes'
 import {
@@ -510,8 +508,7 @@ export function createWbGameVideoRouter(
         if (method === 'GET' && path === 'documents') {
           exactQuery(request.query, [])
           return jsonResponse(200, {
-            documents: (await listHostDocuments(context)).map(documentSummary),
-            selection: await getHostDocumentSelection(context),
+            documents: (await healMissingDocuments(context)).map(documentSummary),
           })
         }
         if (
@@ -520,36 +517,13 @@ export function createWbGameVideoRouter(
           && parts[0] === 'documents'
         ) {
           exactQuery(request.query, [])
+          await healMissingDocuments(context)
           const document = await readHostDocument(context, parts[1]!)
           if (!document) return notFound()
           return jsonResponse(200, {
             document: documentSummary(document.document),
             content: document.content,
-            selection: await getHostDocumentSelection(context),
           })
-        }
-        if (method === 'POST' && path === 'documents/selection') {
-          exactQuery(request.query, [])
-          const body = jsonBody(request)
-          if (
-            !body
-            || typeof body !== 'object'
-            || Array.isArray(body)
-            || typeof (body as { proposalId?: unknown }).proposalId !== 'string'
-          ) {
-            throw new WbServiceInputError('proposalId is required')
-          }
-          try {
-            const selection = await selectHostProposal(
-              context,
-              (body as { proposalId: string }).proposalId,
-            )
-            return jsonResponse(200, { selection })
-          } catch (error) {
-            throw new WbServiceInputError(
-              error instanceof Error ? error.message : 'Unable to select proposal',
-            )
-          }
         }
         if (method === 'GET' && path === 'asset-library') {
           exactQuery(request.query, [])

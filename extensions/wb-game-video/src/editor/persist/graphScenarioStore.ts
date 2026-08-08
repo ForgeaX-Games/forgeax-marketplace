@@ -305,8 +305,11 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
   }
   /** Flush tip immediately. When `checkpoint` is true, also create an internal git checkpoint. */
   const flushTip = async (checkpoint: boolean): Promise<boolean> => {
-    const game = get().game
-    if (!game) return false
+    const { game, booted } = get()
+    // A split-pane may attempt to boot while the package is still uninitialized.
+    // Its pagehide handler must not persist the store's empty pre-boot state over
+    // the package another pane has just initialized.
+    if (!game || !booted) return false
     const project = get().authoringProject()
     const cycle = findReferenceCycle(project)
     if (cycle) return false

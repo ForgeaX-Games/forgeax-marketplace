@@ -91,11 +91,11 @@ export interface ForeignAssetRecord {
   [key: string]: unknown
 }
 
-/** 项目叙事文档类别；独立落在 assets/documents，未进入媒体资产域。 */
-export type DocumentType = 'proposal' | 'outline' | 'script'
+/** 项目叙事文档类别；正文落在游戏根 `docs/`，由 manifest 登记。 */
+export type DocumentType = 'intake' | 'core' | 'inquiry' | 'pillar'
 
 /**
- * 只读项目文档登记项。正文由 provider.ref 指向相对 assets/ 根的 Markdown 文件；
+ * 只读项目文档登记项。正文由 provider.ref 指向相对游戏根的 Markdown 文件；
  * 它与 MediaAsset 共享 manifest，但不能被媒体列表、生成或播放链路消费。
  */
 export interface DocumentRecord {
@@ -152,11 +152,6 @@ export interface AssetLibraryState {
   placements: Record<string, string>
 }
 
-/** 后续生成管线唯一读取的已采用策划案。 */
-export interface DocumentSelection {
-  proposalId?: string
-}
-
 /** manifest.json 顶层容器。 */
 export interface AssetManifest {
   version: 2
@@ -165,8 +160,6 @@ export interface AssetManifest {
   styleAxes?: StyleAxes
   /** 资产浏览器的文件夹和资源归位元数据。 */
   assetLibrary?: AssetLibraryState
-  /** 当前已采用的项目文档；现阶段仅允许一份策划案。 */
-  documentSelection?: DocumentSelection
   [key: string]: unknown
 }
 

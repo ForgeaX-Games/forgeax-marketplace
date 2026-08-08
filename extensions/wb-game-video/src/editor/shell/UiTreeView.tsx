@@ -107,9 +107,10 @@ const UI_TREE_CSS = `
 
 type RowMode = 'rename' | 'delete' | null
 
+// 默认朝下（展开）；.is-collapsed 旋 -90° → 朝右（收起），与 NewSidebar 主树一致。
 const ChevronIcon = (
   <svg viewBox="0 0 20 20" fill="none" aria-hidden>
-    <path d="M15 12.5L10 7.5L5 12.5" stroke="currentColor" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" strokeWidth="1.66667" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
 

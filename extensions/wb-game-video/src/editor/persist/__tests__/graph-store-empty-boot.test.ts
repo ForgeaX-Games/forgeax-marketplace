@@ -81,6 +81,9 @@ describe('store boot failures', () => {
 
     await expect(useGraphScenario.getState().ensureBoot('brand-new-game', demo)).rejects.toThrow(loadError)
 
+    window.dispatchEvent(new Event('pagehide'))
+    await Promise.resolve()
+
     expect(saveProject).not.toHaveBeenCalled()
     expect(useGraphScenario.getState().booted).toBe(false)
 

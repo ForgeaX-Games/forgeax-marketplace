@@ -1,28 +1,20 @@
 // @vitest-environment happy-dom
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-import {
-  CLIP_GENERATION_TOOL_ID,
-  createClipGenerationRequestId,
-  submitClipGeneration,
-  type ClipGenerationRequest,
-  type ClipGenerationSubmission,
-  type WorkbenchGenerationToolPort,
-} from '../generation-api'
-import {
-  CLIP_GENERATION_SOURCE,
-  useClipGeneration,
-  type ClipGenerationRegistryEntry,
-} from '../useClipGeneration'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ClipGenerationRequest, VideoGenerationTask } from '../generation-api'
+import type { CreateKinoGenerationInput } from '../kino-generation-client'
+import { useClipGeneration, type UseClipGenerationOptions } from '../useClipGeneration'
+
+const GAME_SLUG = 'bridge-game'
 
 const request: ClipGenerationRequest = {
-  gameSlug: 'browser-only-label',
+  gameSlug: GAME_SLUG,
   prompt: 'A knight crossing a rain-soaked bridge',
   durationSeconds: 30,
   generateAudio: true,
   mode: 'strict',
-  firstFrameAssetId: 'first-frame',
-  lastFrameAssetId: 'last-frame',
+  firstFrameResourceId: 'kino-first',
+  lastFrameResourceId: 'kino-last',
   size: '1440x2560',
   resolution: '1080p',
   model: 'seedance2',
@@ -30,117 +22,128 @@ const request: ClipGenerationRequest = {
   label: 'Bridge shot',
 }
 
-const requestIdA = 'client-a-request-id'
-const requestIdB = 'client-b-request-id'
+function task(overrides: Partial<VideoGenerationTask> = {}): VideoGenerationTask {
+  return { generationId: 'generation-1', status: 'polling', createdAt: 1, ...overrides }
+}
 
-function deferred<T>(): {
-  promise: Promise<T>
-  resolve: (value: T) => void
-} {
+function deferred<T>(): { promise: Promise<T>, resolve: (value: T) => void } {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((onResolve) => { resolve = onResolve })
   return { promise, resolve }
 }
 
-function registryEntry(
-  id: string,
-  status: ClipGenerationRegistryEntry['status'],
-  requestId: string,
-  error?: string,
-): ClipGenerationRegistryEntry {
-  return {
-    id,
-    status,
-    ...(error ? { error } : {}),
-    meta: { source: CLIP_GENERATION_SOURCE, requestId },
-  }
+function mount(options: UseClipGenerationOptions) {
+  return renderHook(() => useClipGeneration({ gameSlug: GAME_SLUG, ...options }))
 }
 
 async function flush(): Promise<void> {
   await act(async () => { await Promise.resolve() })
 }
 
-describe('Workbench Host generation tool', () => {
-  it('calls the Host tool and validates its result envelope', async () => {
-    const port: WorkbenchGenerationToolPort = {
-      call: vi.fn().mockResolvedValue({
-        ok: true,
-        result: { assetId: 'generated-video', status: 'ready' },
-      }),
-    }
+async function advance(ms: number): Promise<void> {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+}
 
-    await expect(submitClipGeneration({
+describe('useClipGeneration same-origin Kino flow', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('sends the full Kino payload including game and provider parameters', async () => {
+    const createGeneration = vi.fn().mockResolvedValue(
+      task({ status: 'succeeded', resultUrl: 'https://cdn.example/clip.mp4' }),
+    )
+    const { result } = mount({ createGeneration, getGeneration: vi.fn() })
+
+    expect(result.current.state).toEqual({ phase: 'idle', transport: 'kino' })
+    act(() => result.current.submit(request))
+    await flush()
+
+    expect(createGeneration).toHaveBeenCalledWith({
+      gameSlug: GAME_SLUG,
       prompt: request.prompt,
       durationSeconds: 15,
       generateAudio: true,
-      mode: 'strict',
-      firstFrameAssetId: 'first-frame',
-      lastFrameAssetId: 'last-frame',
+      size: '1440x2560',
+      resolution: '1080p',
+      model: 'seedance2',
       visualStyleKey: 'bwcinema',
-      requestId: requestIdA,
-    }, port)).resolves.toEqual({ assetId: 'generated-video', status: 'ready' })
-    expect(port.call).toHaveBeenCalledWith(CLIP_GENERATION_TOOL_ID, expect.any(Object))
-  })
-
-  it('rejects malformed Host results', async () => {
-    const port: WorkbenchGenerationToolPort = {
-      call: vi.fn().mockResolvedValue({ ok: true, result: { status: 'ready' } }),
-    }
-    await expect(submitClipGeneration({
-      prompt: 'prompt',
-      durationSeconds: 8,
-      generateAudio: false,
-      mode: 't2v',
-      requestId: requestIdA,
-    }, port)).rejects.toThrow('invalid response')
-  })
-
-  it('surfaces a typed Workbench Host failure', async () => {
-    const port: WorkbenchGenerationToolPort = {
-      call: vi.fn().mockResolvedValue({
-        ok: false,
-        error: {
-          code: 'generation_failed',
-          target: 'media.video.generate',
-          message: 'Kino rejected the generation',
-          retryable: false,
-        },
-      }),
-    }
-    await expect(submitClipGeneration({
-      prompt: 'prompt',
-      durationSeconds: 8,
-      generateAudio: false,
-      mode: 't2v',
-      requestId: requestIdA,
-    }, port)).rejects.toMatchObject({
-      code: 'generation_failed',
-      target: 'media.video.generate',
-      retryable: false,
+      firstFrameResourceId: 'kino-first',
+      lastFrameResourceId: 'kino-last',
+    })
+    expect(result.current.state).toMatchObject({
+      phase: 'succeeded',
+      generationId: 'generation-1',
+      resultUrl: 'https://cdn.example/clip.mp4',
     })
   })
 
-  it('creates a bounded cryptographic request id', () => {
-    const requestId = createClipGenerationRequestId()
-    expect(requestId.length).toBeGreaterThan(0)
-    expect(requestId.length).toBeLessThanOrEqual(128)
-  })
-})
+  it('polls until the task reaches a terminal status and notifies once', async () => {
+    const createGeneration = vi.fn().mockResolvedValue(task())
+    const getGeneration = vi.fn()
+      .mockResolvedValueOnce(task({ status: 'polling' }))
+      .mockResolvedValue(task({ status: 'succeeded', resultUrl: 'https://cdn.example/a.mp4' }))
+    const onTerminal = vi.fn()
+    const { result } = mount({ createGeneration, getGeneration, onTerminal })
 
-describe('useClipGeneration Host-only flow', () => {
-  it('restores a globally selected Kino task and its prompt without resubmitting', () => {
-    const submitClip = vi.fn()
-    const restoredTask = {
-      generationId: 'generation-1',
-      status: 'polling' as const,
-      prompt: '刷新前的提示词',
-      createdAt: 123,
-    }
-    const { result } = renderHook(() => useClipGeneration([], {
-      submitClip,
+    act(() => result.current.submit({ ...request, mode: 't2v' }))
+    await flush()
+    expect(result.current.state.phase).toBe('generating')
+
+    await advance(3_000)
+    expect(result.current.state.phase).toBe('generating')
+
+    await advance(3_000)
+    expect(result.current.state).toMatchObject({
+      phase: 'succeeded',
+      resultUrl: 'https://cdn.example/a.mp4',
+    })
+    expect(onTerminal).toHaveBeenCalledOnce()
+
+    await advance(9_000)
+    expect(getGeneration).toHaveBeenCalledTimes(2)
+    expect(onTerminal).toHaveBeenCalledOnce()
+  })
+
+  it('tolerates transient polling errors before giving up', async () => {
+    const createGeneration = vi.fn().mockResolvedValue(task())
+    const getGeneration = vi.fn().mockRejectedValue(new Error('gateway hiccup'))
+    const { result } = mount({ createGeneration, getGeneration })
+
+    act(() => result.current.submit({ ...request, mode: 't2v' }))
+    await flush()
+
+    await advance(12_000)
+    expect(result.current.state.phase).toBe('generating')
+
+    await advance(3_000)
+    expect(result.current.state).toMatchObject({
+      phase: 'failed',
+      error: 'gateway hiccup',
+    })
+    expect(getGeneration).toHaveBeenCalledTimes(5)
+  })
+
+  it('surfaces a failed Kino task with its upstream message', async () => {
+    const createGeneration = vi.fn().mockResolvedValue(
+      task({ status: 'failed', errorMessage: '上游拒绝请求' }),
+    )
+    const { result } = mount({ createGeneration, getGeneration: vi.fn() })
+
+    act(() => result.current.submit({ ...request, mode: 't2v' }))
+    await flush()
+
+    expect(result.current.state).toMatchObject({ phase: 'failed', error: '上游拒绝请求' })
+  })
+
+  it('restores a globally selected task and its prompt without resubmitting', () => {
+    const createGeneration = vi.fn()
+    const restoredTask = task({ prompt: '刷新前的提示词' })
+    const { result } = mount({
+      createGeneration,
+      getGeneration: vi.fn().mockResolvedValue(restoredTask),
       restoredTask,
       activeTasks: [restoredTask],
-    }))
+    })
 
     expect(result.current.state).toMatchObject({
       phase: 'generating',
@@ -148,126 +151,69 @@ describe('useClipGeneration Host-only flow', () => {
       prompt: '刷新前的提示词',
       activeTasks: [restoredTask],
     })
-    expect(submitClip).not.toHaveBeenCalled()
+    expect(createGeneration).not.toHaveBeenCalled()
   })
 
-  it('starts in Host tool mode and never sends game/provider identities', async () => {
-    const submitClip = vi.fn().mockResolvedValue({ assetId: 'video-1', status: 'ready' })
-    const { result } = renderHook(() => useClipGeneration([], {
-      submitClip,
-      createRequestId: () => requestIdA,
-    }))
+  it('rejects references that carry no Kino resource id', () => {
+    const createGeneration = vi.fn()
+    const { result } = mount({ createGeneration, getGeneration: vi.fn() })
 
-    expect(result.current.state).toEqual({ phase: 'idle', transport: 'tool' })
-    act(() => result.current.submit(request))
-    await flush()
-
-    expect(submitClip).toHaveBeenCalledWith({
-      prompt: request.prompt,
-      durationSeconds: 15,
-      generateAudio: true,
-      mode: 'strict',
-      firstFrameAssetId: 'first-frame',
-      lastFrameAssetId: 'last-frame',
-      visualStyleKey: 'bwcinema',
-      label: 'Bridge shot',
-      requestId: requestIdA,
-    })
-    expect(submitClip.mock.calls[0]?.[0]).not.toHaveProperty('gameSlug')
-    expect(submitClip.mock.calls[0]?.[0]).not.toHaveProperty('model')
-    expect(submitClip.mock.calls[0]?.[0]).not.toHaveProperty('resourceId')
-    expect(result.current.state).toEqual({
-      phase: 'succeeded', transport: 'tool', assetId: 'video-1',
-    })
-  })
-
-  it('correlates concurrent identical prompts by request id', async () => {
-    const pendingA = deferred<ClipGenerationSubmission>()
-    const pendingB = deferred<ClipGenerationSubmission>()
-    const clientA = renderHook(
-      ({ entries }) => useClipGeneration(entries, {
-        submitClip: () => pendingA.promise,
-        createRequestId: () => requestIdA,
-      }),
-      { initialProps: { entries: [] as ClipGenerationRegistryEntry[] } },
-    )
-    const clientB = renderHook(
-      ({ entries }) => useClipGeneration(entries, {
-        submitClip: () => pendingB.promise,
-        createRequestId: () => requestIdB,
-      }),
-      { initialProps: { entries: [] as ClipGenerationRegistryEntry[] } },
-    )
-
-    act(() => {
-      clientA.result.current.submit({ ...request, mode: 't2v' })
-      clientB.result.current.submit({ ...request, mode: 't2v' })
-    })
-    clientA.rerender({ entries: [
-      registryEntry('video-b', 'generating', requestIdB),
-      registryEntry('video-a', 'generating', requestIdA),
-    ] })
-    clientB.rerender({ entries: [
-      registryEntry('video-b', 'generating', requestIdB),
-      registryEntry('video-a', 'generating', requestIdA),
-    ] })
-
-    expect(clientA.result.current.state.assetId).toBe('video-a')
-    expect(clientB.result.current.state.assetId).toBe('video-b')
-  })
-
-  it('uses Host registry status as the progress source of truth', async () => {
-    const pending = deferred<ClipGenerationSubmission>()
-    const onTerminal = vi.fn()
-    const hook = renderHook(
-      ({ entries }) => useClipGeneration(entries, {
-        submitClip: () => pending.promise,
-        createRequestId: () => requestIdA,
-        onTerminal,
-      }),
-      { initialProps: { entries: [] as ClipGenerationRegistryEntry[] } },
-    )
-
-    act(() => hook.result.current.submit({ ...request, mode: 't2v' }))
-    hook.rerender({ entries: [registryEntry('video-a', 'generating', requestIdA)] })
-    expect(hook.result.current.state).toEqual({
-      phase: 'generating', transport: 'tool', assetId: 'video-a',
-    })
-    hook.rerender({ entries: [registryEntry('video-a', 'ready', requestIdA)] })
-    expect(hook.result.current.state).toEqual({
-      phase: 'succeeded', transport: 'tool', assetId: 'video-a',
-    })
-    expect(onTerminal).toHaveBeenCalledOnce()
-  })
-
-  it('rejects missing Host asset references before calling the tool', () => {
-    const submitClip = vi.fn()
-    const { result } = renderHook(() => useClipGeneration([], {
-      submitClip,
-      createRequestId: () => requestIdA,
-    }))
     act(() => result.current.submit({
       ...request,
-      firstFrameAssetId: undefined,
-      lastFrameAssetId: undefined,
+      firstFrameResourceId: undefined,
+      lastFrameResourceId: undefined,
     }))
-    expect(result.current.state).toMatchObject({
-      phase: 'failed',
-      transport: 'tool',
-      error: expect.stringMatching(/unavailable for tool generation/),
-    })
-    expect(submitClip).not.toHaveBeenCalled()
+
+    expect(result.current.state.phase).toBe('failed')
+    expect(result.current.state.error).toBeTruthy()
+    expect(createGeneration).not.toHaveBeenCalled()
   })
 
-  it('cancel ignores a stale Host completion', async () => {
-    const pending = deferred<ClipGenerationSubmission>()
-    const { result } = renderHook(() => useClipGeneration([], {
-      submitClip: () => pending.promise,
-      createRequestId: () => requestIdA,
+  it('refuses to generate before the host supplies a game slug', () => {
+    const createGeneration = vi.fn()
+    const { result } = renderHook(() => useClipGeneration({
+      gameSlug: '',
+      createGeneration,
+      getGeneration: vi.fn(),
     }))
+
+    act(() => result.current.submit({ ...request, mode: 't2v' }))
+
+    expect(result.current.state.phase).toBe('failed')
+    expect(createGeneration).not.toHaveBeenCalled()
+  })
+
+  it('cancel ignores a stale creation response and stops polling', async () => {
+    const pending = deferred<VideoGenerationTask>()
+    const getGeneration = vi.fn()
+    const { result } = mount({
+      createGeneration: (_input: CreateKinoGenerationInput) => pending.promise,
+      getGeneration,
+    })
+
     act(() => result.current.submit({ ...request, mode: 't2v' }))
     act(() => result.current.cancel())
-    await act(async () => pending.resolve({ assetId: 'stale', status: 'ready' }))
-    expect(result.current.state).toEqual({ phase: 'idle', transport: 'tool' })
+    await act(async () => { pending.resolve(task()) })
+
+    expect(result.current.state).toEqual({ phase: 'idle', transport: 'kino' })
+    await advance(9_000)
+    expect(getGeneration).not.toHaveBeenCalled()
+  })
+
+  it('track resumes polling for a known generation id', async () => {
+    const getGeneration = vi.fn().mockResolvedValue(
+      task({ generationId: 'generation-9', status: 'succeeded', resultUrl: 'https://cdn/x.mp4' }),
+    )
+    const { result } = mount({ createGeneration: vi.fn(), getGeneration })
+
+    act(() => result.current.track('generation-9'))
+    expect(result.current.state.phase).toBe('generating')
+
+    await advance(3_000)
+    expect(getGeneration).toHaveBeenCalledWith('generation-9', GAME_SLUG)
+    expect(result.current.state).toMatchObject({
+      phase: 'succeeded',
+      resultUrl: 'https://cdn/x.mp4',
+    })
   })
 })

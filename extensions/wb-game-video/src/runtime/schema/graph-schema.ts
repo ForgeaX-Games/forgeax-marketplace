@@ -148,6 +148,8 @@ export interface Variable {
   /** 与 `GameScenario.variables` 的 Record key 对齐；编辑器添加时自动生成，不可手填。 */
   id: string
   name?: string
+  /** 当前运行值；规则编辑器写入时与 initial 保持一致，供运行时状态迁移使用。 */
+  value?: ScalarValue
   initial?: ScalarValue
   min?: number
   max?: number

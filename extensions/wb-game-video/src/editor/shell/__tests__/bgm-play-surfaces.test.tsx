@@ -15,7 +15,10 @@ import { GraphStudio } from '../GraphStudio'
 const useKinoVideoResources = vi.hoisted(() => vi.fn())
 const useProjectAssets = vi.hoisted(() => vi.fn())
 
-vi.mock('../../assets/kinoVideoCacheStore', () => ({ useKinoVideoResources }))
+vi.mock('../../assets/kinoVideoCacheStore', () => ({
+  useKinoVideoResources,
+  useKinoVideoCache: { getState: () => ({ byGame: {} }) },
+}))
 // 本件只问「有没有出声」；素材查询（视频/音频）都是别处的事，异步 hydration 留在这儿只会
 // 变成 act(...) 警告。
 vi.mock('../../assets/projectAssetCacheStore', () => ({ useProjectAssets }))
@@ -102,7 +105,7 @@ describe('试玩表面挂载床轨', () => {
   it('GraphPlaySurface：整表面即试玩，进场就起文档床', () => {
     render(<GraphPlaySurface scenario={SCENARIO} />)
     expect(decks().map((el) => el.getAttribute('src'))).toEqual([
-      'https://host.test/extension/runtime/media/resources/a-aud-story/content?game_id=game-nodia-fighting',
+      '/api/v1/kino/resources/a-aud-story/content?game_id=game-nodia-fighting',
     ])
     const deck = decks()[0] as HTMLAudioElement
     expect(deck.muted).toBe(true)
@@ -120,7 +123,7 @@ describe('试玩表面挂载床轨', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '▶ 从此试玩' }))
     expect(decks().map((el) => el.getAttribute('src'))).toEqual([
-      'https://host.test/extension/runtime/media/resources/a-aud-story/content?game_id=game-nodia-fighting',
+      '/api/v1/kino/resources/a-aud-story/content?game_id=game-nodia-fighting',
     ])
     const deck = decks()[0] as HTMLAudioElement
     expect(deck.muted).toBe(true)

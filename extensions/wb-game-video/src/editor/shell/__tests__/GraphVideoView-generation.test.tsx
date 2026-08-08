@@ -17,7 +17,12 @@ vi.mock('../../persist/graphScenarioStore', () => ({
   ),
 }))
 
-vi.mock('../../persist/gameScope', () => ({ getGameSlug: () => 'demo' }))
+vi.mock('../../persist/gameScope', () => ({
+  getGameSlug: () => 'demo',
+  gameKeySuffix: () => ':game:demo',
+  setHostGameSlug: vi.fn(),
+  setSyncGameId: vi.fn(),
+}))
 
 vi.mock('../../assets/useVideoAssets', () => ({
   useVideoAssets: () => ({

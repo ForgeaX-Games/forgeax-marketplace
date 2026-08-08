@@ -18,6 +18,7 @@ import { useGraphView, type GraphView } from '../persist/graphViewStore'
 import { useAssetNav } from '../persist/assetNavStore'
 import { useRuleSelection, type RuleSection } from '../persist/ruleSelectionStore'
 import { useDocumentNav } from '../persist/documentNavStore'
+import { usePendingDocumentTypes } from '../persist/pendingDocumentsStore'
 import {
   useVideoLibraryNav,
   type VideoLibraryFolderTarget,
@@ -106,6 +107,7 @@ function buildNavTree(
       canAddChild: true,
       children: bpChildren,
     },
+    { id: 'play', label: '试玩', kind: 'entry', view: 'play' },
     {
       id: 'ui',
       label: '界面',
@@ -115,7 +117,6 @@ function buildNavTree(
       externallyExpandable: true,
       // 子树由真实 UiTreeView 渲染；行内加号沿用既有界面新建逻辑。
     },
-    { id: 'play', label: '试玩', kind: 'entry', view: 'play' },
     assets,
     rules,
     {
@@ -128,16 +129,24 @@ function buildNavTree(
 }
 
 function buildDocumentNavNode(): NavNode {
+  const DOCUMENT_LABELS: Record<DocumentType, string> = {
+    intake: '需求',
+    core: '核心',
+    inquiry: '问询',
+    pillar: '支柱',
+  }
+  const types: DocumentType[] = ['intake', 'core', 'inquiry', 'pillar']
   return {
     id: 'documents',
     label: '文档',
     kind: 'entry',
     view: 'documents',
-    children: [
-      { id: 'document:proposal', label: '策划案', kind: 'leaf', documentType: 'proposal' },
-      { id: 'document:outline', label: '大纲', kind: 'leaf', documentType: 'outline' },
-      { id: 'document:script', label: '剧本', kind: 'leaf', documentType: 'script' },
-    ],
+    children: types.map((documentType) => ({
+      id: `document:${documentType}`,
+      label: DOCUMENT_LABELS[documentType],
+      kind: 'leaf' as const,
+      documentType,
+    })),
   }
 }
 
@@ -238,22 +247,16 @@ function buildAssetNavNode(
   }
 }
 
-function buildRuleNavNode(meta: { entities?: Record<string, { id: string, name?: string }>, variables?: Record<string, { id: string, name?: string }>, formulas?: Record<string, { id: string, name?: string }> }): NavNode {
-  const section = <T extends { id: string, name?: string }>(
+function buildRuleNavNode(_meta: { entities?: Record<string, { id: string, name?: string }>, variables?: Record<string, { id: string, name?: string }>, formulas?: Record<string, { id: string, name?: string }> }): NavNode {
+  const section = (
     id: 'entities' | 'variables' | 'formulas',
     label: string,
-    values: Record<string, T> | undefined,
   ): NavNode => ({
     id: `rule-${id}`,
     label,
-    kind: 'branch',
+    kind: 'leaf',
     ruleTarget: { section: id },
-    children: Object.entries(values ?? {}).map(([key, value]) => ({
-      id: `rule-${id}:${key}`,
-      label: value.name?.trim() || value.id || key,
-      kind: 'leaf',
-      ruleTarget: { section: id, itemId: key },
-    })),
+    children: [],
   })
   return {
     id: 'rule',
@@ -261,9 +264,9 @@ function buildRuleNavNode(meta: { entities?: Record<string, { id: string, name?:
     kind: 'entry',
     view: 'rule',
     children: [
-      section('entities', '实体', meta.entities),
-      section('variables', '变量', meta.variables),
-      section('formulas', '公式', meta.formulas),
+      section('entities', '实体'),
+      section('variables', '变量'),
+      section('formulas', '公式'),
     ],
   }
 }
@@ -523,6 +526,16 @@ button.ns-leading { cursor: pointer; }
   vertical-align: middle;
   line-height: 1;
 }
+.ns-pending-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #f08840;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
 .ns-inline-edit {
   flex: 1;
   min-width: 0;
@@ -621,6 +634,7 @@ interface NsRowProps {
   mainId: string
   bp: BlueprintNavActions
   uiGroupComposing: boolean
+  pendingDocumentTypes: readonly DocumentType[]
   onToggle: (id: string) => void
   onExpand: (id: string) => void
   onSelect: (node: NavNode) => void
@@ -632,6 +646,7 @@ interface NsRowProps {
 function NsRow({
   node, depth, expanded, activeId, mainId, bp,
   uiGroupComposing,
+  pendingDocumentTypes,
   onToggle, onExpand, onSelect, onMockAddChild, onMockRename, onMockDelete,
 }: NsRowProps): JSX.Element {
   const hasChildren = !!(node.children && node.children.length > 0)
@@ -643,6 +658,9 @@ function NsRow({
   const isMainBp = isBlueprintLeaf && (node.isEntry || node.id === mainId)
   const isEditing = !!isBlueprintLeaf && bp.renameId === node.id
   const inlineRenameRef = useRef<HTMLInputElement>(null!)
+  const isPending = !!(
+    node.documentType && pendingDocumentTypes.includes(node.documentType)
+  )
 
   useEffect(() => {
     if (isEditing && inlineRenameRef.current) {
@@ -765,6 +783,7 @@ function NsRow({
         role="treeitem"
         aria-expanded={isExpandable ? isExpanded : undefined}
         aria-selected={isActive}
+        data-pending={isPending ? 'true' : undefined}
         tabIndex={0}
         style={{ paddingLeft: indent }}
         onClick={activateRow}
@@ -841,6 +860,7 @@ function NsRow({
                 入口
               </span>
             )}
+            {isPending ? <span className="ns-pending-dot" aria-hidden /> : null}
           </span>
         )}
         {rowActions && (
@@ -892,6 +912,7 @@ function NsRow({
               mainId={mainId}
               bp={bp}
               uiGroupComposing={uiGroupComposing}
+              pendingDocumentTypes={pendingDocumentTypes}
               onToggle={onToggle}
               onExpand={onExpand}
               onSelect={onSelect}
@@ -925,6 +946,7 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
   const selectRule = useRuleSelection((s) => s.select)
   const selectDocumentType = useDocumentNav((s) => s.setDocumentType)
   const selectedDocumentType = useDocumentNav((s) => s.documentType)
+  const pendingDocumentTypes = usePendingDocumentTypes()
   const gameId = useGraphScenario((s) => s.game)
   const { entries: assetEntries, directory: assetDirectory } = useAssetBrowser(gameId)
   const videoMetadata = useVideoMetadataSnapshot(gameId)
@@ -1132,6 +1154,7 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
               mainId={mainId}
               bp={bp}
               uiGroupComposing={uiGroupComposing}
+              pendingDocumentTypes={pendingDocumentTypes}
               onToggle={onToggle}
               onExpand={onExpand}
               onSelect={onSelect}

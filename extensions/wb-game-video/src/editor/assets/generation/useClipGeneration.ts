@@ -1,45 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { t } from '../../../i18n'
-import type { MediaStatus } from '../registry-types'
+import type { ClipGenerationRequest, VideoGenerationTask } from './generation-api'
 import {
-  assertClipGenerationRequestId,
-  createClipGenerationRequestId,
-  submitClipGeneration,
-  type ClipGenerationRequest,
-  type ClipGenerationSubmission,
-  type ClipGenerationWireRequest,
-  type VideoGenerationTask,
-} from './generation-api'
+  createKinoGeneration,
+  getKinoGeneration,
+  isActiveGenerationStatus,
+  type CreateKinoGenerationInput,
+} from './kino-generation-client'
 
 export const CLIP_GENERATION_SOURCE = 'asset-library-generation'
+
+const POLL_INTERVAL_MS = 3_000
+/** 连续轮询失败达到该次数才判定任务失败，避免一次网络抖动打断生成。 */
+const MAX_CONSECUTIVE_POLL_ERRORS = 5
+const MAX_DURATION_SECONDS = 15
 
 export type ClipGenPhase = 'idle' | 'submitting' | 'generating' | 'succeeded' | 'failed'
 
 export interface ClipGenState {
   phase: ClipGenPhase
-  transport?: 'tool'
+  transport?: 'kino'
   generationId?: string
+  /** 宿主 registry asset id；直连链路不产生，保留给素材库定位回落。 */
   assetId?: string
+  /** Kino 直出地址，可交给 `<video>` 播放。 */
   resultUrl?: string
   resourceId?: string
   error?: string
-  /** Restored from Kino's durable generation task after navigation/reload. */
   prompt?: string
-  /** Kept empty: durable progress is represented by Host registry assets. */
   activeTasks?: readonly VideoGenerationTask[]
-}
-
-export interface ClipGenerationRegistryEntry {
-  id: string
-  status: MediaStatus
-  error?: string
-  meta?: Readonly<Record<string, unknown>>
 }
 
 export interface UseClipGenerationOptions {
   gameSlug?: string
-  submitClip?: (request: ClipGenerationWireRequest) => Promise<ClipGenerationSubmission>
-  createRequestId?: () => string
+  createGeneration?: (input: CreateKinoGenerationInput) => Promise<VideoGenerationTask>
+  getGeneration?: (generationId: string, gameSlug: string) => Promise<VideoGenerationTask>
   onTerminal?: () => void | Promise<void>
   restoredTask?: VideoGenerationTask
   activeTasks?: readonly VideoGenerationTask[]
@@ -48,46 +43,30 @@ export interface UseClipGenerationOptions {
 export interface ClipGenerationController {
   state: ClipGenState
   submit: (request: ClipGenerationRequest) => void
-  /** Stops local observation; the Host-owned generation continues. */
+  /** 停止本地观察；Kino 侧任务继续推进。 */
   cancel: () => void
   reset: () => void
-  /** Legacy sheet callback; Host registry assets are selected by asset id. */
+  /** 直接观察一个已知任务（刷新恢复用）。 */
   track: (generationId: string) => void
 }
 
-interface TrackedSubmission {
-  requestId: string
-  idsBeforeSubmit: ReadonlySet<string>
-  assetId?: string
-}
-
-const IDLE_STATE: ClipGenState = { phase: 'idle', transport: 'tool' }
+const IDLE_STATE: ClipGenState = { phase: 'idle', transport: 'kino' }
 
 export function useClipGeneration(
-  entries: readonly ClipGenerationRegistryEntry[],
   options: UseClipGenerationOptions = {},
 ): ClipGenerationController {
-  const submitClip = options.submitClip ?? submitClipGeneration
-  const createRequestId = options.createRequestId ?? createClipGenerationRequestId
+  const createGeneration = options.createGeneration ?? createKinoGeneration
+  const getGeneration = options.getGeneration ?? getKinoGeneration
+  const gameSlug = options.gameSlug ?? ''
   const onTerminalRef = useRef(options.onTerminal)
   onTerminalRef.current = options.onTerminal
 
   const [state, setState] = useState<ClipGenState>(IDLE_STATE)
   const epochRef = useRef(0)
   const mountedRef = useRef(true)
-  const trackedRef = useRef<TrackedSubmission | null>(null)
-  const notifiedAssetRef = useRef<string | null>(null)
+  const notifiedRef = useRef<string | null>(null)
   const restoredTask = options.restoredTask
-  const restoredTaskKey = restoredTask
-    ? JSON.stringify([
-        restoredTask.generationId,
-        restoredTask.status,
-        restoredTask.prompt,
-        restoredTask.resultUrl,
-        restoredTask.resourceId,
-        restoredTask.errorMessage,
-      ])
-    : ''
+  const restoredTaskKey = restoredTask ? taskIdentityKey(restoredTask) : ''
   const activeTasks = options.activeTasks ?? []
   const activeTasksKey = JSON.stringify(
     activeTasks.map((task) => [task.generationId, task.status]),
@@ -102,207 +81,227 @@ export function useClipGeneration(
   }, [])
 
   useEffect(() => {
-    const task = restoredTask
-    if (!task) return
-    trackedRef.current = null
-    setState({
-      phase: task.status === 'succeeded'
-        ? 'succeeded'
-        : task.status === 'failed' || task.status === 'cancelled'
-          ? 'failed'
-          : 'generating',
-      transport: 'tool',
-      generationId: task.generationId,
-      resultUrl: task.resultUrl,
-      resourceId: task.resourceId,
-      error: task.errorMessage,
-      activeTasks,
-      prompt: task.prompt,
-    })
+    if (!restoredTask) return
+    notifiedRef.current = null
+    setState(stateFromTask(restoredTask, activeTasks))
   }, [restoredTaskKey])
 
   useEffect(() => {
     setState((current) => {
-      if (!current.generationId || tasksEqual(current.activeTasks ?? [], activeTasks)) return current
+      if (!current.generationId || tasksEqual(current.activeTasks ?? [], activeTasks)) {
+        return current
+      }
       return { ...current, activeTasks }
     })
   }, [activeTasksKey])
 
-  useEffect(() => {
-    const tracked = trackedRef.current
-    if (!tracked) return
-    const entry = tracked.assetId
-      ? entries.find((candidate) => candidate.id === tracked.assetId
-        && matchesCorrelation(candidate, tracked.requestId))
-      : findSubmittedEntry(entries, tracked)
-    if (!entry) return
+  const applyTask = useCallback((task: VideoGenerationTask): void => {
+    setState((current) => {
+      const next = stateFromTask(task, current.activeTasks ?? [])
+      return statesEqual(current, next) ? current : next
+    })
+    if (isActiveGenerationStatus(task.status)) return
+    if (notifiedRef.current === task.generationId) return
+    notifiedRef.current = task.generationId
+    void onTerminalRef.current?.()
+  }, [])
 
-    tracked.assetId ??= entry.id
-    const next = stateFromEntry(entry)
-    if (!next) return
-    setState((current) => statesEqual(current, next) ? current : next)
-    if ((entry.status === 'ready' || entry.status === 'failed')
-      && notifiedAssetRef.current !== entry.id) {
-      notifiedAssetRef.current = entry.id
-      void onTerminalRef.current?.()
+  // 轮询由 `generating` 阶段驱动，所以 submit 与刷新恢复共用同一条推进路径。
+  useEffect(() => {
+    if (state.phase !== 'generating') return
+    const generationId = state.generationId
+    if (!generationId || !gameSlug) return
+
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let consecutiveErrors = 0
+    const schedule = (): void => {
+      timer = setTimeout(() => void tick(), POLL_INTERVAL_MS)
     }
-  }, [entries])
+    const tick = async (): Promise<void> => {
+      try {
+        const task = await getGeneration(generationId, gameSlug)
+        if (cancelled) return
+        consecutiveErrors = 0
+        applyTask(task)
+        if (isActiveGenerationStatus(task.status)) schedule()
+      } catch (error) {
+        if (cancelled) return
+        consecutiveErrors += 1
+        if (consecutiveErrors < MAX_CONSECUTIVE_POLL_ERRORS) {
+          schedule()
+          return
+        }
+        setState((current) => ({
+          ...current,
+          phase: 'failed',
+          error: errorMessage(error),
+        }))
+      }
+    }
+    schedule()
+    return () => {
+      cancelled = true
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [state.phase, state.generationId, gameSlug, getGeneration, applyTask])
 
   const submit = useCallback((request: ClipGenerationRequest): void => {
     const epoch = ++epochRef.current
-    notifiedAssetRef.current = null
-    let requestId: string
-    let wireRequest: ClipGenerationWireRequest
+    notifiedRef.current = null
+    let input: CreateKinoGenerationInput
     try {
-      requestId = createRequestId()
-      assertClipGenerationRequestId(requestId)
-      wireRequest = toHostWireRequest(request, requestId)
+      input = toCreateInput(request, gameSlug)
     } catch (error) {
-      setState({ phase: 'failed', transport: 'tool', error: errorMessage(error) })
+      setState({ phase: 'failed', transport: 'kino', error: errorMessage(error) })
       return
     }
 
-    const tracked: TrackedSubmission = {
-      requestId,
-      idsBeforeSubmit: new Set(entries.map((entry) => entry.id)),
-    }
-    trackedRef.current = tracked
-    setState({ phase: 'submitting', transport: 'tool' })
-    void submitClip(wireRequest).then(
-      (submission) => {
+    setState({ phase: 'submitting', transport: 'kino' })
+    void createGeneration(input).then(
+      (task) => {
         if (!mountedRef.current || epochRef.current !== epoch) return
-        tracked.assetId = submission.assetId
-        setState((current) => terminalState(current, submission))
-        if (notifiedAssetRef.current !== submission.assetId) {
-          notifiedAssetRef.current = submission.assetId
-          void onTerminalRef.current?.()
-        }
+        applyTask(task)
       },
       (error: unknown) => {
         if (!mountedRef.current || epochRef.current !== epoch) return
-        setState((current) => current.phase === 'succeeded' || current.phase === 'failed'
-          ? current
-          : { phase: 'failed', transport: 'tool', assetId: current.assetId, error: errorMessage(error) })
+        setState({ phase: 'failed', transport: 'kino', error: errorMessage(error) })
       },
     )
-  }, [createRequestId, entries, submitClip])
+  }, [applyTask, createGeneration, gameSlug])
 
   const cancel = useCallback((): void => {
     epochRef.current += 1
-    trackedRef.current = null
+    notifiedRef.current = null
     setState(IDLE_STATE)
   }, [])
 
-  const track = useCallback((_generationId: string): void => {}, [])
+  const track = useCallback((generationId: string): void => {
+    if (!generationId.trim()) return
+    notifiedRef.current = null
+    setState((current) => ({
+      ...current,
+      phase: 'generating',
+      transport: 'kino',
+      generationId,
+    }))
+  }, [])
+
   return { state, submit, cancel, reset: cancel, track }
 }
 
-function toHostWireRequest(
+function toCreateInput(
   request: ClipGenerationRequest,
-  requestId: string,
-): ClipGenerationWireRequest {
+  gameSlug: string,
+): CreateKinoGenerationInput {
+  if (!gameSlug.trim()) {
+    throw new Error(t('videoAssets.generate.validation.referenceUnavailableHttp'))
+  }
   assertReferenceIdentities(request)
   return {
+    gameSlug,
     prompt: request.prompt,
-    durationSeconds: Math.min(15, request.durationSeconds),
+    durationSeconds: Math.min(MAX_DURATION_SECONDS, request.durationSeconds),
     generateAudio: request.generateAudio,
-    mode: request.mode,
-    ...(request.firstFrameAssetId ? { firstFrameAssetId: request.firstFrameAssetId } : {}),
-    ...(request.lastFrameAssetId ? { lastFrameAssetId: request.lastFrameAssetId } : {}),
-    ...(request.referenceImageAssetIds
-      ? { referenceImageAssetIds: request.referenceImageAssetIds }
-      : {}),
+    ...(request.size ? { size: request.size } : {}),
+    ...(request.resolution ? { resolution: request.resolution } : {}),
+    ...(request.model ? { model: request.model } : {}),
     ...(request.visualStyleKey ? { visualStyleKey: request.visualStyleKey } : {}),
-    ...(request.label ? { label: request.label } : {}),
-    requestId,
+    ...(request.firstFrameResourceId
+      ? { firstFrameResourceId: request.firstFrameResourceId }
+      : {}),
+    ...(request.lastFrameResourceId
+      ? { lastFrameResourceId: request.lastFrameResourceId }
+      : {}),
+    ...(request.referenceImageResourceIds?.length
+      ? { referenceImageResourceIds: request.referenceImageResourceIds }
+      : {}),
   }
 }
 
 function assertReferenceIdentities(request: ClipGenerationRequest): void {
   if (request.mode === 'strict') {
-    if (!isNonEmptyId(request.firstFrameAssetId) || !isNonEmptyId(request.lastFrameAssetId)) {
+    if (!isNonEmptyId(request.firstFrameResourceId)
+      || !isNonEmptyId(request.lastFrameResourceId)) {
       throw missingReferenceIdentity()
     }
     return
   }
   if (request.mode === 'firstref') {
-    if (!isNonEmptyId(request.firstFrameAssetId)) throw missingReferenceIdentity()
+    if (!isNonEmptyId(request.firstFrameResourceId)) throw missingReferenceIdentity()
     return
   }
   if (request.mode === 'ref' && (
-    !request.referenceImageAssetIds?.length
-    || !request.referenceImageAssetIds.every(isNonEmptyId)
+    !request.referenceImageResourceIds?.length
+    || !request.referenceImageResourceIds.every(isNonEmptyId)
   )) {
     throw missingReferenceIdentity()
   }
 }
 
 function missingReferenceIdentity(): Error {
-  return new Error(t('videoAssets.generate.validation.referenceUnavailableTool'))
+  return new Error(t('videoAssets.generate.validation.referenceUnavailableHttp'))
 }
 
 function isNonEmptyId(value: string | undefined): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
-function findSubmittedEntry(
-  entries: readonly ClipGenerationRegistryEntry[],
-  tracked: TrackedSubmission,
-): ClipGenerationRegistryEntry | undefined {
-  return entries.find((entry) => !tracked.idsBeforeSubmit.has(entry.id)
-    && matchesCorrelation(entry, tracked.requestId))
+function phaseFromStatus(status: VideoGenerationTask['status']): ClipGenPhase {
+  if (status === 'succeeded') return 'succeeded'
+  if (status === 'failed' || status === 'cancelled') return 'failed'
+  return 'generating'
 }
 
-function matchesCorrelation(entry: ClipGenerationRegistryEntry, requestId: string): boolean {
-  return entry.meta?.source === CLIP_GENERATION_SOURCE && entry.meta.requestId === requestId
-}
-
-function stateFromEntry(entry: ClipGenerationRegistryEntry): ClipGenState | null {
-  if (entry.status === 'generating') {
-    return { phase: 'generating', transport: 'tool', assetId: entry.id }
-  }
-  if (entry.status === 'ready') {
-    return { phase: 'succeeded', transport: 'tool', assetId: entry.id }
-  }
-  if (entry.status === 'failed') {
-    return { phase: 'failed', transport: 'tool', assetId: entry.id, error: entry.error }
-  }
-  return null
-}
-
-function terminalState(
-  current: ClipGenState,
-  submission: ClipGenerationSubmission,
+function stateFromTask(
+  task: VideoGenerationTask,
+  activeTasks: readonly VideoGenerationTask[],
 ): ClipGenState {
-  if (current.phase === 'succeeded' || current.phase === 'failed') return current
-  if (submission.status === 'ready') {
-    return { phase: 'succeeded', transport: 'tool', assetId: submission.assetId }
-  }
+  const phase = phaseFromStatus(task.status)
   return {
-    phase: 'failed',
-    transport: 'tool',
-    assetId: submission.assetId,
-    error: submission.error,
+    phase,
+    transport: 'kino',
+    generationId: task.generationId,
+    ...(task.resultUrl !== undefined ? { resultUrl: task.resultUrl } : {}),
+    ...(task.resourceId !== undefined ? { resourceId: task.resourceId } : {}),
+    ...(task.prompt !== undefined ? { prompt: task.prompt } : {}),
+    ...(phase === 'failed'
+      ? { error: task.errorMessage ?? task.errorCode ?? t('videoAssets.generate.statusFailed') }
+      : {}),
+    activeTasks,
   }
+}
+
+function taskIdentityKey(task: VideoGenerationTask): string {
+  return JSON.stringify([
+    task.generationId,
+    task.status,
+    task.prompt,
+    task.resultUrl,
+    task.resourceId,
+    task.errorMessage,
+  ])
+}
+
+function statesEqual(a: ClipGenState, b: ClipGenState): boolean {
+  return a.phase === b.phase
+    && a.generationId === b.generationId
+    && a.resultUrl === b.resultUrl
+    && a.resourceId === b.resourceId
+    && a.prompt === b.prompt
+    && a.error === b.error
+    && tasksEqual(a.activeTasks ?? [], b.activeTasks ?? [])
+}
+
+function tasksEqual(
+  a: readonly VideoGenerationTask[],
+  b: readonly VideoGenerationTask[],
+): boolean {
+  return a.length === b.length
+    && a.every((task, index) => task.generationId === b[index]?.generationId
+      && task.status === b[index]?.status)
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function statesEqual(left: ClipGenState, right: ClipGenState): boolean {
-  return left.phase === right.phase
-    && left.transport === right.transport
-    && left.assetId === right.assetId
-    && left.error === right.error
-}
-
-function tasksEqual(
-  left: readonly VideoGenerationTask[],
-  right: readonly VideoGenerationTask[],
-): boolean {
-  return left.length === right.length && left.every((task, index) => {
-    const candidate = right[index]
-    return candidate?.generationId === task.generationId && candidate.status === task.status
-  })
 }

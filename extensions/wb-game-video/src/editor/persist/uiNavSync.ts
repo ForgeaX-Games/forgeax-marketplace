@@ -15,8 +15,11 @@ import {
 } from './ui-tree'
 import { useUiSelection } from './uiSelectionStore'
 import { nextUniqueOverlayTitle, overlayTitleExists } from '../shell/overlay-title'
+import { gameKeySuffix } from './gameScope'
 
-const CHANNEL_NAME = 'wb-game-video:ui-nav-sync'
+// 按 game 隔离频道，避免同源多开不同 game 时 left/center pane 桥接跨 tab 串台。
+// 后缀在 install 时才求值：进程内挂载的 game 标识由宿主注入，晚于本模块求值。
+const CHANNEL_BASE = 'wb-game-video:ui-nav-sync'
 const PROTOCOL_VERSION = 1
 
 export type UiNavRole = 'standalone' | 'left' | 'center'
@@ -304,7 +307,7 @@ export function installUiNavSync(role: 'left' | 'center'): () => void {
     return () => useUiNavMirror.setState({ role: 'standalone', snapshot: null })
   }
 
-  const channel = new BroadcastChannel(CHANNEL_NAME)
+  const channel = new BroadcastChannel(`${CHANNEL_BASE}${gameKeySuffix()}`)
   if (role === 'left') leftChannel = channel
 
   const publish = (): void => {

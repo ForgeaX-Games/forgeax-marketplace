@@ -76,14 +76,11 @@ export function appendVideoRevision(url: string, updatedAt: number): string {
   return `${url}${separator}v=${encodeURIComponent(String(updatedAt))}`
 }
 
-function toListItem(dto: KinoResourceDTO, client: KinoVideoClient): VideoAssetListItem {
+function toListItem(dto: KinoResourceDTO): VideoAssetListItem {
   return {
     id: dto.resource_id,
     label: dto.name?.trim() || dto.resource_id,
-    url: appendVideoRevision(
-      client.playbackUrl(dto.resource_id, dto.game_id),
-      dto.updated_at,
-    ),
+    url: appendVideoRevision(dto.url, dto.updated_at),
     durMs: dto.source_meta?.duration_ms,
     type: dto.type,
     updatedAt: dto.updated_at,
@@ -167,7 +164,7 @@ export function useVideoAssets(
         }
         const mapped = result.items
           .filter((dto) => dto.media_type === 'video')
-          .map((dto) => toListItem(dto, client))
+          .map(toListItem)
         setLocalItems((prev) => (
           mode === 'append'
             ? mergeUniqueItems(prev, mapped)
@@ -218,7 +215,7 @@ export function useVideoAssets(
     ? localItems
     : kinoResources.items
       .slice(0, page * pageSize)
-      .map((dto) => toListItem(dto, client))
+      .map(toListItem)
   const total = options.client ? localTotal : kinoResources.total
   const loading = options.client ? localLoading : kinoResources.loading
   const error = options.client ? localError : localError ?? kinoResources.error
@@ -284,7 +281,6 @@ export function useVideoAssets(
         if (replacementResourceId) {
           const replacement = toListItem(
             { ...resource, resource_id: replacementResourceId },
-            client,
           )
           setLocalItems((currentItems) => currentItems.map((item) =>
             item.id === replacementResourceId ? replacement : item))
@@ -337,7 +333,7 @@ export function useVideoAssets(
         if (!mountedRef.current || generation !== crudGeneration.current) {
           return undefined
         }
-        const imported = toListItem(resource, client)
+        const imported = toListItem(resource)
         setLocalItems((currentItems) => mergeUniqueItems([imported], currentItems))
         setLocalTotal((currentTotal) => currentTotal + 1)
         upsertCacheResource(resource)
@@ -387,7 +383,7 @@ export function useVideoAssets(
         if (!mountedRef.current || generation !== crudGeneration.current) {
           return undefined
         }
-        const renamed = toListItem(resource, client)
+        const renamed = toListItem(resource)
         setLocalItems((currentItems) => currentItems.map((item) =>
           item.id === resourceId ? renamed : item))
         upsertCacheResource(resource)
@@ -434,7 +430,6 @@ export function useVideoAssets(
         const replacementId = retryPrepared.replacementResourceId
         const replacement = toListItem(
           { ...resource, resource_id: replacementId },
-          client,
         )
         setLocalItems((currentItems) => currentItems.map((item) =>
           item.id === replacementId ? replacement : item))

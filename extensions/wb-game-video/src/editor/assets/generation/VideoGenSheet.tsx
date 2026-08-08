@@ -67,6 +67,7 @@ type PickerTarget = 'first' | 'last' | 'reference'
 type ValidationErrors = Partial<Record<'prompt' | 'frames' | 'first' | 'references', string>>
 
 const RUNNING_PHASES = new Set<ClipGenState['phase']>(['submitting', 'generating'])
+const DURATION_MAX_SECONDS = 15
 const EMPTY_MODELS: readonly string[] = []
 const DEFAULT_SIZE: KinoVideoSize = '2560x1440'
 const DEFAULT_RESOLUTION: KinoVideoResolution = '720p'
@@ -129,8 +130,6 @@ export function VideoGenSheet({
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const noticeTimerRef = useRef<number | null>(null)
   const running = RUNNING_PHASES.has(genState.phase)
-  const hostManaged = true
-  const durationMax = 15
   const modelOptions = useMemo(
     () => [...new Set(availableModels.map((value) => value.trim()).filter(Boolean))],
     [availableModels],
@@ -248,13 +247,13 @@ export function VideoGenSheet({
     const nextErrors: ValidationErrors = {}
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt) nextErrors.prompt = t('videoAssets.generate.validation.needPrompt')
-    if (mode === 'strict' && (!firstFrame || !lastFrame)) {
+    if (mode === 'strict' && (!firstFrame?.resourceId || !lastFrame?.resourceId)) {
       nextErrors.frames = t('videoAssets.generate.validation.needFirstLast')
     }
-    if (mode === 'firstref' && !firstFrame) {
+    if (mode === 'firstref' && !firstFrame?.resourceId) {
       nextErrors.first = t('videoAssets.generate.validation.needFirst')
     }
-    if (mode === 'ref' && references.length === 0) {
+    if (mode === 'ref' && references.every((asset) => !asset.resourceId)) {
       nextErrors.references = t('videoAssets.generate.validation.needRefs')
     }
     setErrors(nextErrors)
@@ -263,7 +262,7 @@ export function VideoGenSheet({
     const request: ClipGenerationRequest = {
       gameSlug,
       prompt: trimmedPrompt,
-      durationSeconds: Math.min(durationMax, Math.max(1, duration)),
+      durationSeconds: Math.min(DURATION_MAX_SECONDS, Math.max(1, duration)),
       generateAudio,
       mode,
       size,
@@ -271,14 +270,16 @@ export function VideoGenSheet({
       ...(model ? { model } : {}),
       ...(selectedVisualStyle ? { visualStyleKey: selectedVisualStyle.key } : {}),
     }
-    if ((mode === 'strict' || mode === 'firstref') && firstFrame) {
-      request.firstFrameAssetId = firstFrame.id
+    if ((mode === 'strict' || mode === 'firstref') && firstFrame?.resourceId) {
+      request.firstFrameResourceId = firstFrame.resourceId
     }
-    if (mode === 'strict' && lastFrame) {
-      request.lastFrameAssetId = lastFrame.id
+    if (mode === 'strict' && lastFrame?.resourceId) {
+      request.lastFrameResourceId = lastFrame.resourceId
     }
     if (mode === 'ref') {
-      request.referenceImageAssetIds = references.map((asset) => asset.id)
+      request.referenceImageResourceIds = references
+        .map((asset) => asset.resourceId)
+        .filter((resourceId): resourceId is string => Boolean(resourceId))
     }
     onSubmit(request)
   }
@@ -287,15 +288,12 @@ export function VideoGenSheet({
   const subtitle = running
     ? t('videoAssets.generate.subtitleRunning')
     : t('videoAssets.generate.subtitleIdle')
-  const fixedByServer = t('videoAssets.generate.fixedByServer')
   const modelServerManaged = t('videoAssets.generate.modelServerManaged')
   const status = generationStatus(genState, t)
   const footHint = genState.phase === 'succeeded'
     ? t('videoAssets.generate.footHintDone')
     : running
       ? t('videoAssets.generate.cancelNote')
-      : hostManaged
-        ? t('videoAssets.generate.fallbackNote')
       : t('videoAssets.generate.footHintIdle')
   const submitLabel = running
     ? t('videoAssets.generate.submitRunning')
@@ -336,9 +334,9 @@ export function VideoGenSheet({
                   id={modelId}
                   className="vgen-setting-select"
                   value={model}
-                  disabled
+                  disabled={modelOptions.length <= 1}
                   aria-label={t('videoAssets.generate.model')}
-                  title={fixedByServer}
+                  title={modelOptions.length <= 1 ? modelServerManaged : undefined}
                   onChange={(event) => setModel(event.target.value)}
                 >
                   {modelOptions.length === 0 ? (
@@ -355,8 +353,6 @@ export function VideoGenSheet({
                       type="button"
                       className={resolution === option ? 'is-on' : ''}
                       aria-pressed={resolution === option}
-                      disabled={hostManaged}
-                      title={fixedByServer}
                       onClick={() => setResolution(option)}
                     >
                       {option}
@@ -395,10 +391,10 @@ export function VideoGenSheet({
                     className="vgen-custom-duration"
                     type="number"
                     min={1}
-                    max={durationMax}
+                    max={DURATION_MAX_SECONDS}
                     value={duration}
                     aria-label={t('videoAssets.generate.duration')}
-                    onChange={(event) => setDuration(clampDuration(event.target.valueAsNumber, durationMax))}
+                    onChange={(event) => setDuration(clampDuration(event.target.valueAsNumber, DURATION_MAX_SECONDS))}
                   />
                 ) : null}
               </GenerationSetting>
@@ -408,9 +404,7 @@ export function VideoGenSheet({
                   id={ratioId}
                   className="vgen-setting-select"
                   value={size}
-                  disabled={hostManaged}
                   aria-label={t('videoAssets.generate.ratio')}
-                  title={fixedByServer}
                   onChange={(event) => setSize(event.target.value as KinoVideoSize)}
                 >
                   {SIZE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}
@@ -582,7 +576,7 @@ export function VideoGenSheet({
           open={pickerTarget !== null}
           gameSlug={gameSlug}
           imageAssets={imageAssets}
-          requireResourceId={!hostManaged}
+          requireResourceId
           onPick={onPickImage}
           onClose={() => setPickerTarget(null)}
         />
@@ -734,9 +728,9 @@ export function VideoGenSheet({
                     className="vgen-input"
                     type="number"
                     min={1}
-                    max={durationMax}
+                    max={DURATION_MAX_SECONDS}
                     value={duration}
-                    onChange={(event) => setDuration(clampDuration(event.target.valueAsNumber, durationMax))}
+                    onChange={(event) => setDuration(clampDuration(event.target.valueAsNumber, DURATION_MAX_SECONDS))}
                   />
                 </div>
                 <div>
@@ -745,8 +739,6 @@ export function VideoGenSheet({
                     id={ratioId}
                     className="vgen-select"
                     value={size}
-                    disabled={hostManaged}
-                    title={hostManaged ? fixedByServer : undefined}
                     onChange={(event) => setSize(event.target.value as KinoVideoSize)}
                   >
                     {SIZE_OPTIONS.map((option) => (
@@ -760,8 +752,6 @@ export function VideoGenSheet({
                     id={resolutionId}
                     className="vgen-select"
                     value={resolution}
-                    disabled={hostManaged}
-                    title={hostManaged ? fixedByServer : undefined}
                     onChange={(event) => setResolution(event.target.value as KinoVideoResolution)}
                   >
                     <option value="720p">720p</option>
@@ -794,8 +784,8 @@ export function VideoGenSheet({
                   id={modelId}
                   className="vgen-select"
                   value={model}
-                  disabled={hostManaged || modelOptions.length <= 1}
-                  title={hostManaged ? fixedByServer : modelOptions.length <= 1 ? modelServerManaged : undefined}
+                  disabled={modelOptions.length <= 1}
+                  title={modelOptions.length <= 1 ? modelServerManaged : undefined}
                   onChange={(event) => setModel(event.target.value)}
                 >
                   {modelOptions.length === 0 ? (
@@ -901,7 +891,7 @@ export function VideoGenSheet({
         open={pickerTarget !== null}
         gameSlug={gameSlug}
         imageAssets={imageAssets}
-        requireResourceId={!hostManaged}
+        requireResourceId
         onPick={onPickImage}
         onClose={() => setPickerTarget(null)}
       />

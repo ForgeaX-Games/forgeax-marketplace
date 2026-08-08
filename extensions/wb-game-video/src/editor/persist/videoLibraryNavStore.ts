@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { gameKeySuffix } from './gameScope'
 
 export type VideoLibraryFolderTarget =
   | { kind: 'all' }
@@ -13,7 +14,9 @@ interface VideoLibraryNavStore extends VideoLibraryLocation {
   setLocation(location: { folder?: VideoLibraryFolderTarget, entryId?: string | null }): void
 }
 
-const CHANNEL = 'wb-game-video:video-library-nav-sync'
+// 按 game 隔离频道，避免同源多开不同 game 时跨 tab 串台。
+// 后缀在 install 时才求值：进程内挂载的 game 标识由宿主注入，晚于本模块求值。
+const CHANNEL_BASE = 'wb-game-video:video-library-nav-sync'
 const ALL_VIDEOS: VideoLibraryFolderTarget = { kind: 'all' }
 
 let channel: BroadcastChannel | null = null
@@ -56,7 +59,7 @@ export const useVideoLibraryNav = create<VideoLibraryNavStore>((set) => ({
 
 export function installVideoLibraryNavSync(): () => void {
   if (typeof BroadcastChannel === 'undefined') return () => {}
-  channel = new BroadcastChannel(CHANNEL)
+  channel = new BroadcastChannel(`${CHANNEL_BASE}${gameKeySuffix()}`)
   channel.onmessage = (event: MessageEvent) => {
     if (!validLocation(event.data)) return
     applyingRemote = true

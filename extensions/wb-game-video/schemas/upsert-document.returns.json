@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "wb-game-video:upsert-document returns",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["document"],
+  "properties": {
+    "document": {
+      "type": "object",
+      "description": "Registered DocumentRecord summary (id, name, documentType, updatedAt)."
+    },
+    "error": { "type": "string" }
+  }
+}

@@ -13,6 +13,7 @@ export type WbGameVideoServiceMethod =
   | 'generateKeyframe'
   | 'generateVideo'
   | 'generateNodeVideo'
+  | 'upsertDocument'
 
 export type WbGameVideoHttpRoute = {
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE'
@@ -20,7 +21,7 @@ export type WbGameVideoHttpRoute = {
   /** Service method for POST routes that share the JSON body → service pattern. */
   readonly service?: WbGameVideoServiceMethod
   /** Free-form GET/POST handlers implemented in router.ts. */
-  readonly kind?: 'list-assets' | 'get-asset' | 'list-documents' | 'get-document' | 'set-document-selection' | 'bundled-media' | 'get-style-axes' | 'set-style-axes' | 'host-media'
+  readonly kind?: 'list-assets' | 'get-asset' | 'list-documents' | 'get-document' | 'upsert-document' | 'bundled-media' | 'get-style-axes' | 'set-style-axes' | 'host-media'
 }
 
 /** Ordered for documentation; router may use maps for O(1) lookup. */
@@ -29,7 +30,7 @@ export const WB_GAME_VIDEO_HTTP_ROUTES: readonly WbGameVideoHttpRoute[] = [
   { method: 'GET', path: 'assets/:id', kind: 'get-asset' },
   { method: 'GET', path: 'documents', kind: 'list-documents' },
   { method: 'GET', path: 'documents/:id', kind: 'get-document' },
-  { method: 'POST', path: 'documents/selection', kind: 'set-document-selection' },
+  { method: 'POST', path: 'documents/upsert', service: 'upsertDocument' },
   { method: 'GET', path: 'media/bundled/:name', kind: 'bundled-media' },
   { method: 'GET', path: 'style-axes', kind: 'get-style-axes' },
   { method: 'POST', path: 'style-axes', kind: 'set-style-axes' },

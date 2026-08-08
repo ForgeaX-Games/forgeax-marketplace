@@ -11,31 +11,37 @@ import '@testing-library/jest-dom/vitest'
  * sessionStorage（同一实例，保证「测试里 clear」与「被测代码里读写」作用于同一份数据）。
  * 仅测试期生效，不进生产构建。
  */
+/**
+ * 数据存为「实例自有属性」（方法都在 prototype 上，不可枚举），因此
+ * `Object.keys(storage)` 会像真实 `Storage` 一样枚举出已存的键。生产代码
+ * （`bootMigrateLegacyKeys` 遍历旧前缀键）依赖这个语义，用 Map 做背板的替身
+ * 会让它枚举不到任何键而静默空转。
+ */
 class MemoryStorage {
-  private store = new Map<string, string>()
+  [key: string]: unknown
 
   get length(): number {
-    return this.store.size
+    return Object.keys(this).length
   }
 
   clear(): void {
-    this.store.clear()
+    for (const key of Object.keys(this)) delete this[key]
   }
 
   getItem(key: string): string | null {
-    return this.store.has(key) ? this.store.get(key)! : null
+    return Object.hasOwn(this, key) ? String(this[key]) : null
   }
 
   setItem(key: string, value: string): void {
-    this.store.set(key, String(value))
+    this[key] = String(value)
   }
 
   removeItem(key: string): void {
-    this.store.delete(key)
+    delete this[key]
   }
 
   key(index: number): string | null {
-    return [...this.store.keys()][index] ?? null
+    return Object.keys(this)[index] ?? null
   }
 }
 

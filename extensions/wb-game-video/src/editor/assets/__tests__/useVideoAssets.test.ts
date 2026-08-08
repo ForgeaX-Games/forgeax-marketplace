@@ -108,13 +108,13 @@ describe('useVideoAssets', () => {
     expect(defaultKinoList).not.toHaveBeenCalled()
   })
 
-  it('adds updated_at as a playback URL revision', async () => {
+  it('uses the Kino CDN URL and adds updated_at as its revision', async () => {
     const client = makeClient()
     const { result } = renderHook(() => useVideoAssets('demo', { client }))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.items[0]?.url).toBe(
-      '/api/v1/kino/resources/res-1/content?game_id=demo&v=2',
+      'http://object/res-1?v=2',
     )
   })
 
@@ -278,7 +278,7 @@ describe('useVideoAssets', () => {
       id: 'res-1',
       label: 'Replacement',
       updatedAt: 30,
-      url: '/api/v1/kino/resources/res-1/content?game_id=demo&v=30',
+      url: 'http://object/res-1?v=30',
     })
     uploadState.replaceImpl = undefined
   })

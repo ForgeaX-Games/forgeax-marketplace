@@ -31,7 +31,33 @@ vi.mock('../../../lib/workbench-host', () => ({
   readExtensionJson: vi.fn(async () => ({ styleAxes: null, assets: [] })),
 }))
 
-vi.mock('../../assets/kinoVideoCacheStore', () => ({ useKinoVideoResources }))
+vi.mock('../../assets/kinoVideoCacheStore', () => ({
+  useKinoVideoResources,
+  useKinoVideoCache: {
+    getState: () => ({
+      byGame: {
+        'game-nodia-fighting': {
+          items: ['intro', 'second'].map((nodeId) => ({
+            resource_id: `${nodeId}-video`,
+            game_id: 'game-nodia-fighting',
+            media_type: 'video',
+            name: `${nodeId}.mp4`,
+            type: 'UPLOAD',
+            url: `https://cdn.test/${nodeId}.mp4`,
+            source: 'upload',
+            source_meta: {},
+            created_at: 1,
+            updated_at: 1,
+          })),
+          total: 2,
+          loading: false,
+          error: null,
+          generation: 1,
+        },
+      },
+    }),
+  },
+}))
 vi.mock('../../assets/projectAssetCacheStore', () => ({ useProjectAssets }))
 
 const SCENARIO: GameScenario = {

@@ -13,17 +13,12 @@ export interface ProjectDocument extends ProjectDocumentSummary {
   content: string
 }
 
-export interface ProjectDocumentSelection {
-  proposalId?: string
-}
-
 export interface ProjectDocumentList {
   documents: ProjectDocumentSummary[]
-  selection: ProjectDocumentSelection | null
 }
 
 function isDocumentType(value: unknown): value is DocumentType {
-  return value === 'proposal' || value === 'outline' || value === 'script'
+  return value === 'intake' || value === 'core' || value === 'inquiry' || value === 'pillar'
 }
 
 function isSummary(value: unknown): value is ProjectDocumentSummary {
@@ -37,26 +32,11 @@ function isSummary(value: unknown): value is ProjectDocumentSummary {
 
 export async function fetchProjectDocuments(): Promise<ProjectDocumentList> {
   const response = await pluginFetch('documents')
-  const body = await readExtensionJson(response) as { documents?: unknown, selection?: unknown }
+  const body = await readExtensionJson(response) as { documents?: unknown }
   if (!Array.isArray(body.documents) || !body.documents.every(isSummary)) {
     throw new Error('Extension returned an invalid documents response')
   }
-  if (
-    body.selection !== null
-    && body.selection !== undefined
-    && (
-      typeof body.selection !== 'object'
-      || typeof (body.selection as { proposalId?: unknown }).proposalId !== 'string'
-    )
-  ) {
-    throw new Error('Extension returned an invalid document selection')
-  }
-  return {
-    documents: body.documents,
-    selection: body.selection === null || body.selection === undefined
-      ? null
-      : body.selection as ProjectDocumentSelection,
-  }
+  return { documents: body.documents }
 }
 
 export async function fetchProjectDocument(id: string): Promise<ProjectDocument> {
@@ -66,22 +46,4 @@ export async function fetchProjectDocument(id: string): Promise<ProjectDocument>
     throw new Error('Extension returned an invalid document response')
   }
   return { ...body.document, content: body.content }
-}
-
-export async function selectProjectProposal(proposalId: string): Promise<ProjectDocumentSelection> {
-  const response = await pluginFetch('documents/selection', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ proposalId }),
-  })
-  const body = await readExtensionJson(response) as { selection?: unknown }
-  const selection = body.selection
-  if (
-    !selection
-    || typeof selection !== 'object'
-    || typeof (selection as { proposalId?: unknown }).proposalId !== 'string'
-  ) {
-    throw new Error('Extension returned an invalid document selection')
-  }
-  return selection as ProjectDocumentSelection
 }
