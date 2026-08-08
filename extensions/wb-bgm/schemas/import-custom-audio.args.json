@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-bgm/import-custom-audio.args",
+  "title": "import-custom-audio args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "type": "string", "enum": ["bgm", "sfx"], "description": "由用户通过“导入 BGM”或“导入音效”明确选择" },
+    "fileName": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "mimeType": { "type": "string", "enum": ["audio/ogg", "application/ogg", "audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave"] },
+    "base64": { "type": "string", "minLength": 4, "description": "浏览器读取的音频文件内容" }
+  },
+  "required": ["kind", "fileName", "mimeType", "base64"]
+}

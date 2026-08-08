@@ -7,6 +7,9 @@ import type {
   KinoVideoClient,
 } from './kino-api'
 import { KinoClientError } from './kino-api'
+import { rewriteUrl } from '@forgeax/workbench-host/browser'
+import { getActiveRewriteRules } from '../../lib/forgeax-http'
+import { getWorkbenchHost } from '../../lib/workbench-host'
 
 export const MAX_VIDEO_UPLOAD_BYTES = 104_857_600
 export const VIDEO_UPLOAD_MIME = 'video/mp4' as const
@@ -91,82 +94,7 @@ const FORBIDDEN_UPLOAD_HEADERS = new Set([
   'via',
 ])
 const MAX_UPLOAD_ERROR_BODY_LENGTH = 512
-const DEFAULT_VIDEO_UPLOAD_DEV_PROXY_PORT = '15185'
-const VIDEO_UPLOAD_PROXY_PATH = '/__video-upload-proxy'
 const inFlightUploads = new Set<string>()
-
-export interface UploadTransportLocation {
-  origin: string
-}
-
-function devProxyPortFromOrigin(origin: string): string | null {
-  try {
-    const parsed = new URL(origin)
-    if (parsed.port) {
-      return parsed.port
-    }
-    return parsed.protocol === 'https:' ? '443' : '80'
-  } catch {
-    return null
-  }
-}
-
-function configuredDevProxyPort(): string {
-  return import.meta.env.VITE_DEV_PORT || DEFAULT_VIDEO_UPLOAD_DEV_PROXY_PORT
-}
-
-function isCrossOriginHttpUrl(instructionUrl: string, origin: string): boolean {
-  try {
-    const target = new URL(instructionUrl)
-    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-      return false
-    }
-    return target.origin !== origin
-  } catch {
-    return false
-  }
-}
-
-/** A server-issued Kino upload must stay on the ordinary `/api` proxy, never the COS/S3 proxy. */
-function kinoUploadUrl(instructionUrl: string): URL | null {
-  try {
-    const target = new URL(instructionUrl)
-    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-      return null
-    }
-    const kinoUploadPath = /^\/api\/v1\/kino\/uploads\/[^/]+$/.test(target.pathname)
-    return kinoUploadPath && target.searchParams.has('game_id') ? target : null
-  } catch {
-    return null
-  }
-}
-
-/** Rewrite cross-origin signed upload URLs through the active Vite dev server. */
-export function resolveUploadTransportUrl(
-  instructionUrl: string,
-  location: UploadTransportLocation = globalThis.location,
-): string {
-  const origin = location.origin
-  if (
-    !import.meta.env.DEV
-    || devProxyPortFromOrigin(origin) !== configuredDevProxyPort()
-  ) {
-    return instructionUrl
-  }
-  const kinoUpload = kinoUploadUrl(instructionUrl)
-  if (kinoUpload) {
-    if (!isCrossOriginHttpUrl(instructionUrl, origin)) {
-      return instructionUrl
-    }
-    return new URL(`${kinoUpload.pathname}${kinoUpload.search}`, origin).toString()
-  }
-  if (!isCrossOriginHttpUrl(instructionUrl, origin)) {
-    return instructionUrl
-  }
-  const proxyUrl = new URL(VIDEO_UPLOAD_PROXY_PATH, origin)
-  proxyUrl.searchParams.set('url', instructionUrl)
-  return proxyUrl.toString()
-}
 
 export interface UploadTransport {
   put(
@@ -275,8 +203,8 @@ export interface UploadProviderResourceOptions {
 
 /**
  * Standard prepare → PUT → create pipeline for non-replacement resources.
- * The browser calls the `/api/v1/kino` route, while the server selects the
- * active Local, S3, COS, or Kino provider.
+ * The browser calls the handshake-bound Workbench media extension, while the
+ * host selects and persists the active media provider.
  * Video replacement and retry behavior builds on the lower-level primitives below.
  */
 export async function uploadProviderResource(options: UploadProviderResourceOptions): Promise<KinoResourceDTO> {
@@ -415,19 +343,41 @@ function truncateMessage(text: string): string {
   return text.slice(0, MAX_UPLOAD_ERROR_BODY_LENGTH)
 }
 
+interface ValidatedUploadInstruction {
+  url: string
+  headers: Record<string, string>
+  chunkSize: number
+  chunkCount: number
+}
+
+function resolveInstructionUrl(rawUrl: string): string {
+  try {
+    const absolute = new URL(rawUrl)
+    if (absolute.protocol !== 'http:' && absolute.protocol !== 'https:') {
+      throw new Error('Invalid upload instruction')
+    }
+    return absolute.toString()
+  } catch {
+    if (!rawUrl || rawUrl.startsWith('//') || /^[a-z][a-z\d+.-]*:/iu.test(rawUrl) || /[\s\\]/.test(rawUrl)) {
+      throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+    }
+    try {
+      return getWorkbenchHost().extension.url(rawUrl)
+    } catch {
+      throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+    }
+  }
+}
+
 function validateUploadInstruction(
   instruction: DirectUploadInstruction,
-): Record<string, string> {
+): ValidatedUploadInstruction {
   if ((instruction as { method?: unknown }).method !== 'PUT') {
     throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
   }
-  let url: URL
-  try {
-    url = new URL(instruction.url)
-  } catch {
-    throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+  const url = resolveInstructionUrl(instruction.url)
+  if (!Number.isSafeInteger(instruction.chunk_size) || instruction.chunk_size <= 0
+    || !Number.isSafeInteger(instruction.chunk_count) || instruction.chunk_count <= 0) {
     throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
   }
   if (
@@ -437,93 +387,80 @@ function validateUploadInstruction(
   ) {
     throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
   }
-  return sanitizeInstructionHeaders(instruction.headers)
+  return {
+    url,
+    headers: sanitizeInstructionHeaders(instruction.headers),
+    chunkSize: instruction.chunk_size,
+    chunkCount: instruction.chunk_count,
+  }
 }
 
 export function createDefaultXhrUploadTransport(): UploadTransport {
   return {
     async put(file, instruction, onProgress, signal) {
-      const headers = validateUploadInstruction(instruction)
+      const { url, headers, chunkSize, chunkCount } = validateUploadInstruction(instruction)
+      if (Math.ceil(file.size / chunkSize) !== chunkCount) {
+        throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+      }
       assertNotAborted(signal)
       const report = createProgressReporter(onProgress)
+      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+        assertNotAborted(signal)
+        const start = chunkIndex * chunkSize
+        const end = Math.min(file.size, start + chunkSize)
+        const chunk = file.slice(start, end)
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          let settled = false
+          const cleanup = () => signal?.removeEventListener('abort', handleSignalAbort)
+          const succeed = () => {
+            if (settled) return
+            settled = true
+            cleanup()
+            resolve()
+          }
+          const fail = (error: VideoUploadError) => {
+            if (settled) return
+            settled = true
+            cleanup()
+            reject(error)
+          }
+          const handleSignalAbort = () => {
+            try { xhr.abort() } finally { fail(new VideoUploadError('Upload aborted', 'upload_aborted')) }
+          }
 
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        let settled = false
-        const cleanup = () => {
-          signal?.removeEventListener('abort', handleSignalAbort)
-        }
-        const succeed = () => {
-          if (settled) return
-          settled = true
-          cleanup()
-          resolve()
-        }
-        const fail = (error: VideoUploadError) => {
-          if (settled) return
-          settled = true
-          cleanup()
-          reject(error)
-        }
-        const handleSignalAbort = () => {
+          signal?.addEventListener('abort', handleSignalAbort, { once: true })
+          if (signal?.aborted) {
+            handleSignalAbort()
+            return
+          }
+          xhr.upload.onprogress = (event) => {
+            const total = event.lengthComputable && event.total > 0 ? event.total : chunk.size
+            if (total > 0) report(((start + Math.min(event.loaded, total)) / file.size) * 100)
+          }
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              succeed()
+              return
+            }
+            fail(new VideoUploadError(xhr.responseText || `Upload failed with HTTP ${xhr.status}`, 'upload_failed'))
+          }
+          xhr.onerror = () => fail(new VideoUploadError('Upload network error', 'upload_network_error'))
+          xhr.onabort = () => fail(new VideoUploadError('Upload aborted', 'upload_aborted'))
           try {
-            xhr.abort()
-          } finally {
-            fail(new VideoUploadError('Upload aborted', 'upload_aborted'))
+            xhr.open(instruction.method, rewriteUrl(url, getActiveRewriteRules()), true)
+            for (const [key, value] of Object.entries(headers)) xhr.setRequestHeader(key, value)
+            // Host resumable media writes are byte-offset based; the server owns
+            // recovery/idempotency instead of this extension persisting chunks.
+            xhr.setRequestHeader('upload-offset', String(start))
+            xhr.send(chunk)
+          } catch (error) {
+            fail(new VideoUploadError(error instanceof Error ? error.message : 'Upload failed', 'upload_failed'))
           }
-        }
-
-        signal?.addEventListener('abort', handleSignalAbort, { once: true })
-        if (signal?.aborted) {
-          handleSignalAbort()
-          return
-        }
-
-        xhr.upload.onprogress = (event) => {
-          const total = event.lengthComputable && event.total > 0 ? event.total : file.size
-          if (total <= 0) {
-            return
-          }
-          report((event.loaded / total) * 99)
-        }
-
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            succeed()
-            return
-          }
-          fail(
-            new VideoUploadError(
-              xhr.responseText || `Upload failed with HTTP ${xhr.status}`,
-              'upload_failed',
-            ),
-          )
-        }
-
-        xhr.onerror = () => {
-          fail(new VideoUploadError('Upload network error', 'upload_network_error'))
-        }
-
-        xhr.onabort = () => {
-          fail(new VideoUploadError('Upload aborted', 'upload_aborted'))
-        }
-
-        try {
-          const transportUrl = resolveUploadTransportUrl(instruction.url)
-          xhr.open(instruction.method, transportUrl, true)
-          for (const [key, value] of Object.entries(headers)) {
-            xhr.setRequestHeader(key, value)
-          }
-          xhr.send(file)
-        } catch (error) {
-          fail(
-            new VideoUploadError(
-              error instanceof Error ? error.message : 'Upload failed',
-              'upload_failed',
-            ),
-          )
-        }
-      })
+        })
+        report(((end / file.size) * 100))
+      }
+      report(100, true)
     },
   }
 }

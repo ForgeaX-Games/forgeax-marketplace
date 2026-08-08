@@ -1,9 +1,9 @@
 /**
- * 多局 Player 键盘焦点门控 —— 只有「当前焦点」Player 的交互皮响应 window keydown。
- *
- * 皮肤仍可挂 window 监听（便于全局快捷键手感），但必须先 `isPlayerFocused(root)`；
- * GraphPlayer 在 pointerdown / focusin 时 `claimPlayerFocus(root)`。
+ * 多局 Player 键盘焦点门控（平台侧单例）。
+ * 组件包不依赖此模块：实例挂载即听 window，销毁即卸监听。
  */
+import { createContext, useContext } from 'react'
+
 let focusedRoot: HTMLElement | null = null
 
 export function claimPlayerFocus(root: HTMLElement | null | undefined): void {
@@ -24,4 +24,13 @@ export function isPlayerFocused(root: HTMLElement | null | undefined): boolean {
 
 export function getFocusedPlayerRoot(): HTMLElement | null {
   return focusedRoot
+}
+
+/** Player 根节点（供平台侧焦点标记）。由 GraphPlayer / PlaySurface 注入。 */
+export const PlayerRootContext = createContext<HTMLElement | null>(null)
+
+/** @deprecated 组件侧已不再门控；保留给仍想查询焦点的平台代码。 */
+export function usePlayerKeyGate(): (e?: KeyboardEvent) => boolean {
+  const root = useContext(PlayerRootContext)
+  return () => isPlayerFocused(root)
 }

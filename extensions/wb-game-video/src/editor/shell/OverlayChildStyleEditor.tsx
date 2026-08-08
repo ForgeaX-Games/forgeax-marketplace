@@ -4,7 +4,6 @@
  */
 import type { CSSProperties, JSX } from 'react'
 import type { GraphTextStyle, Layout, OverlayChild } from '../../runtime/schema/graph-schema'
-import { hpBarComponents } from '../../runtime/component-host'
 import { GraphTextStylePicker } from './GraphTextStylePicker'
 import { isSizable, SizeEditor } from './editors'
 
@@ -17,15 +16,6 @@ const COMPONENT_LABEL: Record<string, string> = {
   qte: 'QTE',
   choice: '选项',
   battleHpBar: 'HUD 血条',
-}
-
-function field(label: string, node: JSX.Element): JSX.Element {
-  return (
-    <label style={row}>
-      <span style={lbl}>{label}</span>
-      {node}
-    </label>
-  )
 }
 
 function sizeField(child: OverlayChild, onPatchLayout: (patch: Partial<Layout>) => void): JSX.Element {
@@ -47,7 +37,6 @@ function sizeField(child: OverlayChild, onPatchLayout: (patch: Partial<Layout>) 
 export function OverlayChildStyleEditor({
   child,
   onPatchParams,
-  onPatchComponent,
   onPatchLayout,
 }: {
   child: OverlayChild
@@ -58,27 +47,6 @@ export function OverlayChildStyleEditor({
   const inputs = child.inputs ?? {}
   const kind = child.component
   const title = COMPONENT_LABEL[kind] ?? kind
-
-  const hpBars = hpBarComponents()
-  if (hpBars.some((s) => s.id === kind) || kind === 'battleHpBar') {
-    const skin = hpBars.some((s) => s.id === child.component) ? child.component : ''
-    return (
-      <div style={{ marginTop: 6 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{child.id} · 血条</div>
-        {field(
-          '血条组件',
-          <select value={skin} onChange={(e) => onPatchComponent(e.target.value)} style={{ flex: 1 }}>
-            {hpBars.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>,
-        )}
-        {sizeField(child, onPatchLayout)}
-      </div>
-    )
-  }
 
   if (kind === 'Dialogue') {
     return (

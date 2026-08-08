@@ -44,10 +44,13 @@ import {
 } from './ValueExprEditor'
 import { TextValueEditor, type TextOrRef } from './TextValueEditor'
 import { LooseNumberInput } from './TermChainEditor'
+import { NiSelect } from './ni-ui'
 import { EffectOpButtons } from './OpSymbolButtons'
 import {
+  compileValuePick,
   decodeEffectOperation,
   encodeEffectOperation,
+  resolveValuePick,
   type EffectDisplayOp,
 } from './valueExprPick'
 
@@ -127,17 +130,17 @@ function ItemIdEditor({
   const known = ids.includes(value)
   return (
     <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
-      <select
-        aria-label="道具"
+      <NiSelect
+        ariaLabel="道具"
         value={known ? value : '__custom__'}
-        onChange={(event) => {
-          if (event.target.value !== '__custom__') onChange(event.target.value)
+        onChange={(next) => {
+          if (next !== '__custom__') onChange(next)
         }}
         style={{ flex: 1, minWidth: 0 }}
       >
         {ids.map((id) => <option key={id} value={id}>{id}</option>)}
         <option value="__custom__">新建或输入道具 ID…</option>
-      </select>
+      </NiSelect>
       {!known ? (
         <input
           aria-label="道具 ID"
@@ -166,7 +169,7 @@ function field(
 ): JSX.Element {
   // 用 div 而非 label：子树常含 button，包在 label 里会点到文字也触发按钮（如「乘」误删）。
   return (
-    <div style={rowStyle}>
+    <div className="editor-field-row" style={rowStyle}>
       <span style={labelWidth === undefined ? lbl : { ...lbl, width: labelWidth }}>{label}</span>
       {node}
     </div>
@@ -416,6 +419,8 @@ export function ValueInput({
   createVariable,
   createFormula,
   stackControls,
+  assignmentLayout,
+  propertyLayout,
 }: {
   value: NumOrExpr | string | undefined
   defaultValue?: number
@@ -431,13 +436,15 @@ export function ValueInput({
   createVariable?: ValueExprVariableCreateConfig
   createFormula?: ValueExprFormulaCreateConfig
   stackControls?: boolean
+  assignmentLayout?: boolean
+  propertyLayout?: boolean
   /** 挂了这个 = 这个值要配一个 Effect「运算」符号按钮，嵌进编辑器顶部（跟常量/选取公式同一行）。 */
   effectOp?: { op: EffectDisplayOp; onOpChange: (next: EffectDisplayOp) => void }
   fieldLabels?: { source: string; value: string }
   fieldLabelWidth?: CSSProperties['width']
 } & MetaCatalogProps): JSX.Element {
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    <div className="value-input-shell" style={{ flex: 1, minWidth: 0 }}>
       <ValueExprEditor
         value={value ?? defaultValue}
         entities={entities}
@@ -458,6 +465,9 @@ export function ValueInput({
         fieldLabels={fieldLabels}
         fieldLabelWidth={fieldLabelWidth}
         stackControls={stackControls}
+        assignmentLayout={assignmentLayout}
+        propertyLayout={propertyLayout}
+        numericOnly
       />
     </div>
   )
@@ -476,6 +486,7 @@ export function TextValueInput({
   createVariable,
   createFormula,
   stackControls,
+  propertyLayout,
 }: {
   value: TextOrRef | undefined
   onChange: (v: TextOrRef) => void
@@ -489,9 +500,10 @@ export function TextValueInput({
   createVariable?: ValueExprVariableCreateConfig
   createFormula?: ValueExprFormulaCreateConfig
   stackControls?: boolean
+  propertyLayout?: boolean
 }): JSX.Element {
   return (
-    <div style={{ flex: 1, minWidth: 0 }}>
+    <div className="text-value-input-shell" style={{ flex: 1, minWidth: 0 }}>
       <TextValueEditor
         value={value}
         entities={entities}
@@ -504,6 +516,7 @@ export function TextValueInput({
         createVariable={createVariable}
         createFormula={createFormula}
         stackControls={stackControls}
+        propertyLayout={propertyLayout}
         onChange={onChange}
       />
     </div>
@@ -563,16 +576,6 @@ export function EntitySelect({
       label: `配置「${draft.name.trim() || entityId || defaultId}」实体`,
       children: [
         {
-          key: `detail:${actionKey}:id`,
-          label: '实体 ID',
-          editor: {
-            value: draft.entityId,
-            ariaLabel: '效果目标的新实体 ID',
-            invalid: !entityId || catalogIdOccupied(entities, entityId),
-            onChange: (next) => patch({ entityId: next }),
-          },
-        },
-        {
           key: `detail:${actionKey}:name`,
           label: '显示名',
           editor: {
@@ -615,7 +618,7 @@ export function EntitySelect({
     )
   }
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value)} style={{ flex: 1 }}>
+    <NiSelect value={value} onChange={onChange} style={{ flex: 1 }}>
       <option value="" disabled={pickerOptions.length > 0}>选择对象…</option>
       {opts.map((option) => (
         <option key={option.id} value={option.id}>{option.label}</option>
@@ -623,7 +626,7 @@ export function EntitySelect({
       {value && !known.has(value) ? (
         <option value={value} disabled>{value}（实体模板已删除）</option>
       ) : null}
-    </select>
+    </NiSelect>
   )
 }
 
@@ -650,9 +653,9 @@ export function AttrSelect({
   }>>({})
   if (!entityId) {
     return (
-      <select value="" disabled style={{ flex: 1 }}>
+      <NiSelect value="" onChange={onChange} disabled style={{ flex: 1 }}>
         <option value="">请先选择对象…</option>
-      </select>
+      </NiSelect>
     )
   }
   const entity = findEntity(entities, entityId)
@@ -722,16 +725,6 @@ export function AttrSelect({
       label: `配置「${draft.label.trim() || attrId || defaultAttrId}」属性`,
       children: [
         {
-          key: `detail:${actionKey}:id`,
-          label: '属性 ID',
-          editor: {
-            value: draft.attrId,
-            ariaLabel: `${entityDisplayName(entity, entityId)}的新属性 ID`,
-            invalid: !attrId || occupiedAttr,
-            onChange: (next) => patch({ attrId: next }),
-          },
-        },
-        {
           key: `detail:${actionKey}:label`,
           label: '显示名',
           editor: {
@@ -781,12 +774,12 @@ export function AttrSelect({
     )
   }
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value)} style={{ flex: 1 }}>
+    <NiSelect value={value} onChange={onChange} style={{ flex: 1 }}>
       <option value="" disabled={options.length > 0}>选择属性…</option>
       {options.map((attr) => (
         <option key={attr.id} value={attr.id}>{attr.label}</option>
       ))}
-    </select>
+    </NiSelect>
   )
 }
 
@@ -805,12 +798,12 @@ function VarSelect({
 }): JSX.Element {
   const opts = listVarOptions(variables, { flagsOnly, numbersOnly })
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ flex: 1 }}>
+    <NiSelect value={value} onChange={onChange} style={{ flex: 1 }}>
       <option value="" disabled={opts.length > 0}>选择变量…</option>
       {opts.map((o) => (
         <option key={o.id} value={o.id}>{o.label}</option>
       ))}
-    </select>
+    </NiSelect>
   )
 }
 
@@ -889,6 +882,7 @@ function EffectRow({
   onOpSnapshot,
   onUndoOp,
   labelWidth,
+  propertyLayout = false,
 }: {
   eff: GraphEffect
   allowedKinds: readonly EffectKind[]
@@ -903,6 +897,7 @@ function EffectRow({
   onOpSnapshot?: (snap: { op: NumericEffectOp; value: NumOrExpr }) => void
   onUndoOp?: () => void
   labelWidth?: CSSProperties['width']
+  propertyLayout?: boolean
 } & MetaCatalogProps): JSX.Element {
   const entityOpts = listEntityOptions(entities)
   const numVars = listVarOptions(variables, { numbersOnly: true })
@@ -928,8 +923,64 @@ function EffectRow({
     onChange({ ...eff, ...encodeEffectOperation(operation.op, value) })
   }
 
+  if (propertyLayout && operation && (eff.kind === 'attr' || eff.kind === 'var')) {
+    const subjectValue = compileValuePick({
+      mode: 'pick',
+      terms: [eff.kind === 'attr'
+        ? { op: '+', source: 'entity', refId: eff.entityId, attr: eff.attr }
+        : { op: '+', source: 'var', refId: eff.varId }],
+    })
+    const selectSubject = (next: NumOrExpr): void => {
+      const selected = resolveValuePick(next, entities, variables)
+      if (selected.mode !== 'pick') return
+      const term = selected.terms[0]
+      if (term?.source === 'entity' && term.refId && term.attr) {
+        onChange({ kind: 'attr', entityId: term.refId, attr: term.attr, ...encodeEffectOperation(operation.op, operation.value) })
+      } else if (term?.source === 'var' && term.refId) {
+        onChange({ kind: 'var', varId: term.refId, ...encodeEffectOperation(operation.op, operation.value) })
+      }
+    }
+    return (
+      <div data-effect-editor data-property-effect-editor>
+        <div className="editor-property-cascade-field">
+          <span>效果主体</span>
+          <ValueExprEditor
+            value={subjectValue}
+            entities={entities}
+            variables={variables}
+            formulas={formulas}
+            createAttribute={createAttribute}
+            createEntity={createEntity}
+            createVariable={createVariable}
+            allowedSources={['entity', 'var']}
+            pickerAriaLabel="效果主体"
+            numericOnly
+            stackControls
+            onChange={selectSubject}
+          />
+        </div>
+        <div className="editor-property-assign-field">
+          <span>赋值</span>
+          <ValueInput
+            value={operation.value}
+            entities={entities}
+            variables={variables}
+            formulas={formulas}
+            createAttribute={createAttribute}
+            createEntity={createEntity}
+            createVariable={createVariable}
+            createFormula={createFormula}
+            effectOp={{ op: operation.op, onOpChange: handleOpChange }}
+            assignmentLayout
+            onChange={handleValueChange}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div style={box}>
+    <div data-effect-editor style={box}>
       <div style={rowStyle}>
         <span style={{ fontSize: 12, fontWeight: 600, flex: 1, minWidth: 0 }} title={summary}>
           {summary}
@@ -954,15 +1005,15 @@ function EffectRow({
         </button>
       </div>
       {field('类型', (
-        <select
+        <NiSelect
           value={eff.kind}
-          onChange={(e) => onChange(defaultEffect(e.target.value as EffectKind, entities, variables))}
+          onChange={(value) => onChange(defaultEffect(value as EffectKind, entities, variables))}
           title={`效果类型：${allowedKinds.map((kind) => EFFECT_KIND_LABEL[kind] ?? kind).join(' / ')}`}
         >
           {selectableKinds.map((k) => (
             <option key={k} value={k}>{EFFECT_KIND_LABEL[k] ?? k}</option>
           ))}
-        </select>
+        </NiSelect>
       ), labelWidth)}
       {eff.kind === 'attr' && (
         <>
@@ -1046,10 +1097,10 @@ function EffectRow({
             />
           ), labelWidth)}
           {field('值', (
-            <select value={String(eff.value)} onChange={(e) => onChange({ ...eff, value: e.target.value === 'true' })}>
+            <NiSelect value={String(eff.value)} onChange={(value) => onChange({ ...eff, value: value === 'true' })}>
               <option value="true">是</option>
               <option value="false">否</option>
-            </select>
+            </NiSelect>
           ), labelWidth)}
         </>
       )}
@@ -1057,10 +1108,10 @@ function EffectRow({
         <>
           {field('道具', <ItemIdEditor value={eff.itemId} itemIds={itemIds ?? []} onChange={(itemId) => onChange({ ...eff, itemId })} />, labelWidth)}
           {field('操作', (
-            <select value={eff.op} onChange={(e) => onChange({ ...eff, op: e.target.value as 'give' | 'take' })}>
+            <NiSelect value={eff.op} onChange={(value) => onChange({ ...eff, op: value as 'give' | 'take' })}>
               <option value="give">给予（增加持有数量）</option>
               <option value="take">取走（减少且不低于 0）</option>
-            </select>
+            </NiSelect>
           ), labelWidth)}
           {field('数量', <LooseNumberInput value={eff.count} emptyValue={0} onChange={(count) => onChange({ ...eff, count })} style={{ width: 90 }} />, labelWidth)}
         </>
@@ -1084,6 +1135,7 @@ export function EffectsEditor({
   labelWidth,
   allowAdd = true,
   allowedKinds = EFFECT_KINDS,
+  propertyLayout = false,
 }: {
   value: GraphEffect[] | undefined
   onChange: (v: GraphEffect[]) => void
@@ -1096,6 +1148,7 @@ export function EffectsEditor({
   allowAdd?: boolean
   /** 限制新建/切换效果时可选择的类型；既有的其他类型仍保留显示，避免静默改写历史数据。 */
   allowedKinds?: readonly EffectKind[]
+  propertyLayout?: boolean
 } & MetaCatalogProps): JSX.Element {
   const cat = resolveCatalog({ entities, variables, formulas, itemIds, pickers })
   const list = value ?? []
@@ -1120,6 +1173,7 @@ export function EffectsEditor({
           createVariable={createVariable}
           createFormula={createFormula}
           labelWidth={labelWidth}
+          propertyLayout={propertyLayout}
           onChange={(next) => onChange(list.map((e, idx) => (idx === i ? next : e)))}
           onDelete={() => { opStacks.current.delete(i); onChange(list.filter((_, idx) => idx !== i)) }}
           canUndoOp={(opStacks.current.get(i)?.length ?? 0) > 0}
@@ -1186,11 +1240,11 @@ function defaultClause(
 }
 
 const opSelect = (op: CmpOp, onChange: (op: CmpOp) => void): JSX.Element => (
-  <select aria-label="比较运算符" value={op} onChange={(e) => onChange(e.target.value as CmpOp)}>
+  <NiSelect ariaLabel="比较运算符" value={op} onChange={(value) => onChange(value as CmpOp)}>
     {CMP_OPS.map((o) => (
       <option key={o} value={o}>{CMP_LABEL[o]}</option>
     ))}
-  </select>
+  </NiSelect>
 )
 
 function ClauseRow({
@@ -1215,11 +1269,11 @@ function ClauseRow({
   return (
     <div style={box}>
       <div style={rowStyle}>
-        <select aria-label="条件字段类型" value={clause.type} onChange={(e) => onChange(defaultClause(e.target.value as ClauseType, entities, variables))}>
+        <NiSelect ariaLabel="条件字段类型" value={clause.type} onChange={(value) => onChange(defaultClause(value as ClauseType, entities, variables))}>
           {clauseTypes.map((t) => (
             <option key={t} value={t}>{CLAUSE_LABEL[t] ?? t}</option>
           ))}
-        </select>
+        </NiSelect>
         <button style={del} onClick={onDelete}>删除</button>
       </div>
       {(clause.type === 'attr' || clause.type === 'attrRatio') && (
@@ -1290,20 +1344,20 @@ function ClauseRow({
             />
           ))}
           {field('等于', (
-            <select value={String(clause.equals)} onChange={(e) => onChange({ ...clause, equals: e.target.value === 'true' })}>
+            <NiSelect value={String(clause.equals)} onChange={(value) => onChange({ ...clause, equals: value === 'true' })}>
               <option value="true">是</option>
               <option value="false">否</option>
-            </select>
+            </NiSelect>
           ))}
         </>
       )}
       {clause.type === 'visited' && field('节点', (
-        <select value={clause.nodeId} onChange={(e) => onChange({ ...clause, nodeId: e.target.value })} style={{ flex: 1 }}>
+        <NiSelect value={clause.nodeId} onChange={(nodeId) => onChange({ ...clause, nodeId })} style={{ flex: 1 }}>
           <option value="">（选节点）</option>
           {nodeIds.map((id) => (
             <option key={id} value={id}>{nodeLabel?.(id) ?? id}</option>
           ))}
-        </select>
+        </NiSelect>
       ))}
       {clause.type === 'score' && (
         <>

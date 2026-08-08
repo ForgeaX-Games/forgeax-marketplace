@@ -31,8 +31,10 @@ describe('EffectsEditor numeric operations', () => {
       />,
     )
 
+    // 排除 .ni-select-value：那是 NiSelect 壳里显示当前选项的装饰 span（如「类型」选中「属性」），
+    // 与同名字段标签撞文本；这里量的是标签本身。
     for (const label of ['类型', '实体', '属性', '操作', '数值来源', '数值']) {
-      expect(screen.getByText(label, { selector: 'span' })).toHaveStyle({ width: '77px' })
+      expect(screen.getByText(label, { selector: 'span:not(.ni-select-value)' })).toHaveStyle({ width: '77px' })
     }
   })
 
@@ -85,6 +87,46 @@ describe('EffectsEditor numeric operations', () => {
     expect(screen.getByRole('button', { name: '+' }).classList.contains('is-on')).toBe(true)
     expect(screen.getByLabelText('数值')).toHaveValue('4')
     expect(latest[0]).toMatchObject({ op: 'add', value: 4 })
+  })
+
+  it('replaces subtraction with division instead of nesting unary wraps', () => {
+    let latest: GraphEffect[] = []
+    function Harness(): JSX.Element {
+      const [effects, setEffects] = useState<GraphEffect[]>([{
+        kind: 'attr',
+        entityId: 'hero',
+        attr: 'hp',
+        op: 'add',
+        value: 10,
+      }])
+      latest = effects
+      return (
+        <EffectsEditor
+          value={effects}
+          propertyLayout
+          entities={{
+            hero: {
+              id: 'hero',
+              name: '主角',
+              attrs: { hp: 100 },
+              attrMeta: { hp: { label: '生命值' } },
+            },
+          }}
+          onChange={setEffects}
+        />
+      )
+    }
+
+    render(<Harness />)
+
+    fireEvent.click(screen.getByRole('button', { name: '−' }))
+    expect(latest[0]).toMatchObject({ op: 'add', value: { expr: '-(10)' } })
+
+    // − → ÷：先还原到点 − 前的操作数，再套 ÷，不得出现 1/(-(10))
+    fireEvent.click(screen.getByRole('button', { name: '÷' }))
+    expect(screen.getByRole('button', { name: '÷' }).classList.contains('is-on')).toBe(true)
+    expect(screen.getByRole('button', { name: '−' }).classList.contains('is-on')).toBe(false)
+    expect(latest[0]).toMatchObject({ op: 'mul', value: { expr: '1/(10)' } })
   })
 
   it('keeps manual value mode after switching from an entity binding and then choosing subtraction', () => {
@@ -153,13 +195,13 @@ describe('EffectsEditor numeric operations', () => {
     fireEvent.click(screen.getByRole('combobox', { name: '实体' }))
     expect(screen.getByRole('menuitem', { name: '主角' })).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: '新增实体' }))
-    expect(screen.getByRole('textbox', { name: '效果目标的新实体 ID' })).toHaveValue('entity1')
+    expect(screen.queryByRole('textbox', { name: '效果目标的新实体 ID' })).toBeNull()
     fireEvent.keyDown(document, { key: 'Escape' })
 
     fireEvent.click(screen.getByRole('combobox', { name: '属性' }))
     expect(screen.getByRole('menuitem', { name: '生命值' })).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: '新增属性' }))
-    expect(screen.getByRole('textbox', { name: '主角的新属性 ID' })).toHaveValue('attr0')
+    expect(screen.queryByRole('textbox', { name: '主角的新属性 ID' })).toBeNull()
     fireEvent.keyDown(document, { key: 'Escape' })
 
     fireEvent.click(screen.getByRole('combobox', { name: '数值来源' }))

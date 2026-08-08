@@ -101,6 +101,13 @@ describe('useVideoAssets', () => {
     expect(defaultKinoList).toHaveBeenCalledTimes(1)
   })
 
+  it('does not query the media API with an empty game id', async () => {
+    const { result } = renderHook(() => useVideoAssets(''))
+
+    expect(result.current.loading).toBe(false)
+    expect(defaultKinoList).not.toHaveBeenCalled()
+  })
+
   it('adds updated_at as a playback URL revision', async () => {
     const client = makeClient()
     const { result } = renderHook(() => useVideoAssets('demo', { client }))
@@ -142,6 +149,55 @@ describe('useVideoAssets', () => {
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     expect(result.current.items.map((item) => item.id)).toEqual(['local-import', 'uploaded'])
+  })
+
+  it('imports an HTTPS source video with the documented Kino payload and returns its DTO', async () => {
+    const imported = makeResource({
+      resource_id: 'imported-video',
+      name: 'Imported outdoor',
+      url: 'https://cdn.example.com/outdoor.mp4',
+      source: 'external-import',
+      type: 'OTHER',
+      updated_at: 30,
+    })
+    const create = vi.fn(async () => imported)
+    const client = makeClient({
+      create,
+      list: vi.fn()
+        .mockResolvedValueOnce({ items: [makeResource()], total: 1, page: 1, page_size: 20 })
+        .mockResolvedValueOnce({ items: [imported, makeResource()], total: 2, page: 1, page_size: 20 }),
+    })
+    const { result } = renderHook(() => useVideoAssets('demo', { client }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let returned: KinoResourceDTO | undefined
+    await act(async () => {
+      returned = await result.current.importExternal(makeResource({
+        game_id: 'source-game',
+        url: 'https://cdn.example.com/outdoor.mp4',
+        source_meta: { duration_ms: 5_000 },
+      }), ' Imported outdoor ')
+    })
+
+    expect(create).toHaveBeenCalledWith({
+      game_id: 'demo', media_type: 'video', url: 'https://cdn.example.com/outdoor.mp4',
+      name: 'Imported outdoor', type: 'OTHER', source: 'external-import',
+      source_meta: { duration_ms: 5_000 },
+    }, expect.any(Object))
+    expect(returned).toBe(imported)
+    expect(result.current.items.map((item) => item.id)).toContain('imported-video')
+  })
+
+  it('surfaces an external import failure instead of swallowing it', async () => {
+    const client = makeClient({ create: vi.fn(async () => { throw new Error('create failed') }) })
+    const { result } = renderHook(() => useVideoAssets('demo', { client }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    await act(async () => {
+      await expect(result.current.importExternal(makeResource({ url: 'https://cdn.example.com/outdoor.mp4' }), 'Outdoor'))
+        .rejects.toThrow('create failed')
+    })
+    expect(result.current.error).toBe('create failed')
   })
 
   it('renames an item while preserving its stable resource id and metadata', async () => {

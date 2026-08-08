@@ -6,9 +6,11 @@
   "description": "ForgeaX workbench plugin: audio/SFX asset library (Local depot). Preview + attach to game (download + audio/manifest.json). Shared by humans and AI.",
   "scripts": {
     "dev": "vite --host",
-    "build": "tsc --noEmit && vite build",
+    "index:local-library": "bun scripts/build-local-library-index.ts",
+    "check:local-library": "bun scripts/build-local-library-index.ts --check",
+    "build": "bun run check:local-library && tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun run check:local-library && tsc --noEmit"
   },
   "dependencies": {},
   "devDependencies": {

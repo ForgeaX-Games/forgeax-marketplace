@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { loadGameComponents, registerBuiltins } from '../../component-host'
+import { bootComponents } from '../../component-host'
 import { GamePlayer } from '../../play'
 import { createAssetResolver } from '../client/asset-resolver'
 import {
@@ -20,17 +20,6 @@ function errorMessage(error: unknown): string {
   return 'Unable to start game'
 }
 
-async function bootRuntimeComponents(gameId: string, signal: AbortSignal): Promise<void> {
-  registerBuiltins()
-  try {
-    const response = await fetch(`/__gva__/components-status?game=${encodeURIComponent(gameId)}`, { signal })
-    const status = response.ok ? await response.json() as { available?: boolean } : null
-    if (status?.available) await loadGameComponents(gameId)
-  } catch (error) {
-    if ((error as { name?: string })?.name === 'AbortError') throw error
-  }
-}
-
 export function RuntimeGameApp(): JSX.Element {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
 
@@ -40,7 +29,7 @@ export function RuntimeGameApp(): JSX.Element {
       try {
         const gameId = readGameId()
         const gamePackage = await fetchGamePackage(gameId, controller.signal)
-        await bootRuntimeComponents(gameId, controller.signal)
+        await bootComponents(gameId)
         if (!controller.signal.aborted) setState({ status: 'ready', gameId, gamePackage })
       } catch (error) {
         if (!controller.signal.aborted) setState({ status: 'error', message: errorMessage(error) })

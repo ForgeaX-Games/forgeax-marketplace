@@ -7,6 +7,7 @@ import type { NumOrExpr, Overlay } from '../../runtime/schema/graph-schema'
 import type { ComponentInput } from '../../runtime/schema/node-config-schema'
 import { getComponentManifest } from '../../runtime/registry/component-registry'
 import { TextValueInput, ValueInput, type EditorPickerCtx } from './editors'
+import { NiSelect } from './ni-ui'
 import type { TextOrRef } from './TextValueEditor'
 
 type BindMode = 'literal' | 'expr' | 'ref'
@@ -87,16 +88,17 @@ function ParamRow({
   return (
     <div style={rowStyle}>
       <span style={keyLbl} title={inputKey}>{label}</span>
-      <select value={mode} onChange={(e) => setMode(e.target.value as BindMode)} style={{ fontSize: 11, width: 72 }}>
+      {/* flex:none 顶掉 NiSelect 壳默认的 flex:1，把这只窄下拉钉回原来的 72px。 */}
+      <NiSelect value={mode} onChange={(next) => setMode(next as BindMode)} style={{ flex: 'none', fontSize: 11, width: 72 }}>
         {(Object.keys(MODE_LABEL) as BindMode[]).map((m) => (
           <option key={m} value={m}>{MODE_LABEL[m]}</option>
         ))}
-      </select>
+      </NiSelect>
       {valueType === 'boolean' && mode === 'literal' ? (
-        <select value={text === 'true' ? 'true' : 'false'} onChange={(e) => setText(e.target.value)} style={{ flex: 1, fontSize: 12 }}>
+        <NiSelect value={text === 'true' ? 'true' : 'false'} onChange={setText} style={{ flex: 1, fontSize: 12 }}>
           <option value="true">是</option>
           <option value="false">否</option>
-        </select>
+        </NiSelect>
       ) : (
         <input
           value={text}

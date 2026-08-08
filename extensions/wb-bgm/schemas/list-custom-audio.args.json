@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "forgeax://plugin/wb-bgm/list-custom-audio.args",
+  "title": "list-custom-audio args",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "type": "string", "enum": ["bgm", "sfx"] }
+  }
+}

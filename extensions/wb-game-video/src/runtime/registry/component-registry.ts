@@ -2,8 +2,8 @@
  * 组件注册契约 —— Overlay child 的运行时扩展点。
  *
  * 落盘字段只有 `OverlayChild.component`；注册键与之直接对应。
- * 多局并行：每个 GraphRuntime / GraphSession 可持有自己的 `ComponentRegistry` 实例；
- * 模块级 `registerComponent` / `getComponent` 指向默认表（单测 / 未注入时的回退）。
+ * 缺省使用模块级 `defaultComponentRegistry`（与 bootComponents / GraphSession 共用）；
+ * 测试或特殊路径可自建 `ComponentRegistry` 注入。
  *
  * 编辑器专用辅助（展示名、新建默认值、拍点/选项结构判定等）不在本文件——见 `editor/shell/editors.tsx`。
  */
@@ -52,6 +52,15 @@ export class ComponentRegistry {
     return this.components.get(componentId)
   }
 
+  /** 复制当前表（Session 隔离 / createDefault* 用）。 */
+  clone(): ComponentRegistry {
+    const next = new ComponentRegistry()
+    for (const [id, def] of this.components) {
+      next.registerComponent(id, def)
+    }
+    return next
+  }
+
   /** 组件契约视图：inputs + events（无静态 events 时从 inputs 默认值折）。 */
   getManifest(componentId: string): ComponentManifest | undefined {
     const p = this.getComponent(componentId)
@@ -89,7 +98,7 @@ export class ComponentRegistry {
   }
 }
 
-/** 默认表（单测 / Runtime 未注入时回退）。多局隔离请用 `createDefaultComponentRegistry()`。 */
+/** 默认表（bootComponents / Session / Runtime 共用；测试可注入自建表）。 */
 export const defaultComponentRegistry = new ComponentRegistry()
 
 export function registerComponent<P>(id: string, def: ComponentDef<P>): void {

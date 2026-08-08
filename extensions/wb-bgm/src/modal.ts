@@ -108,7 +108,16 @@ export function openModal(asset: AssetMeta, cosKey: string): void {
   } else { EL.modalVersionTabs().classList.add('hidden'); EL.modalVersionTabs().innerHTML = ''; }
 
   const tags = [...(asset.custom_tags || []), ...(asset.gen_tags || [])];
-  if (tags.length) { EL.infoTagsRow().classList.remove('hidden'); EL.infoTags().innerHTML = tags.map(t => `<span class="info-tag">${t}</span>`).join(''); }
+  if (tags.length) {
+    EL.infoTagsRow().classList.remove('hidden');
+    const container = EL.infoTags();
+    container.replaceChildren(...tags.map((tag) => {
+      const span = document.createElement('span');
+      span.className = 'info-tag';
+      span.textContent = tag;
+      return span;
+    }));
+  }
   else EL.infoTagsRow().classList.add('hidden');
 
   EL.modalOverlay().classList.remove('hidden');

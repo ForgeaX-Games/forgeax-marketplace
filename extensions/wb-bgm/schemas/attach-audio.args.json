@@ -6,11 +6,23 @@
   "properties": {
     "assetId": { "type": "string", "description": "资产 id(来自 search-audio)" },
     "kind": { "type": "string", "enum": ["bgm", "sfx"], "description": "bgm 或 sfx" },
-    "resUrl": { "type": "string", "description": "COS 下载地址(来自 search-audio,勿编造)" },
     "name": { "type": "string", "description": "曲目名;sfx 建议用稳定短名(如 hit/score)" },
     "version": { "type": "string", "description": "版本号(来自 search-audio)" },
     "slug": { "type": "string", "description": "目标游戏 slug(必填):必须显式传入,不自动探测" },
-    "filename": { "type": "string", "description": "落盘文件名;缺省从 name/url 推导" }
+    "filename": { "type": "string", "description": "落盘文件名;缺省使用本地库文件名" },
+    "shaping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gainDb": { "type": "number", "minimum": -24, "maximum": 12 },
+        "pitchSemitones": { "type": "number", "minimum": -12, "maximum": 12 },
+        "highpassHz": { "type": "number", "minimum": 20, "maximum": 2000 },
+        "lowpassHz": { "type": "number", "minimum": 1000, "maximum": 20000 },
+        "eqLowDb": { "type": "number", "minimum": -12, "maximum": 12 },
+        "eqMidDb": { "type": "number", "minimum": -12, "maximum": 12 },
+        "eqHighDb": { "type": "number", "minimum": -12, "maximum": 12 }
+      }
+    }
   },
-  "required": ["assetId", "kind", "resUrl", "slug"]
+  "required": ["assetId", "kind", "slug"]
 }

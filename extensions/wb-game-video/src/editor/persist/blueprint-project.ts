@@ -55,6 +55,8 @@ export function metaFromDocument(scn: EditorScenarioDocument | GraphLibraryDocum
   if (scn.bgm !== undefined) m.bgm = scn.bgm
   const formulas = (scn as EditorScenarioDocument).formulas
   if (formulas !== undefined) m.formulas = formulas
+  const uiTree = (scn as GraphLibraryDocument).uiTree
+  if (uiTree !== undefined) m.uiTree = uiTree
   return m
 }
 

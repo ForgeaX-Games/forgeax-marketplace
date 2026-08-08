@@ -31,9 +31,7 @@ import type {
   Trigger,
 } from '../../runtime/schema/graph-schema'
 import type { NodeAction } from '../../runtime/schema/node-config-schema'
-import type { ChoiceOption } from '../../runtime/component-host/components/Choice'
-import type { FloatTextParams } from '../../runtime/component-host/components/FloatText'
-import type { QteCue } from '../../runtime/component-host/components/Qte'
+import type { ChoiceOption, FloatTextParams, QteCue } from './overlayMaterialTypes'
 import { componentHandles, getComponent } from '../../runtime/registry/component-registry'
 import {
   componentTypeLabel,
@@ -43,7 +41,6 @@ import {
   isPositionable,
 } from '../shell/editors'
 import { decodeEffectOperation, encodeEffectOperation } from '../shell/valueExprPick'
-import { INTERACTION_SKINS } from '../../runtime/component-host/components'
 import { FILTER_PRESETS, FX_PRESETS } from '../../runtime/fx/video-fx'
 import { initState } from '../../runtime/engine/engine-init'
 import type { OverlaySnap } from '../../runtime/engine/session'
@@ -393,56 +390,21 @@ export interface OutcomeView {
 export type QteOutcomeCandidate = OutcomeCandidate
 
 /**
- * 有完整专属皮肤实现的组件（真实交互动画 + 自己的固定出口目录）——不是靠某个分类字段
- * （"QTE"/"choice"）圈出来的一族，而是直接从 `INTERACTION_SKINS`（唯一登记点，见
- * `runtime/component-host/components/index.ts`）派生：新皮肤在那边注册一行，这里自动识别，不必再手工
- * 同步维护第二份组件 id 名单。
- * - 编辑器能直接渲染它们的真实皮肤做时间轴预览（而不是通用兜底展示）；
- * - 它们的出口目录（`events[]` + `defaultEvent`，见 `ChoiceParams`/`QteParams` 共用契约）不让
- *   编辑器自由增删/改文案，永远用自己皮肤登记的 `defaultEvents` 覆盖。
- * 默认清单（choice/skill/qte 裸组件，未在 `INTERACTION_SKINS` 登记）不在此列，可自由增删事件。
+ * 组件出口目录：新规格以 manifest.events 为准；无静态 events 时才看实例 `inputs.events`。
  */
-const RICH_SKIN_COMPONENTS = new Set(INTERACTION_SKINS.map((s) => s.id))
-
-/** 上述组件各自的固定出口目录，直接取自 `INTERACTION_SKINS` 登记的 `defaultEvents`。 */
-const RICH_SKIN_DEFAULT_EVENTS: Record<string, ChoiceOption[]> = Object.fromEntries(
-  INTERACTION_SKINS.map((s) => [s.id, s.defaultEvents as ChoiceOption[]]),
-)
-
-/** 当前组件是否样式锁定出口集合（默认清单可自由增删；这份白名单里的不可）。 */
-export function componentEventsLocked(component: string | undefined): boolean {
-  return RICH_SKIN_COMPONENTS.has(component ?? '')
+function componentEventCatalog(
+  componentId: string,
+  inputs: Record<string, unknown> = {},
+): Array<{ id: string; label?: string }> {
+  const plugin = getComponent(componentId)
+  if (plugin?.events?.length) return plugin.events.map((e) => ({ id: e.id, label: e.label }))
+  return componentHandles(componentId, inputs)
 }
 
-/**
- * 样式锁定出口：白名单组件强制用自己皮肤 defaults.events 覆盖实例上可被写脏的 events。
- * SSOT = inputs.events / inputs.defaultEvent。
- */
-export function applyStyleLockedEventParams(
-  inputs: Record<string, unknown>,
-  componentId?: string,
-): Record<string, unknown> {
-  const id = componentId ?? ''
-  const cleaned = inputs
-  if (!RICH_SKIN_COMPONENTS.has(id)) return cleaned
-  const locked = RICH_SKIN_DEFAULT_EVENTS[id]
-  if (!Array.isArray(locked) || locked.length === 0) return cleaned
-  const eventIds = new Set(locked.map((event) => event.id))
-  const requestedDefault = typeof cleaned.defaultEvent === 'string' ? cleaned.defaultEvent : ''
-  return {
-    ...cleaned,
-    events: locked.map((e) => ({ id: e.id, label: e.label, condition: e.condition })),
-    defaultEvent: eventIds.has(requestedDefault) ? requestedDefault : locked[0]!.id,
-  }
-}
-
-/** 某 QTE 元素当前样式声明的结算候选 = component manifest.events / componentHandles(skin, inputs)。 */
+/** 某 QTE 元素当前样式声明的结算候选 = component manifest.events。 */
 function qteOutcomeCandidates(el: OverlayChild | undefined): QteOutcomeCandidate[] {
   if (!el) return []
-  const skin = el.component
-  const inputs = applyStyleLockedEventParams(paramsOf(el), skin)
-  const outs = componentHandles(skin, inputs)
-  return outs.map((o: { id: string; label?: string }) => ({
+  return componentEventCatalog(el.component, paramsOf(el)).map((o) => ({
     handle: o.id,
     label: o.label ?? o.id,
   }))
@@ -911,7 +873,6 @@ export function qteSkinPreviewInteraction(
   const el = qteElement(scenario, node)
   if (!el) return null
   const component = el.component
-  if (!RICH_SKIN_COMPONENTS.has(component)) return null
   const inputs = paramsOf(el)
   const cues = cuesOf(el)
   if (!cues.length) return null
@@ -969,17 +930,16 @@ export function choiceSkinPreviewInteractions(
   for (const el of mountedChildrenOf(scenario, node)) {
     if (!hasOptionEventsInput(el.component)) continue
     const component = el.component
-    if (!RICH_SKIN_COMPONENTS.has(component)) continue
     if (playheadMs != null) {
       const start = el.window?.startMs ?? 0
       const end = el.window?.endMs ?? maxMs
       if (playheadMs < start || playheadMs > end) continue
     }
-    const locked = applyStyleLockedEventParams(paramsOf(el), component)
+    const inputs = paramsOf(el)
     out.push({
       elementId: el.id,
       component,
-      inputs: { ...locked, component },
+      inputs: { ...inputs, component },
     })
   }
   return out
@@ -1183,7 +1143,7 @@ export function collectMountItemsFromNode(scenario: GameScenario, node: GameNode
 // ── 写映射：挂载级编辑（挂载 / 移除 / 整体平移） ──────────────────────────────────
 /**
  * 挂载一张覆盖物到节点（「添加控件」入口）：目录缺失且给了 preset 时先写入固化原型，
- * 再 push 一份挂载（已挂载则原样返回）。等价 NodeInspector「＋挂载」的 onEnsureOverlay + push。
+ * 再 push 一份挂载（已挂载则原样返回）。候选须已在 live overlays 目录中。
  */
 export function mountOverlayGraph(
   scenario: GameScenario,
@@ -1211,12 +1171,12 @@ export function mountOverlayGraph(
  * 删除组件或整份挂载时用它级联清边与结算。
  */
 function eventHandlesOfChild(el: OverlayChild): string[] {
-  if (hasOptionEventsInput(el.component)) return optionsOf(el).map((o) => o.id)
-  if (hasCuePointsInput(el.component)) return qteOutcomeCandidates(el).map((c) => c.handle)
+  if (hasOptionEventsInput(el.component) || hasCuePointsInput(el.component)) {
+    return componentEventCatalog(el.component, paramsOf(el)).map((o) => o.id)
+  }
   const plugin = getComponent(el.component)
   if (!plugin) return []
-  const inputs = applyStyleLockedEventParams(paramsOf(el), el.component)
-  return componentHandles(el.component, inputs).map((h) => h.id)
+  return componentEventCatalog(el.component, paramsOf(el)).map((h) => h.id)
 }
 
 /**
@@ -1908,7 +1868,7 @@ export function addMaterialGraph(
     const optStart = at ? startMs : 0
     const optEnd = at ? endMs : dur
     // 默认选项固定使用新规格「應/默」组件。
-    const inputs = applyStyleLockedEventParams({}, 'InkYingMo')
+    const inputs = {}
     const el: OverlayChild = {
       id,
       component: 'InkYingMo',
@@ -1929,13 +1889,10 @@ export function addMaterialGraph(
   if (!plugin && !fromChild) return { scenario, selectKey: null }
   const id = newElementId()
   const defaults = defaultsForComponent(componentId) as Record<string, unknown>
-  // 克隆自方案实例时也要垫 defaults：方案目录里的组件可能是老数据（未经当前 preset 补全 inputs），
-  // 直接搬 fromChild.inputs 会把这份缺省原样克隆出去，每次"重新拖入"都还是同一份残缺 inputs。
-  // 叩击/防反/應默/技能条这类样式锁定皮肤还要过一遍 applyStyleLocked*Params——
-  // 通用 defaultsForComponent 只给得出无皮肤特征的泛用兜底（如"选项一"），
-  // 这两个函数才知道该皮肤自己的出口文案（應/默、斩/突/守…），克隆出来才跟方案目录里长得一样。
+  // 克隆自方案实例时也要垫 defaults：方案目录里的组件可能缺 inputs，
+  // 直接搬 fromChild.inputs 会把残缺原样克隆出去。
   const seeded = fromChild
-    ? applyStyleLockedEventParams({ ...defaults, ...(fromChild.inputs ?? {}) }, componentId)
+    ? { ...defaults, ...(fromChild.inputs ?? {}) }
     : { x: 0.5, y: 0.5, ...defaults }
   const el: OverlayChild = {
     id,
@@ -1998,10 +1955,7 @@ export function addQteCueGraph(
   const choice = choiceElement(scenario, node)
   const s0 = teardownInteractionScenario(scenario, node, { kind: 'choice', handlePrefixes: choice ? optionsOf(choice).map((o) => o.id) : [], childId: choice?.id })
   const id = newElementId()
-  const seeded = applyStyleLockedEventParams(
-    { qteKind: 'parry', passingHits: 1, cues: [cue], defaultEvent: 'fail' },
-    'InkKou',
-  )
+  const seeded = { cues: [cue] }
   const newEl: OverlayChild = {
     id,
     component: 'InkKou',
@@ -2069,15 +2023,14 @@ export function patchSelectedGraph(
       else cuePatch[k] = v
     }
     const cues = cuesOf(el).map((c) => (c.id === item.id ? { ...c, ...cuePatch } : c))
-    // 样式锁出口：写入时强制用皮肤 defaults.events，丢掉实例上的脏出口
-    const nextParams = applyStyleLockedEventParams({ ...(el.inputs ?? {}), ...elemPatch, cues }, el.component)
+    const nextParams = { ...(el.inputs ?? {}), ...elemPatch, cues }
     return patchOverlayChild(scenario, node.id, el.id, { inputs: nextParams })
   }
   if (item.kind === 'option') {
     const el = findElement(scenario, node, item.id)
     if (!el) return scenario
     const next = mergeParams(el, patch)
-    return patchOverlayChild(scenario, node.id, el.id, { inputs: applyStyleLockedEventParams(next, el.component) })
+    return patchOverlayChild(scenario, node.id, el.id, { inputs: next })
   }
   if (item.kind === 'component') {
     const el = findElement(scenario, node, item.id)
@@ -2157,24 +2110,16 @@ export type OptionBranchView = OutcomeView
 export function listOptionBranches(scenario: GameScenario, node: GameNode): OutcomeView[] {
   const el = choiceElement(scenario, node)
   if (!el) return []
-  const locked = applyStyleLockedEventParams(paramsOf(el), el.component)
-  const events = Array.isArray(locked.events) ? (locked.events as ChoiceOption[]) : optionsOf(el)
-  const candidates: OutcomeCandidate[] = events.map((o) => ({ handle: o.id, label: o.label ?? o.id }))
+  const candidates: OutcomeCandidate[] = componentEventCatalog(el.component, paramsOf(el)).map((o) => ({
+    handle: o.id,
+    label: o.label ?? o.id,
+  }))
   return candidates.map((c) => outcomeView(scenario, node, el.id, c.handle, c.label, candidates))
-}
-
-/** 打开检视器时把脏 events 写回样式锁定值（与 listOptionBranches / 预览对齐）。 */
-export function syncChoiceStyleLockedOptionsGraph(scenario: GameScenario, node: GameNode): GameScenario {
-  const el = choiceElement(scenario, node)
-  if (!el || !componentEventsLocked(el.component)) return scenario
-  const locked = applyStyleLockedEventParams(paramsOf(el), el.component)
-  if (JSON.stringify(locked.events) === JSON.stringify(paramsOf(el).events)) return scenario
-  return writeChoiceParamsWithEdgeCleanup(scenario, node, el, locked)
 }
 
 export function addOptionBranchGraph(scenario: GameScenario, node: GameNode): GameScenario {
   const el = choiceElement(scenario, node)
-  if (!el || componentEventsLocked(el.component)) return scenario
+  if (!el) return scenario
   const events = optionsOf(el)
   const id = `opt${events.length}-${Date.now().toString(36).slice(-3)}`
   const label = `选项 ${events.length + 1}`
@@ -2184,7 +2129,7 @@ export function addOptionBranchGraph(scenario: GameScenario, node: GameNode): Ga
 }
 export function updateOptionLabelGraph(scenario: GameScenario, node: GameNode, key: string, label: string): GameScenario {
   const el = choiceElement(scenario, node)
-  if (!el || componentEventsLocked(el.component)) return scenario
+  if (!el) return scenario
   const events = optionsOf(el).map((o) => (o.id === key ? { ...o, label } : o))
   return patchOverlayChild(scenario, node.id, el.id, { inputs: { ...(el.inputs ?? {}), events } })
 }
@@ -2219,23 +2164,17 @@ export function setOptionBranchSpawnGraph(
   return writeMountEventSpawn(scenario, node, el.id, key, spawn)
 }
 
-/**
- * 通用组件的事件结算列表（manifest.events / outputs；跳转·改数值·spawn 与选项/QTE 同内核）。
- * 挂在共享方案上的样式锁定皮肤（inkYingMo/battleSkillBar 等无静态 events 兜底的组件，见
- * `componentEventsLocked`）先过一遍 `applyStyleLockedEventParams`——跟 `qteOutcomeCandidates`/
- * `listOptionBranches` 保持同一套兜底口径，不再因为实例 `inputs.events` 缺失/脏就整块结算区消失。
- */
+/** 通用组件的事件结算列表（manifest.events；跳转·改数值·spawn 与选项/QTE 同内核）。 */
 export function listComponentEventViews(
   scenario: GameScenario,
   node: GameNode,
   el: OverlayChild | undefined,
 ): OutcomeView[] {
   if (!el) return []
-  const componentId = el.component
-  const plugin = getComponent(componentId)
-  const inputs = applyStyleLockedEventParams(paramsOf(el), componentId)
-  const fromPlugin = plugin ? componentHandles(componentId, inputs) : []
-  const candidates: OutcomeCandidate[] = fromPlugin.map((e) => ({ handle: e.id, label: e.label ?? e.id }))
+  const candidates: OutcomeCandidate[] = componentEventCatalog(el.component, paramsOf(el)).map((e) => ({
+    handle: e.id,
+    label: e.label ?? e.id,
+  }))
   if (!candidates.length) return []
   return candidates.map((c) => outcomeView(scenario, node, el.id, c.handle, c.label, candidates))
 }
@@ -2266,7 +2205,7 @@ export function setComponentEventSpawnGraph(
 }
 export function removeOptionBranchGraph(scenario: GameScenario, node: GameNode, key: string): GameScenario {
   const el = choiceElement(scenario, node)
-  if (!el || componentEventsLocked(el.component)) return scenario
+  if (!el) return scenario
   const events = optionsOf(el).filter((o) => o.id !== key)
   // 删到 0 个选项 = 拆整段选项交互（回落叙事 + 自动续连）。
   if (events.length === 0) {

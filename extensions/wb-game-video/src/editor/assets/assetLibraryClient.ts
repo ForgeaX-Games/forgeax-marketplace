@@ -254,6 +254,7 @@ export interface AssetLibraryController {
 const UNAVAILABLE_MESSAGE = '资产资源 API 尚未启用'
 
 export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): AssetLibraryController {
+  const hasGameId = gameId.trim().length > 0
   const cache = useProjectAssetCache((state) => state.byGame[gameId])
   const refreshCached = useProjectAssetCache((state) => state.refresh)
   const upsertCached = useProjectAssetCache((state) => state.upsert)
@@ -287,9 +288,10 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
       ?? (errors.length > 0 ? `部分资产加载失败；保留已缓存内容。${errors.join('；')}` : null)
 
   const refresh = useCallback(async () => {
-    if (!client) {
+    if (!client || !hasGameId) {
       setCapabilities(null)
       setCapabilitiesError(null)
+      setCapabilitiesLoading(false)
       return
     }
     setCapabilitiesLoading(true)
@@ -304,14 +306,14 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     } finally {
       setCapabilitiesLoading(false)
     }
-  }, [client, gameId, refreshCached])
+  }, [client, gameId, hasGameId, refreshCached])
 
   useEffect(() => {
     void refresh()
   }, [refresh])
 
   const upload = useCallback(async (kind: ManagedAssetKind, file: File) => {
-    if (!client || !supportedKinds.includes(kind)) {
+    if (!client || !hasGameId || !supportedKinds.includes(kind)) {
       return undefined
     }
     setUploading(kind)
@@ -326,10 +328,10 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     } finally {
       setUploading(null)
     }
-  }, [client, gameId, supportedKinds, upsertCached])
+  }, [client, gameId, hasGameId, supportedKinds, upsertCached])
 
   const rename = useCallback(async (id: string, name: string) => {
-    if (!client) {
+    if (!client || !hasGameId) {
       return undefined
     }
     const nextName = name.trim()
@@ -346,10 +348,10 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     } finally {
       setMutating(false)
     }
-  }, [client, gameId, upsertCached])
+  }, [client, gameId, hasGameId, upsertCached])
 
   const remove = useCallback(async (id: string) => {
-    if (!client) {
+    if (!client || !hasGameId) {
       return
     }
     const current = useProjectAssetCache.getState().byGame[gameId]
@@ -368,10 +370,10 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     } finally {
       setMutating(false)
     }
-  }, [client, gameId, removeCached, supportedKinds])
+  }, [client, gameId, hasGameId, removeCached, supportedKinds])
 
   const removeMany = useCallback(async (ids: readonly string[], onProgress?: (current: number, total: number) => void) => {
-    if (!client || ids.length === 0) return { completed: 0 }
+    if (!client || !hasGameId || ids.length === 0) return { completed: 0 }
     setMutating(true)
     setMutationError(null)
     const result = await deleteSequentially(ids, async (id) => {
@@ -384,7 +386,7 @@ export function useAssetLibrary(gameId: string, client?: AssetLibraryClient): As
     setMutating(false)
     if (result.error) setMutationError(result.error instanceof Error ? result.error.message : '资产操作失败')
     return { completed: result.completed, failedId: result.failedId }
-  }, [client, gameId, removeCached, supportedKinds])
+  }, [client, gameId, hasGameId, removeCached, supportedKinds])
 
   return {
     available: Boolean(client),

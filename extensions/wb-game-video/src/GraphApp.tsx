@@ -3,24 +3,47 @@
  * 都对应 GraphMain 的真实视图：蓝图/视频/资产/界面/规则/试玩。
  *
  * Page layout 把 sidebar/workspace 两个 Panel 放成左右布局，宿主给两个 iframe
- * 分别传 `?pane=left` / `?pane=center`。两个 iframe 通过 graphViewStore 与
- * BroadcastChannel 同步当前 tab；无 pane 时仍按侧栏 + 主区独立运行。
+ * 分别传 `?pane=left` / `?pane=center`。两个 iframe 通过 graphViewStore /
+ * uiNavSync / graphBlueprintSync 同步 tab、界面树与蓝图库意图。
+ * 无 pane 时仍按侧栏 + 主区独立运行。
+ *
+ * 进程内挂载（mount()）可经 props 显式传入 pane / gameId，避免改宿主 URL。
  */
-import { useEffect, useState } from 'react'
-import { BlueprintLibraryView } from './editor/shell/BlueprintLibraryView'
+import { useEffect, useMemo, useState } from 'react'
+import { GraphStudio } from './editor/shell/GraphStudio'
 import { GraphVideoView } from './editor/shell/GraphVideoView'
+import { VideoGenerationPage } from './editor/shell/VideoGenerationPage'
 import { GraphAssetView } from './editor/shell/GraphAssetView'
 import { GraphConfigView } from './editor/shell/GraphConfigView'
 import { GraphPlaySurface } from './editor/shell/GraphPlaySurface'
 import { NewSidebar } from './editor/shell/NewSidebar'
+import { DocumentLibraryView } from './editor/documents/DocumentLibraryView'
 import { useGraphScenario } from './editor/persist/graphScenarioStore'
 import { useGraphView, installGraphViewSync } from './editor/persist/graphViewStore'
-import { NODIA_DEMO } from './editor/demo/demo'
+import { installUiNavSync } from './editor/persist/uiNavSync'
+import { installGraphBlueprintSync } from './editor/persist/graphBlueprintSync'
+import { installAssetNavSync } from './editor/persist/assetNavStore'
+import { installDocumentNavSync } from './editor/persist/documentNavStore'
+import { installRuleSelectionSync } from './editor/persist/ruleSelectionStore'
+import { installVideoLibraryNavSync } from './editor/persist/videoLibraryNavStore'
 import { getGameSlug } from './editor/persist/gameScope'
 import { injectStyleOnce } from './styles/injectStyle'
 import { GameBootstrap } from './editor/bootstrap/GameBootstrap'
+import { useGlobalVideoGenerationTracker } from './editor/assets/generation/videoGenerationStore'
+import { useVideoAssets, type VideoAssetsController } from './editor/assets/useVideoAssets'
+import { installKinoVideoCacheSync } from './editor/assets/kinoVideoCacheStore'
+import { installTipSyncPolling } from './editor/persist/tipSyncPolling'
 
-function readPane(): 'left' | 'center' | null {
+export type GraphAppPane = 'left' | 'center' | null
+
+export type GraphAppProps = {
+  /** Host-supplied pane for in-process mounts; URL query wins only when omitted. */
+  pane?: GraphAppPane
+  /** Host-supplied game id (slug) for in-process mounts. */
+  gameId?: string
+}
+
+function readPane(): GraphAppPane {
   try {
     const pane = new URLSearchParams(location.search).get('pane')
     return pane === 'left' || pane === 'center' ? pane : null
@@ -29,15 +52,32 @@ function readPane(): 'left' | 'center' | null {
   }
 }
 
+function resolveGameSlug(explicit?: string): string {
+  return explicit ?? getGameSlug() ?? 'game-nodia-fighting'
+}
+
 /** 主区——当前 tab 对应的内容。center pane 的全部内容。 */
-function GraphMain(): JSX.Element {
+function GraphMain({ videoController }: { videoController?: VideoAssetsController } = {}): JSX.Element {
   const view = useGraphView((state) => state.view)
+  const setView = useGraphView((state) => state.setView)
+  const scenarioFromStore = useGraphScenario((s) => s.scn)
+  const loadEpoch = useGraphScenario((s) => s.loadEpoch)
+  const game = useGraphScenario((s) => s.game)
+  useGlobalVideoGenerationTracker(game)
+  // The host package is the only runtime source. The bundled demo remains
+  // available for explicit reset/template flows, never as a live project.
+  const scenario = useMemo(
+    () => scenarioFromStore(),
+    [loadEpoch, scenarioFromStore],
+  )
   return (
     <main className="ga-main">
-      {view === 'graph' && <BlueprintLibraryView />}
-      {view === 'video' && <GraphVideoView />}
+      {view === 'documents' && <DocumentLibraryView />}
+      {view === 'graph' && <GraphStudio scenario={scenario} />}
+      {view === 'video' && <GraphVideoView controller={videoController} />}
+      {view === 'video-generate' && <VideoGenerationPage onBack={() => setView('video')} />}
       {view === 'assets' && <GraphAssetView />}
-      {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '自定义界面' }]} scenario={NODIA_DEMO} />}
+      {view === 'ui' && <GraphConfigView title="界面" icon="🖥" tabs={[{ section: 'overlays', label: '自定义界面' }]} scenario={scenario} />}
       {view === 'rule' && (
         <GraphConfigView
           title="规则"
@@ -47,41 +87,100 @@ function GraphMain(): JSX.Element {
             { section: 'variables', label: '变量' },
             { section: 'formulas', label: '公式' },
           ]}
-          scenario={NODIA_DEMO}
+          scenario={scenario}
         />
       )}
-      {view === 'play' && <GraphPlaySurface scenario={NODIA_DEMO} />}
+      {view === 'play' && <GraphPlaySurface scenario={scenario} />}
     </main>
   )
 }
 
-export function GraphApp(): JSX.Element {
-  injectStyleOnce('graph-app-shell', CSS)
-  const [pane] = useState(readPane)
-  const ensureBoot = useGraphScenario((state) => state.ensureBoot)
-  const gameSlug = getGameSlug() ?? 'game-nodia-fighting'
-
-  useEffect(() => {
-    if (pane === null) return
-    return installGraphViewSync()
-  }, [pane])
-
-  if (pane === 'left') {
-    return <div className="ga-root is-pane-left"><NewSidebar /></div>
-  }
-  if (pane === 'center') {
-    return <div className="ga-root is-pane-center"><GameBootstrap slug={gameSlug} onBoot={() => ensureBoot(gameSlug, NODIA_DEMO)}><GraphMain /></GameBootstrap></div>
-  }
+function CombinedWorkspace({
+  gameId,
+  ensureBoot,
+}: {
+  gameId?: string
+  ensureBoot: (gameId: string) => Promise<void>
+}): JSX.Element {
+  const game = useGraphScenario((state) => state.game)
+  const videoController = useVideoAssets(game)
   return (
     <div className="ga-root">
-      <NewSidebar />
-      <GameBootstrap slug={gameSlug} onBoot={() => ensureBoot(gameSlug, NODIA_DEMO)}><GraphMain /></GameBootstrap>
+      <NewSidebar videoItems={videoController.items} />
+      <GameBootstrap gameId={gameId} onBoot={(bootGameId) => ensureBoot(bootGameId)}>
+        <GraphMain videoController={videoController} />
+      </GameBootstrap>
     </div>
   )
 }
 
+function LeftPane({ gameSlug }: { gameSlug: string }): JSX.Element {
+  const ensureBoot = useGraphScenario((state) => state.ensureBoot)
+
+  useEffect(() => {
+    // 侧栏不包 GameBootstrap（避免 package guide 顶掉导航），但仍需加载同一 persist。
+    void ensureBoot(gameSlug)
+  }, [ensureBoot, gameSlug])
+
+  return (
+    <div className="ga-root is-pane-left">
+      <NewSidebar uiNavMode="left" />
+    </div>
+  )
+}
+
+export function GraphApp({ pane: explicitPane, gameId }: GraphAppProps = {}): JSX.Element {
+  injectStyleOnce('graph-app-shell', CSS)
+  const [pane] = useState(() => (explicitPane === undefined ? readPane() : explicitPane))
+  const ensureBoot = useGraphScenario((state) => state.ensureBoot)
+  const booted = useGraphScenario((state) => state.booted)
+  const gameSlug = resolveGameSlug(gameId)
+
+  useEffect(() => {
+    if (pane === null) return
+    const disposeView = installGraphViewSync()
+    const disposeUiNav = installUiNavSync(pane)
+    const disposeBp = installGraphBlueprintSync()
+    const disposeAssetNav = installAssetNavSync()
+    const disposeDocumentNav = installDocumentNavSync()
+    const disposeVideoLibraryNav = installVideoLibraryNavSync()
+    const disposeRuleSelection = installRuleSelectionSync()
+    return () => {
+      disposeRuleSelection()
+      disposeVideoLibraryNav()
+      disposeDocumentNav()
+      disposeAssetNav()
+      disposeBp()
+      disposeUiNav()
+      disposeView()
+    }
+  }, [pane])
+
+  useEffect(() => installKinoVideoCacheSync(), [])
+
+  useEffect(() => {
+    if (!booted) return
+    return installTipSyncPolling()
+  }, [booted])
+
+  if (pane === 'left') {
+    return <LeftPane gameSlug={gameSlug} />
+  }
+  if (pane === 'center') {
+    return (
+      <div className="ga-root is-pane-center">
+        <GameBootstrap gameId={gameId} onBoot={(bootGameId) => ensureBoot(bootGameId)}>
+          <GraphMain />
+        </GameBootstrap>
+      </div>
+    )
+  }
+  return <CombinedWorkspace gameId={gameId} ensureBoot={ensureBoot} />
+}
+
 const CSS = `
 .ga-root { position: fixed; inset: 0; display: flex; background: var(--color-background-base, #0e0c09); color: var(--color-text-primary, #f6f1e9); }
+/* pane 嵌入态 / 宿主进程内挂载：填满宿主容器，不用 fixed 视口 */
 .ga-root.is-pane-left, .ga-root.is-pane-center { position: absolute; inset: 0; }
 .ks-app-host .ga-root { position: absolute; inset: 0; }
 .ga-root.is-pane-left .ns-sidebar { width: 100%; min-width: 0; }

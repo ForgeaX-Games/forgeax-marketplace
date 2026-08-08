@@ -8,7 +8,7 @@
  * 公式引用仍以内嵌 `pick` 形式贴在数值字段旁，便于在任意图结构里跟随复制/删除；
  * 该结构是编辑器私有的扩展形状，runtime 不声明也不读取它。
  */
-import type { Entity, GameScenario, ValueTerm, Variable } from '../../runtime/schema/graph-schema'
+import type { Entity, GameScenario, UiTree, ValueTerm, Variable } from '../../runtime/schema/graph-schema'
 import { parseExpr, serializeExpr, type Node as RuntimeExprNode } from '../../runtime/engine/expr'
 
 export type EditorValueTerm = ValueTerm & { id?: string }
@@ -30,6 +30,12 @@ export type FormulaAstNode =
   | { t: 'call'; id: string; name: string; args: FormulaAstNode[] }
   /** 留空位：应用公式时按 holeId 绑定具体值（实体属性 / 数值 / 变量）。 */
   | { t: 'hole'; id: string; holeId: string; kind: FormulaHoleKind; label?: string; suggestAttr?: string }
+
+export interface FormulaParseFailureSnapshot {
+  readonly kind: 'wb-game-video.formula-parse-failure.v1'
+  readonly invalidDraft: string
+  readonly parserDiagnostic: string
+}
 
 export interface Formula {
   id: string
@@ -55,6 +61,7 @@ export interface FormulaPick {
 /** 存储/草稿文档：公式与 entities / variables 同级；运行时 `GameScenario` 不声明它。 */
 export interface EditorScenarioDocument extends GameScenario {
   formulas?: Record<string, Formula>
+  uiTree?: UiTree
 }
 
 // ── id 分配（React key + 空位寻址；同一棵树内唯一即可）────────────────────────────
@@ -389,7 +396,7 @@ export function toEditorScenarioDocument(raw: GameScenario | null | undefined): 
   }
 }
 
-/** 执行前递归移除编辑器 sidecar，确保 runtime 只接收表达式源码。 */
+/** 执行前递归移除编辑器 sidecar，确保 runtime 只接收表达式源码与 Overlay SSOT。 */
 export function toRuntimeScenario<T extends GameScenario>(scenario: T): GameScenario {
   function strip(value: unknown, root = false): unknown {
     if (Array.isArray(value)) return value.map((item) => strip(item))
@@ -397,7 +404,7 @@ export function toRuntimeScenario<T extends GameScenario>(scenario: T): GameScen
     const source = value as Record<string, unknown>
     const out: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(source)) {
-      if (root && key === 'formulas') continue
+      if (root && (key === 'formulas' || key === 'uiTree')) continue
       // `pick` 是数值表达式作者态；不按字段名全局删除，避免误伤组件的同名 input。
       if (key === 'pick' && typeof source.expr === 'string') continue
       out[key] = strip(child)

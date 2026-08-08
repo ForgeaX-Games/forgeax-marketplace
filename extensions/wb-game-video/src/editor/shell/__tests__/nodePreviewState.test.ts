@@ -72,7 +72,7 @@ describe('projectNodePreviewState', () => {
           overlays: {
             float: {
               id: 'float',
-              children: [{ id: 'rage', component: 'DamageFloatText', inputs: { value: 0 } }],
+              children: [{ id: 'rage', component: 'test.float', inputs: { value: 0 } }],
             },
           },
         },
@@ -83,7 +83,7 @@ describe('projectNodePreviewState', () => {
     expect(projector.project(299)).toEqual([])
     expect(projector.project(300)).toMatchObject([{
       startedAtMs: 300,
-      mount: { children: [{ component: 'DamageFloatText', inputs: { value: 80 } }] },
+      mount: { children: [{ component: 'test.float', inputs: { value: 80 } }] },
     }])
     expect(projector.project(1499)).toHaveLength(1)
     expect(projector.project(1500)).toEqual([])
@@ -102,7 +102,7 @@ describe('projectNodePreviewState', () => {
       { nodes: [current], edges: [] },
       {
         entities: { bull: { id: 'bull', attrs: { rage: 10 } } },
-        ui: { overlays: { rage: { id: 'rage', children: [{ id: 'value', component: 'DamageFloatText', trigger: { when: 'enter' } }] } } },
+        ui: { overlays: { rage: { id: 'rage', children: [{ id: 'value', component: 'test.float', trigger: { when: 'enter' } }] } } },
       },
     )
     const projector = new NodePreviewRuntimeProjector(scenario, current)

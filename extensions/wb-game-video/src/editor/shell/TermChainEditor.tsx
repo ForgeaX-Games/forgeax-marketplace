@@ -11,6 +11,7 @@ import { useState, type CSSProperties, type JSX } from 'react'
 import type { Entity, ValueTermOp, Variable } from '../../runtime/schema/graph-schema'
 import type { EditorValueTerm as ValueTerm } from '../persist/formula-authoring'
 import { OpSymbolButtons } from './OpSymbolButtons'
+import { NiSelect } from './ni-ui'
 import {
   VALUE_TERM_OP_LABEL,
   allocTermId,
@@ -162,18 +163,18 @@ export function TermChainEditor({
               options={ops.map((o) => ({ key: o, symbol: VALUE_TERM_OP_LABEL[o], active: o === op }))}
               onPick={(key) => patchTerm(i, { op: key as ValueTermOp })}
             />
-            <select
+            <NiSelect
               value={t.source}
-              onChange={(e) => patchTerm(i, { source: e.target.value as ValueTerm['source'] })}
-              aria-label="对象类型"
+              onChange={(source) => patchTerm(i, { source: source as ValueTerm['source'] })}
+              ariaLabel="对象类型"
             >
               <option value="entity" disabled={entityOpts.length === 0}>实体</option>
               <option value="var" disabled={varOpts.length === 0}>变量</option>
               <option value="const">常数</option>
-            </select>
+            </NiSelect>
             {t.source === 'entity' ? (
               <>
-                <select value={t.refId} onChange={(e) => patchTerm(i, { refId: e.target.value })} aria-label="实体" style={{ flex: 1, minWidth: 100 }}>
+                <NiSelect value={t.refId} onChange={(refId) => patchTerm(i, { refId })} ariaLabel="实体" style={{ flex: 1, minWidth: 100 }}>
                   {allowHoleEntity ? (
                     <option value="">留空（应用时选择）</option>
                   ) : (
@@ -182,7 +183,7 @@ export function TermChainEditor({
                   {entityOpts.map((o) => (
                     <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
-                </select>
+                </NiSelect>
                 {hole ? (
                   <input
                     value={t.attr ?? ''}
@@ -192,21 +193,21 @@ export function TermChainEditor({
                     style={{ flex: 1, minWidth: 90 }}
                   />
                 ) : (
-                  <select value={t.attr ?? ''} onChange={(e) => patchTerm(i, { attr: e.target.value })} aria-label="属性" style={{ flex: 1, minWidth: 90 }}>
+                  <NiSelect value={t.attr ?? ''} onChange={(attr) => patchTerm(i, { attr })} ariaLabel="属性" style={{ flex: 1, minWidth: 90 }}>
                     <option value="" disabled>选择属性…</option>
                     {attrs.map((a) => (
                       <option key={a.id} value={a.id}>{a.label}</option>
                     ))}
-                  </select>
+                  </NiSelect>
                 )}
               </>
             ) : t.source === 'var' ? (
-              <select value={t.refId} onChange={(e) => patchTerm(i, { refId: e.target.value })} aria-label="变量" style={{ flex: 1, minWidth: 100 }}>
+              <NiSelect value={t.refId} onChange={(refId) => patchTerm(i, { refId })} ariaLabel="变量" style={{ flex: 1, minWidth: 100 }}>
                 <option value="" disabled>选择变量…</option>
                 {varOpts.map((o) => (
                   <option key={o.id} value={o.id}>{o.label}</option>
                 ))}
-              </select>
+              </NiSelect>
             ) : (
               <LooseNumberInput
                 value={t.constValue ?? 0}

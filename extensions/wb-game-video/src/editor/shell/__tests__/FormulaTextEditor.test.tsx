@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { previewFormula } from '../../persist/formula-authoring'
 import { FormulaTextEditor } from '../FormulaTextEditor'
@@ -7,7 +7,7 @@ import { FormulaTextEditor } from '../FormulaTextEditor'
 afterEach(cleanup)
 
 describe('FormulaTextEditor hole guidance', () => {
-  it('highlights holes in both the example and multiline editor with the same tag style', () => {
+  it('highlights holes in the multiline editor without rendering a permanent example', () => {
     const { container } = render(
       <FormulaTextEditor
         ast={{
@@ -21,18 +21,14 @@ describe('FormulaTextEditor hole guidance', () => {
       />,
     )
 
-    const example = screen.getByRole('region', { name: '公式示例' })
-    expect(within(example).getByText('目标：')).toBeTruthy()
-    expect(within(example).getByText(/攻击力乘以技能倍率/)).toBeTruthy()
-    expect(example.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(3)
-
+    expect(screen.queryByRole('region', { name: '公式示例' })).toBeNull()
     fireEvent.change(screen.getByRole('textbox', { name: '公式表达式' }), {
       target: { value: '?攻击力 +\n?加成' },
     })
     const highlight = container.querySelector('.gc-fx-highlight')
     expect(highlight?.textContent).toBe('?攻击力 +\n?加成')
     expect(highlight?.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(2)
-    expect(container.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(5)
+    expect(container.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(2)
   })
 })
 
@@ -80,6 +76,38 @@ describe('FormulaTextEditor input state', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ t: 'num', v: 25 }))
   })
 
+  it('reports parsing errors without duplicating the short error or parameter count', async () => {
+    const onChange = vi.fn()
+    const onParseFailureChange = vi.fn()
+    render(
+      <FormulaTextEditor
+        ast={{ t: 'hole', id: 'h-atk', holeId: '攻击力', kind: 'number', label: '攻击力' }}
+        onParseFailureChange={onParseFailureChange}
+        onChange={onChange}
+      />,
+    )
+
+    expect(screen.queryByText(/参数 1/)).toBeNull()
+    expect(screen.getByText('试算')).toBeTruthy()
+
+    const input = screen.getByRole('textbox', { name: '公式表达式' })
+    fireEvent.change(input, { target: { value: 'max(' } })
+    await waitFor(() => expect(onParseFailureChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'wb-game-video.formula-parse-failure.v1',
+      invalidDraft: 'max(',
+      parserDiagnostic: expect.any(String),
+    })))
+    expect(input).toHaveClass('is-err')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.queryByText('无法解析')).toBeNull()
+    expect(screen.queryByText(/^错误详情：/)).toBeNull()
+    expect(screen.getByText(/可用：数字/)).toBeTruthy()
+    expect(onChange).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: 'max(1, 2)' } })
+    await waitFor(() => expect(onParseFailureChange).toHaveBeenLastCalledWith(null))
+  })
+
   it('inserts a tool fragment at the saved selection after the toolbar takes focus', () => {
     render(
       <FormulaTextEditor
@@ -95,7 +123,7 @@ describe('FormulaTextEditor input state', () => {
     )
 
     const input = screen.getByRole('textbox', { name: '公式表达式' }) as HTMLTextAreaElement
-    const insertHole = screen.getByRole('button', { name: '?参数' })
+    const insertHole = screen.getByRole('button', { name: '插入参数' })
     fireEvent.focus(input)
     input.setSelectionRange(4, 5)
     fireEvent.select(input)
@@ -121,6 +149,91 @@ describe('FormulaTextEditor authoring syntax', () => {
       attrs: { defense: 50 },
     },
   }
+
+  it('uses common dropdowns for entity, variable, and function insertion', () => {
+    const variables = {
+      combo: { id: 'combo', name: '连击', initial: 1 },
+    }
+    const { container } = render(
+      <FormulaTextEditor
+        ast={{ t: 'num', id: 'n0', v: 0 }}
+        empty
+        entities={entities}
+        variables={variables}
+        onChange={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByRole('textbox', { name: '公式表达式' }) as HTMLTextAreaElement
+    const entity = screen.getByRole('combobox', { name: '插入实体属性' })
+    const variable = screen.getByRole('combobox', { name: '插入变量' })
+    const fn = screen.getByRole('combobox', { name: '插入函数' })
+    const parameter = screen.getByRole('button', { name: '插入参数' })
+    expect(entity).toHaveTextContent('+实体属性')
+    expect(variable).toHaveTextContent('+变量')
+    expect(fn).toHaveTextContent('+函数')
+    expect(entity.querySelector('.gc-cascade-trigger-add')).toHaveStyle({ width: '18px', height: '18px' })
+    expect(variable.querySelector('.gc-cascade-trigger-add')).toHaveStyle({ width: '18px', height: '18px' })
+    expect(fn.querySelector('.gc-cascade-trigger-add')).toHaveStyle({ width: '18px', height: '18px' })
+    expect(parameter.querySelector('.gc-fx-tool-add')).toHaveClass('gc-fx-tool-add')
+    expect(parameter.querySelector('.gc-fx-tool-label')).toHaveTextContent('参数')
+    expect(parameter).toHaveTextContent('+参数')
+    expect(container.querySelector('.gc-fx-tools select')).toBeNull()
+
+    fireEvent.click(entity)
+    fireEvent.click(screen.getByRole('menuitem', { name: /玩家/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'attack' }))
+    expect(input.value).toBe('entity.ent-player.attr.attack')
+
+    fireEvent.click(variable)
+    fireEvent.click(screen.getByRole('menuitem', { name: /连击/ }))
+    expect(input.value).toBe('entity.ent-player.attr.attackvar.combo')
+
+    fireEvent.click(fn)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'max()' }))
+    expect(input.value).toBe('entity.ent-player.attr.attackvar.combomax()')
+
+    fireEvent.click(parameter)
+    expect(input.value).toBe('entity.ent-player.attr.attackvar.combomax()?参数')
+  })
+
+  it('keeps empty catalog actions visible and disabled', () => {
+    render(
+      <FormulaTextEditor
+        ast={{ t: 'num', id: 'n0', v: 0 }}
+        empty
+        onChange={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('combobox', { name: '插入实体属性' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '插入变量' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '插入函数' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '插入参数' })).toBeEnabled()
+  })
+
+  it('does not commit while browsing a portal menu and commits once on outside click', () => {
+    const onChange = vi.fn()
+    render(
+      <>
+        <FormulaTextEditor
+          ast={{ t: 'num', id: 'n0', v: 0 }}
+          entities={entities}
+          onChange={onChange}
+        />
+        <button type="button">外部</button>
+      </>,
+    )
+
+    const input = screen.getByRole('textbox', { name: '公式表达式' })
+    const entity = screen.getByRole('combobox', { name: '插入实体属性' })
+    fireEvent.change(input, { target: { value: '1 + 2' } })
+    fireEvent.blur(input, { relatedTarget: entity })
+    fireEvent.click(entity)
+    expect(onChange).not.toHaveBeenCalled()
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: '外部' }))
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
 
   it('commits no-space subtraction using the current entity catalog', () => {
     const onChange = vi.fn()

@@ -1,22 +1,14 @@
 /**
- * 内置「通用样式」方案 —— 两份自由 overlay，装齐现有全部组件预设，做「组件画廊 / 预设仓库」。
+ * 界面方案目录辅助：`base:<组件id>` 单组件方案 + 「+ 组件」预设模板。
  *
- * 与普通 overlay 同一套数据格式（Overlay + OverlayChild），只是 id/标题固定、boot 时保证存在，
- * 免得后续因缺失某个皮肤预设被带偏。静态 = 常驻展示类；动态 = 交互/动画类。叩击/防反/應默/技能条
- * 各自是独立注册的顶层组件 id（`OverlayChild.component` 直接就是最终渲染的组件，无 inputs.component
- * 覆盖层）；各皮肤预设由对应 tsx 导出，本文件组装引用。
- *
- * 幂等：boot 只在缺失时补，用户可自由改内部 children；删掉整份下次 boot 会补回。
+ * 方案清单一律从 live `ui.overlays` 派生；boot 只保证 `base:*` 存在。
  */
 import type { Overlay, OverlayChild } from '../../runtime/schema/graph-schema'
-import newComponents from '../../runtime/component-host/components/new'
+import newComponents from '../../runtime/component-host/components'
 import { STAGE_FILL_LAYOUT } from '../../runtime/schema/layout'
 
 /** 基础覆盖物 方案 id 前缀：`base:<组件id>`，每份仅含该单组件、锁定不可增删。 */
 export const BASE_HUD_PREFIX = 'base:'
-
-export const SCHEME_STATIC_ID = 'scheme-static'
-export const SCHEME_DYNAMIC_ID = 'scheme-dynamic'
 
 /** 新规格组件均从外层 Layout 取得舞台盒，不再从 inputs 猜位置或尺寸。 */
 function makeNewComponentPreset(component: string, id: string): OverlayChild {
@@ -32,60 +24,16 @@ function makeNewComponentPreset(component: string, id: string): OverlayChild {
   }
 }
 
-/** 静态组件方案：常驻展示（HUD 血条 / 字幕）。 */
-const STATIC_SCHEME: Overlay = {
-  id: SCHEME_STATIC_ID,
-  title: '静态组件方案',
-  children: [
-    makeNewComponentPreset('BattlePlayerHpBar', 'hp-player'),
-    makeNewComponentPreset('BattleEnemyHpBar', 'hp-boss'),
-    makeNewComponentPreset('Dialogue', 'line'),
-  ],
-}
-
-/** 动态组件方案：交互 / 动画（QTE 叩击·防反 / 應默 / 技能条 / 飘字）。 */
-const DYNAMIC_SCHEME: Overlay = {
-  id: SCHEME_DYNAMIC_ID,
-  title: '动态组件方案',
-  children: [
-    makeNewComponentPreset('InkKou', 'qte-kou'),
-    makeNewComponentPreset('BattleParry', 'qte-parry'),
-    makeNewComponentPreset('InkYingMo', 'choice-yingmo'),
-    makeNewComponentPreset('BattleSkill', 'choice-skills'),
-    makeNewComponentPreset('TextOption', 'text-option'),
-    makeNewComponentPreset('StatusNotice', 'status-notice'),
-    makeNewComponentPreset('DamageFloatText', 'damage-float'),
-    makeNewComponentPreset('GainFloatText', 'gain-float'),
-  ],
-}
-
-export const BUILTIN_SCHEMES: Overlay[] = [STATIC_SCHEME, DYNAMIC_SCHEME]
-
-/**
- * 界面方案列表排序：内置方案（静态/动态）固定置顶，其余（项目自建 + demo 具名方案）按原有相对
- * 顺序跟后——`ensureBuiltinSchemes` 只在缺失时把内置方案 append 到 overlays 目录末尾（对象 key
- * 插入顺序），若不重排，UI 各处方案下拉/列表会看到内置方案沉底。凡是展示「界面方案」清单的地方
- * （NodeInspector 挂载/默认样式下拉、ScenarioInspector 目录列表…）都应过这层排序，保持同一顺序感。
- */
-export function sortSchemeIds(ids: string[]): string[] {
-  const builtinIds = BUILTIN_SCHEMES.map((s) => s.id)
-  const builtin = builtinIds.filter((id) => ids.includes(id))
-  const rest = ids.filter((id) => !builtinIds.includes(id))
-  return [...builtin, ...rest]
-}
-
 /**
  * 界面 tab「自定义覆盖物」组 = 用户自由方案：排除 `node:*`（时间轴内容容器）与
- * `base:*`（基础覆盖物单组件方案），再走 `sortSchemeIds` 把内置方案置顶。
+ * `base:*`（基础覆盖物单组件方案）。
  */
 export function listCustomSchemeIds(overlays: Record<string, Overlay> | undefined): string[] {
-  return sortSchemeIds(
-    Object.keys(overlays ?? {}).filter((id) => !id.startsWith('node:') && !id.startsWith(BASE_HUD_PREFIX)),
-  )
+  return Object.keys(overlays ?? {}).filter((id) => !id.startsWith('node:') && !id.startsWith(BASE_HUD_PREFIX))
 }
 
 /**
- * 界面 tab 的「自定义覆盖物」列表：沿用通用排序，但让 overlays 中最先写入的自定义方案置顶。
+ * 界面 tab 的「自定义覆盖物」列表：让 overlays 中最先写入的自定义方案置顶。
  * 新建方案会 prepend 到 overlays，因此它在后续重渲染和重新载入后仍保持列表第一项。
  */
 export function listInterfaceCustomSchemeIds(overlays: Record<string, Overlay> | undefined): string[] {
@@ -137,12 +85,7 @@ export const NEW_COMPONENT_PRESETS: Array<{
   { id: 'BattleEnemyHpBar', label: 'HUD · 敌方血条', make: (id) => makeNewComponentPreset('BattleEnemyHpBar', id) },
 ]
 
-/**
- * 保证基础覆盖物存在于 overlays 目录。
- *
- * `BUILTIN_SCHEMES` 与 Nodia 方案仍作为可手动挂载的预设目录存在，但不自动写入项目数据。
- * 自定义覆盖物只有作者明确创建或挂载后才进入 `ui.overlays`。
- */
+/** 保证基础覆盖物存在于 overlays 目录（缺失才补）。 */
 export function ensureBuiltinSchemes(
   overlays: Record<string, Overlay> | undefined,
 ): Record<string, Overlay> {
