@@ -2,16 +2,15 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ScenarioInspector, type ScenarioMeta } from '../ScenarioInspector'
 
-function renderInspector(value: ScenarioMeta, section: 'variables' | 'entities' | 'formulas', onRename = vi.fn(() => ({ ok: true as const }))) {
+function renderInspector(value: ScenarioMeta, section: 'variables' | 'entities' | 'formulas') {
   const onChange = vi.fn()
-  render(<ScenarioInspector value={value} section={section} onChange={onChange} onRenameId={onRename} />)
-  return { onChange, onRename }
+  render(<ScenarioInspector value={value} section={section} onChange={onChange} />)
+  return { onChange }
 }
 
 describe('ScenarioInspector rules editing', () => {
-  it('keeps the shared variable toolbar sticky and blocks duplicate IDs', () => {
-    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
-    const { onRename } = renderInspector({
+  it('keeps the shared variable toolbar sticky and makes IDs read-only', () => {
+    renderInspector({
       variables: {
         health: { id: 'health', initial: 10 },
         rage: { id: 'rage', initial: 0 },
@@ -20,13 +19,8 @@ describe('ScenarioInspector rules editing', () => {
     const toolbar = screen.getByRole('button', { name: '＋ 新建变量' }).closest('.gc-rule-toolbar')
     expect(toolbar).toHaveStyle({ position: 'sticky', top: '0px' })
     const idInput = screen.getAllByLabelText('变量 ID')[0]!
-    fireEvent.change(idInput, { target: { value: 'rage' } })
-    expect(idInput).toHaveAttribute('aria-invalid', 'true')
-    fireEvent.blur(idInput)
-    expect(onRename).not.toHaveBeenCalled()
-    expect(alert).toHaveBeenCalledWith('变量 ID 无法修改：ID 已存在')
+    expect(idInput).toHaveAttribute('readonly')
     expect(idInput).toHaveValue('health')
-    alert.mockRestore()
   })
 
   it('allows a numeric attribute value to be cleared before blur, then restores zero', () => {

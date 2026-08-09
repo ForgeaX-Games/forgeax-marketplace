@@ -4,8 +4,10 @@
  */
 import type { CSSProperties } from 'react'
 
-// 字体与皮肤组件同层自带；随 runtime 一起发，不依赖 editor 注入。
-import brushFontUrl from './HYShangWei.woff2'
+// Keep the font as a package asset instead of embedding 6MB into every
+// browser bundle. tsup copies it to dist/, and Vite can rewrite this static
+// URL when an Arrival build consumes the published package.
+const brushFontUrl = new URL('./HYShangWei.woff2', import.meta.url).href
 
 const injected = new Map<string, HTMLStyleElement>()
 

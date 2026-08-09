@@ -13,6 +13,12 @@ initLocaleSync()
 const root = document.getElementById('root')
 if (!root) throw new Error('Root element #root not found')
 
+// The iframe entry owns this document; in-process mount() deliberately does
+// not apply these document-level styles to its host.
+document.documentElement.classList.add('ks-app-standalone')
+document.body.classList.add('ks-app-standalone')
+root.classList.add('ks-app-host')
+
 /**
  * 剪贴板兜底：在缺 clipboard-write 权限的 iframe / 非安全上下文里，
  * navigator.clipboard 不可用，退回临时 textarea + execCommand('copy')。

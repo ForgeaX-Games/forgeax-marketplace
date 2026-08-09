@@ -70,7 +70,10 @@ const panelStyles = `
   }
 
   .cpp-panel {
-    flex: 0 0 clamp(360px, 36vw, 480px);
+    /* 外部 slot（inspectorEl）是 flex column：用 flex:1 沿主轴拉满高度，否则 height:100%
+       在 flex 子项上不可靠、会塌成内容高。宽度仍由下面的 width 钳制；
+       内联形态（.ose-root > .cpp-panel）由其 !important 规则覆盖，不受影响。 */
+    flex: 1 1 auto;
     width: clamp(360px, 36vw, 480px);
     color: #fff;
   }

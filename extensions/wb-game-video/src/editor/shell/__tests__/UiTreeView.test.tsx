@@ -62,6 +62,19 @@ describe('UiTreeView', () => {
     expect(props.onSelect).not.toHaveBeenCalled()
   })
 
+  it('clicking a folder row toggles expand/collapse without selecting (main-tree parity)', () => {
+    // 与左栏主树 activateRow 对齐：文件夹行点击只展开/收起，不选中、不切页。
+    const props = setup()
+    expect(screen.queryByText('首领战')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '战斗界面 文件夹' }))
+    expect(screen.getByText('首领战')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '战斗界面 文件夹' }))
+    expect(screen.queryByText('首领战')).toBeNull()
+    expect(props.onSelect).not.toHaveBeenCalled()
+  })
+
   it('selects a scheme with both tree and overlay identity', () => {
     const props = setup()
     fireEvent.click(screen.getByRole('button', { name: '展开战斗界面' }))
@@ -110,7 +123,7 @@ describe('UiTreeView', () => {
 
     fireEvent.click(screen.getByLabelText('删除 战斗界面'))
     expect(screen.getByRole('dialog', { name: '删除战斗界面' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
     expect(props.onDelete).toHaveBeenCalledWith(expect.objectContaining({ id: 'folder-root' }))
   })
 

@@ -7,12 +7,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useT } from '../../i18n'
-import assetLibraryIcon from '../../assets/sidebar-asset-library.svg?url'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { countOverlayReferences } from '../../graph/edit/overlay-edit'
 import { useGraphScenario } from '../persist/graphScenarioStore'
 import { BASIC_UI_FOLDER_ID, ensureUiTree } from '../persist/ui-tree'
-import { sendUiNavCommand, useUiNavMirror } from '../persist/uiNavSync'
+import { broadcastUiTreeIntent } from '../persist/graphUiTreeSync'
 import { useUiSelection } from '../persist/uiSelectionStore'
 import { useGraphView, type GraphView } from '../persist/graphViewStore'
 import { useAssetNav } from '../persist/assetNavStore'
@@ -70,6 +69,25 @@ export interface NavNode {
 }
 
 const EMPTY_VIDEO_LIBRARY_METADATA: VideoLibraryMetadata = { tagsByEntryId: {}, folderNames: [] }
+
+const AssetLibraryIcon = (
+  <svg
+    aria-hidden
+    width="12"
+    height="12"
+    viewBox="0 0 12 12"
+    fill="none"
+    preserveAspectRatio="none"
+    overflow="visible"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      id="Vector"
+      d="M1.212 12C0.876 12 0.59 11.882 0.354 11.646C0.118 11.41 0 11.1243 0 10.7888V2.6145C0 2.4685 0.02325 2.331 0.06975 2.202C0.11625 2.073 0.18625 1.95425 0.27975 1.84575L1.44825 0.44325C1.55675 0.29675 1.6925 0.18625 1.8555 0.11175C2.0185 0.0372501 2.19325 0 2.37975 0H9.59175C9.77775 0 9.95475 0.0372501 10.1227 0.11175C10.2907 0.18625 10.429 0.2965 10.5375 0.4425L11.7203 1.875C11.8138 1.9835 11.8837 2.10475 11.9302 2.23875C11.9767 2.37225 12 2.51225 12 2.65875V10.7888C12 11.1238 11.882 11.4095 11.646 11.646C11.41 11.882 11.1243 12 10.7888 12H1.212ZM1.035 2.106H10.95L9.9525 0.9075C9.904 0.8595 9.8485 0.82125 9.786 0.79275C9.7235 0.76425 9.6585 0.75 9.591 0.75H2.394C2.327 0.75 2.262 0.7645 2.199 0.7935C2.136 0.8225 2.081 0.861 2.034 0.909L1.035 2.106ZM8.24925 2.856H3.75V6.9585C3.75 7.1885 3.84475 7.3635 4.03425 7.4835C4.22375 7.6035 4.4195 7.6105 4.6215 7.5045L6 6.822L7.37925 7.5045C7.58075 7.61 7.77625 7.603 7.96575 7.4835C8.15525 7.3635 8.25 7.1885 8.25 6.9585L8.24925 2.856Z"
+      fill="currentColor"
+    />
+  </svg>
+)
 
 const SIDEBAR_ASSET_ROOTS: ReadonlyArray<{
   kind: AssetLibraryRootKind
@@ -363,7 +381,7 @@ const NEW_SIDEBAR_CSS = `
   color: var(--ns-text-80);
 }
 button.ns-leading { cursor: pointer; }
-.ns-leading img { display: block; width: 12px; height: 12px; }
+.ns-leading svg { display: block; width: 12px; height: 12px; }
 .ns-leading.is-add { width: 18px; height: 18px; }
 .ns-leading.is-add svg { display: block; width: 14px; height: 14px; }
 .ns-label {
@@ -820,7 +838,7 @@ function NsRow({
               onToggle(node.id)
             }}
           >
-            <img src={assetLibraryIcon} alt="" />
+            {AssetLibraryIcon}
           </button>
         ) : null}
         {node.leadingIcon === 'add-folder' ? (
@@ -955,26 +973,27 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
   const activeBlueprintId = useGraphScenario((s) => s.activeBlueprintId)
   const selectBlueprint = useGraphScenario((s) => s.selectBlueprint)
   const ruleMeta = useGraphScenario((s) => s.meta)
-  const meta = useGraphScenario((s) => (uiNavMode === 'left' ? null : s.meta))
-  const remoteSnapshot = useUiNavMirror((s) => s.snapshot)
+  // 与蓝图同构：left/center/standalone 都直接读本地 graphScenarioStore，不再走 uiNavSync 的 snapshot 镜像。
+  const meta = useGraphScenario((s) => s.meta)
+  const createUiScheme = useGraphScenario((s) => s.createUiScheme)
+  const createUiFolder = useGraphScenario((s) => s.createUiFolder)
+  const renameUiNode = useGraphScenario((s) => s.renameUiNode)
+  const removeUiNode = useGraphScenario((s) => s.removeUiNode)
   const selectedTreeNodeId = useUiSelection((s) => s.selectedTreeNodeId)
   const selectUiNode = useUiSelection((s) => s.selectUiNode)
+  const clearUiSelection = useUiSelection((s) => s.clearUiSelection)
   const bp = useBlueprintNavActions()
 
   const localOverlays = meta?.ui?.overlays ?? {}
+  // left pane 只展示树结构 + 标题，不渲染 overlay 内容：剥离 children 与右栏共用同一份 meta。
   const overlays = uiNavMode === 'left'
-    ? Object.fromEntries(Object.entries(remoteSnapshot?.overlays ?? {}).map(([id, overlay]) => [
-      id,
-      { ...overlay, children: [] },
-    ]))
+    ? Object.fromEntries(Object.entries(localOverlays).map(([id, overlay]) => [id, { ...overlay, children: [] }]))
     : localOverlays
-  const uiTree = uiNavMode === 'left'
-    ? ensureUiTree(remoteSnapshot?.uiTree, overlays)
-    : ensureUiTree(meta?.uiTree, localOverlays)
+  const uiTree = ensureUiTree(meta?.uiTree, localOverlays)
   const uiNodes = toViewNodes(uiTree.root)
-  const overlayUsage = uiNavMode === 'left'
-    ? (remoteSnapshot?.usage ?? {})
-    : countOverlayReferences(Object.values(blueprints ?? {}).map((doc) => doc.graph))
+  const overlayUsage = countOverlayReferences(
+    Object.values(blueprints ?? {}).map((doc) => doc.graph).filter((g): g is NonNullable<typeof g> => !!g),
+  )
 
   const navTree = useMemo(
     () => buildNavTree(
@@ -1029,7 +1048,11 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
             : videoFolder.kind === 'tag'
               ? videoFolderId(videoFolder.name)
               : 'asset-root:video'
-          : (navTree.find((n) => n.view === view)?.id ?? null)
+          : view === 'ui'
+            // 与蓝图同构：选中具体方案/文件夹时高亮该项（其 id 不在主树 navTree 里 → 主树无行匹配，
+            // 只在界面子树内高亮）；未选任何时回退到「界面」父行，表示当前位置。
+            ? (selectedTreeNodeId ?? 'ui')
+            : (navTree.find((n) => n.view === view)?.id ?? null)
 
   const onToggle = (id: string): void => {
     setExpanded((cur) => {
@@ -1045,6 +1068,12 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
   }
 
   const onSelect = (node: NavNode): void => {
+    // 切到任何非界面视图时，清掉界面子树选中态并广播，使界面行高亮随切走而灭
+    // （对齐主树 activeId 随 view 变的语义；界面选中态本身不随视图切换记住）。
+    const leaveUi = (): void => {
+      clearUiSelection()
+      broadcastUiTreeIntent({ type: 'select', treeNodeId: null, overlayId: null })
+    }
     if (node.id === 'new-folder') {
       setVideoFolderDraft('')
       setVideoFolderError(null)
@@ -1052,6 +1081,7 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
       return
     }
     if (node.videoLocation) {
+      leaveUi()
       setExpanded((current) => {
         const next = new Set(current)
         next.add('assets')
@@ -1070,31 +1100,37 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
     }
     if (node.id === 'assets') {
       // “资产库”是浏览器根入口，不是上一次选中的分类或文件夹。
+      leaveUi()
       setAssetLocation({ root: null })
       setView('assets')
       return
     }
     if (node.assetLocation) {
+      leaveUi()
       setView('assets')
       setAssetLocation(node.assetLocation)
       return
     }
     if (node.ruleTarget) {
+      leaveUi()
       selectRule(node.ruleTarget.section, node.ruleTarget.itemId)
       setView('rule')
       return
     }
     if (node.documentType) {
+      leaveUi()
       selectDocumentType(node.documentType)
       setView('documents')
       return
     }
     if (node.blueprint) {
+      leaveUi()
       selectBlueprint(node.id)
       setView('graph')
       return
     }
     if (node.view) {
+      if (node.view !== 'ui') leaveUi()
       setView(node.view)
       if (node.view === 'graph' && activeBlueprintId) {
         // 点「蓝图」入口：保持当前蓝图选中
@@ -1213,7 +1249,7 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
                       event.preventDefault()
                       const name = uiGroupDraft.trim()
                       if (!name) return
-                      sendUiNavCommand({ type: 'add-root-folder', name }, uiNavMode)
+                      createUiFolder(null, name)
                       setUiGroupDraft('')
                       setUiGroupComposing(false)
                     } else if (event.key === 'Escape') {
@@ -1243,14 +1279,14 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
                     const overlayId = treeNode.kind === 'scheme' ? (treeNode.overlayId ?? null) : null
                     selectUiNode(treeNode.id, overlayId)
                     setView('ui')
-                    sendUiNavCommand({ type: 'select', treeNodeId: treeNode.id, overlayId }, uiNavMode)
+                    broadcastUiTreeIntent({ type: 'select', treeNodeId: treeNode.id, overlayId })
                   }}
                   onAddScheme={(parentId, name) => {
-                    sendUiNavCommand({ type: 'add-scheme', parentId, name }, uiNavMode)
+                    createUiScheme(parentId, name)
                   }}
-                  onRename={(nodeId, name) => sendUiNavCommand({ type: 'rename', nodeId, name }, uiNavMode)}
+                  onRename={(nodeId, name) => renameUiNode(nodeId, name)}
                   onDelete={(treeNode) => {
-                    if (!treeNode.readOnly) sendUiNavCommand({ type: 'remove', nodeId: treeNode.id }, uiNavMode)
+                    if (!treeNode.readOnly) removeUiNode(treeNode.id)
                   }}
                 />
               </div>

@@ -4,7 +4,7 @@
  *
  * Page layout 把 sidebar/workspace 两个 Panel 放成左右布局，宿主给两个 iframe
  * 分别传 `?pane=left` / `?pane=center`。两个 iframe 通过 graphViewStore /
- * uiNavSync / graphBlueprintSync 同步 tab、界面树与蓝图库意图。
+ * graphUiTreeSync / graphBlueprintSync 同步 tab、界面树与蓝图库意图。
  * 无 pane 时仍按侧栏 + 主区独立运行。
  *
  * 进程内挂载（mount()）可经 props 显式传入 pane / gameId，避免改宿主 URL。
@@ -20,7 +20,7 @@ import { NewSidebar } from './editor/shell/NewSidebar'
 import { DocumentLibraryView } from './editor/documents/DocumentLibraryView'
 import { useGraphScenario } from './editor/persist/graphScenarioStore'
 import { useGraphView, installGraphViewSync } from './editor/persist/graphViewStore'
-import { installUiNavSync } from './editor/persist/uiNavSync'
+import { installGraphUiTreeSync } from './editor/persist/graphUiTreeSync'
 import { installGraphBlueprintSync } from './editor/persist/graphBlueprintSync'
 import { installAssetNavSync } from './editor/persist/assetNavStore'
 import { installDocumentNavSync } from './editor/persist/documentNavStore'
@@ -148,7 +148,7 @@ export function GraphApp({ pane: explicitPane, gameId, autoInitialize }: GraphAp
     // 用真实 game 作为跨 tab 同步频道的作用域，再安装，保证不同 game 的 tab 互不收听。
     setSyncGameId(activeGame)
     const disposeView = installGraphViewSync()
-    const disposeUiNav = installUiNavSync(pane)
+    const disposeUiTree = installGraphUiTreeSync()
     const disposeBp = installGraphBlueprintSync()
     const disposeAssetNav = installAssetNavSync()
     const disposeDocumentNav = installDocumentNavSync()
@@ -160,7 +160,7 @@ export function GraphApp({ pane: explicitPane, gameId, autoInitialize }: GraphAp
       disposeDocumentNav()
       disposeAssetNav()
       disposeBp()
-      disposeUiNav()
+      disposeUiTree()
       disposeView()
     }
   }, [pane, activeGame])

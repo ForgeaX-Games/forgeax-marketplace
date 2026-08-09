@@ -172,7 +172,6 @@ describe('release identity', () => {
       'SKILL.md',
       '!**/*.mp4',
       '!**/*.map',
-      '!dist/HYShangWei-*.woff2',
       '!dist/**/*.map',
     ])
     expect(pkg.files).not.toContain('vendor')

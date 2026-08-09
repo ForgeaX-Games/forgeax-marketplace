@@ -67,7 +67,20 @@ export function mount(
   }
   applyHostInit(options)
   initLocaleSync()
-  rootEl.classList.add('ks-app-host')
+  // Portaled panels live in host-owned slots outside the React root. Give
+  // every extension-owned mount surface the same scope so tokens/resets keep
+  // working there without leaking back to the host document.
+  const scopeElements = Array.from(new Set([
+    rootEl,
+    options.inspectorEl,
+    options.previewEl,
+    options.docActionSlotEl,
+  ].filter((element): element is HTMLElement => element !== undefined)))
+  const addedScopeElements = scopeElements.filter((element) => {
+    if (element.classList.contains('ks-app-host')) return false
+    element.classList.add('ks-app-host')
+    return true
+  })
   const reactRoot: Root = createRoot(rootEl)
   reactRoot.render(
     <GraphApp
@@ -90,7 +103,7 @@ export function mount(
     setInspectorActive,
     unmount: () => {
       reactRoot.unmount()
-      rootEl.classList.remove('ks-app-host')
+      addedScopeElements.forEach((element) => element.classList.remove('ks-app-host'))
       // Portal content unmounts with the canvas root; clear the host slots for remounts.
       if (inspectorEl) inspectorEl.replaceChildren()
       if (previewEl) previewEl.replaceChildren()

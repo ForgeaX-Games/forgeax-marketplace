@@ -158,6 +158,23 @@ describe('NewSidebar interface tree', () => {
       selectedTreeNodeId: 'hud-node',
       selectedOverlayId: 'hud',
     })
+    // 选中具体方案后，主树「界面」父行不应高亮（activeId 指向方案节点 id，不在 navTree 里）——
+    // 与蓝图选中具体蓝图时「蓝图」父行不高亮一致。
+    const uiRow = screen.getByRole('button', { name: '折叠 界面' }).closest('.ns-row')
+    expect(uiRow).not.toHaveClass('is-active')
+  })
+
+  it('clears interface selection when a non-ui leaf (blueprint) is selected', () => {
+    render(<NewSidebar />)
+    expandUiTree()
+    fireEvent.click(screen.getByRole('button', { name: '展开战斗' }))
+    fireEvent.click(screen.getByRole('button', { name: '展开首领' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择界面方案 战斗 HUD' }))
+    expect(useUiSelection.getState().selectedTreeNodeId).toBe('hud-node')
+
+    // 切去点「试玩」叶子（非 ui 视图）：界面选中态应被清空，界面子树行不再高亮。
+    fireEvent.click(screen.getByText('试玩'))
+    expect(useUiSelection.getState().selectedTreeNodeId).toBeNull()
   })
 
   it('shows interface children when its arrow is clicked from the rule view', () => {
@@ -215,6 +232,38 @@ describe('NewSidebar interface tree', () => {
     })
   })
 
+  it('does not flicker selection when creating a new overlay (no heal-back to another scheme)', () => {
+    // 回归：新建方案后，选中态应直接落在新方案，不出现「先被自愈抢回第一个方案、再回跳」的中间态。
+    // 修复前 GraphConfigView 的自愈 effect 会与 add-scheme 的 selectUiNode 抢态，trace 里会出现别的 overlayId。
+    const trace: Array<string | null> = []
+    let last: string | null = useUiSelection.getState().selectedOverlayId
+    trace.push(last)
+    const unsub = useUiSelection.subscribe((next) => {
+      if (next.selectedOverlayId !== last) {
+        last = next.selectedOverlayId
+        trace.push(last)
+      }
+    })
+
+    render(<NewSidebar />)
+    expandUiTree()
+    fireEvent.click(screen.getByLabelText('新增界面 战斗'))
+    const input = screen.getByPlaceholderText('新建界面名称')
+    fireEvent.change(input, { target: { value: '战斗结算' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    unsub()
+
+    const selection = useUiSelection.getState()
+    expect(selection.selectedOverlayId).toBeTruthy()
+    // 末态就是新方案。
+    expect(trace[trace.length - 1]).toBe(selection.selectedOverlayId)
+    // 新建过程中不应出现「先选中别的方案、再回跳到新方案」——trace 里新方案 id 只应在末尾出现一次。
+    const finalId = selection.selectedOverlayId!
+    const firstFinalIndex = trace.indexOf(finalId)
+    expect(firstFinalIndex).toBe(trace.length - 1)
+  })
+
   it('persists nested folder rename and delete operations', () => {
     render(<NewSidebar />)
     fireEvent.click(screen.getByRole('button', { name: '新增 界面 子项' }))
@@ -237,7 +286,7 @@ describe('NewSidebar interface tree', () => {
     })
 
     fireEvent.click(screen.getByLabelText('删除 过场界面'))
-    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
     expect(findUiTreeNode(useGraphScenario.getState().meta.uiTree!, folderId)).toBeUndefined()
   })
 
@@ -247,7 +296,7 @@ describe('NewSidebar interface tree', () => {
     fireEvent.click(screen.getByRole('button', { name: '展开战斗' }))
     fireEvent.click(screen.getByRole('button', { name: '展开首领' }))
     fireEvent.click(screen.getByLabelText('删除 战斗 HUD'))
-    fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
 
     const meta = useGraphScenario.getState().meta
     expect(meta.ui?.overlays?.hud).toBeUndefined()

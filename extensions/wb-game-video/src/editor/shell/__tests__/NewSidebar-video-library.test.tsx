@@ -68,7 +68,12 @@ describe('NewSidebar video asset hierarchy', () => {
     const css = document.querySelector('style[data-reel-style="new-sidebar"]')?.textContent
     expect(css).toContain('width: 196px')
     expect(css).toContain('padding: 0')
-    expect(sidebar.querySelector('.ns-leading img')).toBeTruthy()
+    expect(css).toContain('.ns-leading svg { display: block; width: 12px; height: 12px; }')
+    const assetLibraryIcon = sidebar.querySelector('.ns-leading > svg')
+    expect(sidebar.querySelector('.ns-leading img')).toBeNull()
+    expect(assetLibraryIcon).toHaveAttribute('width', '12')
+    expect(assetLibraryIcon).toHaveAttribute('height', '12')
+    expect(assetLibraryIcon?.querySelector('path')).toHaveAttribute('fill', 'currentColor')
 
     const folderRow = screen.getByText('户外').closest<HTMLElement>('.ns-row')!
     const untaggedRow = screen.getByText('无标签视频.mp4').closest<HTMLElement>('.ns-row')!

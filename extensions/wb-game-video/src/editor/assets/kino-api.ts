@@ -80,19 +80,25 @@ export interface KinoResourcePage {
   page_size: number
 }
 
-export interface DirectUploadInstruction {
-  method: 'PUT'
-  url: string
-  headers: Record<string, string>
-  expires_at: string
-  chunk_size: number
-  chunk_count: number
-}
-
-export interface DirectUploadResponse {
-  upload: DirectUploadInstruction
-  object_url: string
-  upload_token: string
+/**
+ * Short-lived credentials for exactly one COS object.  The browser must hand
+ * these to the COS SDK; `bucket_url` is the eventual object URL, not a
+ * pre-signed upload endpoint.
+ */
+export interface KinoCosStsUploadResponse {
+  tmp_secret_id: string
+  tmp_secret_key: string
+  session_token: string
+  expiration: string
+  bucket: string
+  bucket_url: string
+  region: string
+  prefix: string
+  object_key: string
+  allowed_extensions: string[]
+  allowed_content_types: string[]
+  max_file_size_bytes: number
+  required_headers: Record<string, string>
 }
 
 export interface PrepareUploadInput {
@@ -173,7 +179,7 @@ export interface KinoEnvelopeRequestOptions extends KinoRequestOptions {
 
 export interface KinoVideoClient {
   capabilities(options?: KinoRequestOptions): Promise<KinoProviderCapabilities>
-  prepareUpload(input: PrepareUploadInput, options?: KinoRequestOptions): Promise<DirectUploadResponse>
+  prepareUpload(input: PrepareUploadInput, options?: KinoRequestOptions): Promise<KinoCosStsUploadResponse>
   list(query: ListKinoResourcesQuery, options?: KinoRequestOptions): Promise<KinoResourcePage>
   get(resourceId: string, gameId: string, options?: KinoRequestOptions): Promise<KinoResourceDTO>
   create(input: CreateKinoResourceInput, options?: KinoRequestOptions): Promise<KinoResourceDTO>
@@ -384,7 +390,7 @@ export function createKinoVideoClient(
     },
 
     async prepareUpload(input, options) {
-      return requestJson<DirectUploadResponse>(fetchImpl, baseUrl, '/image-assets/upload', {
+      return requestJson<KinoCosStsUploadResponse>(fetchImpl, baseUrl, '/image-assets/upload', {
         method: 'POST',
         body: JSON.stringify(input),
         signal: options?.signal,

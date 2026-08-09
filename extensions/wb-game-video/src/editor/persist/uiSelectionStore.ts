@@ -11,7 +11,7 @@ interface UiSelectionState {
  * 界面目录的瞬态选中态。
  *
  * 树与 overlay 内容仍以 graphScenarioStore.meta 为唯一真相；这里不持久化。
- * split-pane 只通过 uiNavSync 的窄域 snapshot 镜像这两个 selection 字段。
+ * split-pane 通过 graphUiTreeSync 的 select 意图镜像这两个 selection 字段。
  */
 export const useUiSelection = create<UiSelectionState>((set) => ({
   selectedTreeNodeId: null,

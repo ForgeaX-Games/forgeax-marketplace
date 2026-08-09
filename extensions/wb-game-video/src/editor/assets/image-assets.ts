@@ -1,6 +1,6 @@
 import type { MediaAsset } from './registry-types'
 import { createKinoVideoClient, KinoClientError, type KinoResourceDTO } from './kino-api'
-import { createDefaultXhrUploadTransport } from './video-upload'
+import { buildCosObjectUrl, createDefaultCosUploadTransport } from './video-upload'
 
 const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024
 const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
@@ -64,15 +64,15 @@ export async function uploadReferenceImage(
       mime_type: file.type as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
       bytes: file.size,
     })
-    await createDefaultXhrUploadTransport().put(
+    await createDefaultCosUploadTransport().put(
       file,
-      prepared.upload,
+      prepared,
       (percent) => onProgress?.(Math.min(99, percent)),
     )
     const resource = await client.create({
       game_id: game,
       media_type: 'image',
-      url: prepared.object_url,
+      url: buildCosObjectUrl(prepared.bucket_url, prepared.object_key),
       name: file.name.replace(/\.[^.]+$/, ''),
       type: referenceType === 'character' ? 'CHARACTER_IMAGE' : 'LOCATION_IMAGE',
       source: 'wb-game-video',

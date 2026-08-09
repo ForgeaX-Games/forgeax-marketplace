@@ -47,6 +47,33 @@ test('leaves GraphApp on its URL-derived defaults when the host says nothing', (
   act(() => handle.unmount())
 })
 
+test('scopes the in-process stylesheet to its mount root', () => {
+  const root = document.createElement('div')
+  const inspector = document.createElement('div')
+  const preview = document.createElement('div')
+  const docActionSlot = document.createElement('div')
+  document.body.append(root, inspector, preview, docActionSlot)
+
+  let handle!: ReturnType<typeof mount>
+  act(() => {
+    handle = mount(root, {
+      inspectorEl: inspector,
+      previewEl: preview,
+      docActionSlotEl: docActionSlot,
+    })
+  })
+  expect(root).toHaveClass('ks-app-host')
+  expect(inspector).toHaveClass('ks-app-host')
+  expect(preview).toHaveClass('ks-app-host')
+  expect(docActionSlot).toHaveClass('ks-app-host')
+
+  act(() => handle.unmount())
+  expect(root).not.toHaveClass('ks-app-host')
+  expect(inspector).not.toHaveClass('ks-app-host')
+  expect(preview).not.toHaveClass('ks-app-host')
+  expect(docActionSlot).not.toHaveClass('ks-app-host')
+})
+
 test('stores inspectorEl and onNodeSelect for the GraphStudio external panel', async () => {
   const { getInspectorMountOptions } = await import('../host-init')
   const inspectorEl = document.createElement('div')

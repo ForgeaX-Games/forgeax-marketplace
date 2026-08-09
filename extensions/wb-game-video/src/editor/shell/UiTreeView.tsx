@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import type { Overlay } from '../../runtime/schema/graph-schema'
 import { injectStyleOnce } from '../../styles/injectStyle'
+import { placeAdaptivePop } from './useBlueprintNavActions'
 
 export interface UiTreeViewNode {
   id: string
@@ -43,11 +45,14 @@ const UI_TREE_CSS = `
 }
 .uit-toggle {
   width:20px; height:20px; flex:none; display:inline-flex; align-items:center; justify-content:center;
-  border:0; padding:0; background:transparent; color:#fff; cursor:pointer;
-  transition:transform .18s ease;
+  border:0; padding:0; background:transparent; color:var(--ns-text, #fff); cursor:pointer;
+  transition:transform .18s ease, color .18s ease;
 }
 .uit-toggle svg { width:20px; height:20px; display:block; }
-.uit-toggle.is-collapsed { transform:rotate(-90deg); }
+/* 收起态变暗，与主树 .ns-chev.is-collapsed 一致。 */
+.uit-toggle.is-collapsed { color:var(--ns-text-40, rgba(255,255,255,.40)); transform:rotate(-90deg); }
+/* 叶子方案无 chevron：用等宽占位补齐，使同级文件夹与方案的标签左边缘对齐（同主树 .ns-chev-spacer）。 */
+.uit-chev-spacer { width:20px; height:20px; flex:none; }
 .uit-label {
   min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   font-size:16px; line-height:26px;
@@ -69,17 +74,6 @@ const UI_TREE_CSS = `
 .uit-icon-btn.is-danger:hover,.uit-icon-btn.is-danger.is-open { color:#ff8e8e; }
 .uit-icon-btn svg { width:14px; height:14px; display:block; }
 .uit-children { display:flex; flex-direction:column; width:100%; min-width:0; }
-.uit-menu {
-  box-sizing:border-box; width:calc(100% - 24px); min-width:0;
-  margin:4px 0 4px 24px; padding:5px; display:flex; flex-wrap:wrap; gap:4px;
-  border:1px solid rgba(255,255,255,.12); border-radius:2px; background:#353535;
-}
-.uit-menu button {
-  border:0; border-radius:2px; padding:5px 7px; background:rgba(255,255,255,.08);
-  color:#fff; cursor:pointer; font-size:12px;
-}
-.uit-menu button:hover { background:rgba(255,255,255,.15); }
-.uit-menu button.is-danger { color:#ffb4ae; }
 .uit-edit { flex:1; min-width:0; display:flex; gap:4px; }
 .uit-edit input {
   min-width:0; flex:1; border:1px solid rgba(255,255,255,.22); border-radius:2px;
@@ -97,8 +91,6 @@ const UI_TREE_CSS = `
   font-family:inherit; font-size:16px; line-height:22px;
 }
 .uit-compose-input:focus { outline-color:rgba(255,255,255,.8); }
-.uit-confirm { display:flex; flex-direction:column; gap:6px; width:100%; font-size:12px; line-height:1.4; }
-.uit-confirm-actions { display:flex; justify-content:flex-end; gap:5px; }
 .ns-empty {
   min-height:42px; display:flex; align-items:center; border-bottom:1px solid rgba(255,255,255,.10);
   color:rgba(255,255,255,.45); font-size:13px; padding-left:8px;
@@ -150,6 +142,10 @@ function UiTreeRow({
   const [draft, setDraft] = useState(node.name ?? '')
   const [composingScheme, setComposingScheme] = useState(false)
   const [schemeDraft, setSchemeDraft] = useState('')
+  // 删除确认浮层：复用主树 ns-pop-confirm 的 DOM/样式 + placeAdaptivePop 自适应定位。
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const deletePopRef = useRef<HTMLDivElement | null>(null)
+  const [deletePopPlacement, setDeletePopPlacement] = useState<{ style: CSSProperties; side: 'below' | 'above' | 'right' | 'left' } | null>(null)
   const overlay = node.overlayId ? overlays[node.overlayId] : undefined
   const label = isFolder ? (node.name?.trim() || '未命名文件夹') : (overlay?.title?.trim() || node.overlayId || '缺失方案')
   const usage = node.overlayId ? (usageByOverlay?.[node.overlayId] ?? 0) : 0
@@ -157,6 +153,33 @@ function UiTreeRow({
   useEffect(() => {
     if (mode === 'rename') setDraft(node.name ?? label)
   }, [mode, node.name, label])
+
+  // 删除确认浮层定位：与主树 useBlueprintNavActions 同模式——首次按 fallback 落点，
+  // portal 挂上后用真实尺寸校准，并跟随窗口/侧栏滚动。
+  useLayoutEffect(() => {
+    if (mode !== 'delete') {
+      setDeletePopPlacement(null)
+      return
+    }
+    const place = (): void => {
+      const trigger = deleteTriggerRef.current
+      const pop = deletePopRef.current
+      const size = pop
+        ? { width: pop.offsetWidth || 180, height: pop.offsetHeight || 96 }
+        : { width: 180, height: 96 }
+      const p = placeAdaptivePop(trigger, size)
+      if (p) setDeletePopPlacement({ style: p.style, side: p.side })
+    }
+    place()
+    const raf = requestAnimationFrame(place)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [mode])
 
   const confirmRename = (): void => {
     const next = draft.trim()
@@ -182,17 +205,25 @@ function UiTreeRow({
           className="uit-main"
           role="button"
           tabIndex={0}
-          aria-label={isFolder ? `选择文件夹 ${label}` : `选择界面方案 ${label}`}
+          aria-label={isFolder ? `${label} 文件夹` : `选择界面方案 ${label}`}
           onClick={() => {
             if (mode === 'rename') return
+            // 与主树 activateRow 一致：文件夹行只展开/收起，不切换选中视图；
+            // 只有叶子方案才选中并进入界面页。
+            if (isFolder) {
+              setExpanded((value) => !value)
+              return
+            }
             onSelect(node)
-            if (isFolder) setExpanded(true)
           }}
           onKeyDown={(event) => {
             if (mode === 'rename' || (event.key !== 'Enter' && event.key !== ' ')) return
             event.preventDefault()
+            if (isFolder) {
+              setExpanded((value) => !value)
+              return
+            }
             onSelect(node)
-            if (isFolder) setExpanded(true)
           }}
         >
           {isFolder ? (
@@ -207,7 +238,9 @@ function UiTreeRow({
             >
               {ChevronIcon}
             </button>
-          ) : null}
+          ) : (
+            <span className="uit-chev-spacer" aria-hidden />
+          )}
           {mode === 'rename' ? (
             <span className="uit-edit" onClick={(event) => event.stopPropagation()}>
               <input
@@ -255,6 +288,7 @@ function UiTreeRow({
               {PencilIcon}
             </button>
             <button
+              ref={deleteTriggerRef}
               type="button"
               className={`uit-icon-btn is-danger${mode === 'delete' ? ' is-open' : ''}`}
               aria-label={`删除 ${label}`}
@@ -295,20 +329,35 @@ function UiTreeRow({
           />
         </div>
       ) : null}
-      {mode === 'delete' && (
-        <div className="uit-menu" role="dialog" aria-label={`删除${label}`}>
-          <div className="uit-confirm">
-            <span>
+      {mode === 'delete' && deletePopPlacement && typeof document !== 'undefined'
+        ? createPortal(
+          <div
+            ref={deletePopRef}
+            className="ns-pop-confirm"
+            data-side={deletePopPlacement.side}
+            role="dialog"
+            aria-label={`删除${label}`}
+            style={deletePopPlacement.style}
+          >
+            <span className="ns-pop-arrow" aria-hidden />
+            <div className="ns-pop-confirm-msg">
               确定删除「{label}」？
               {!isFolder && usage > 0 ? ` 当前仍被 ${usage} 个节点引用。` : ''}
-            </span>
-            <span className="uit-confirm-actions">
+            </div>
+            <div className="ns-pop-confirm-actions">
               <button type="button" onClick={() => setMode(null)}>取消</button>
-              <button type="button" className="is-danger" onClick={() => { onDelete(node); setMode(null) }}>确认删除</button>
-            </span>
-          </div>
-        </div>
-      )}
+              <button
+                type="button"
+                className="is-danger"
+                onClick={() => { onDelete(node); setMode(null) }}
+              >
+                确认
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
       {isFolder && expanded && (node.children?.length ?? 0) > 0 && (
         <div className="uit-children" role="group">
           {node.children!.map((child) => (

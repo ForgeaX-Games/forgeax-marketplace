@@ -28,7 +28,6 @@ import {
   type NodeProps,
   type ReactFlowInstance,
 } from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
 
 // 暗色主题下修正 reactflow 控制条按钮（默认白底白图标看不清）+ 隐藏官方水印。
 function ensureCanvasStyle(): void {

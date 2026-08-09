@@ -93,9 +93,10 @@ function GraphConfigViewScenario(): JSX.Element {
 }
 
 describe('NewSidebar interface folder selection', () => {
-  it('keeps a folder selected after clicking it then switching to 规则/公式 (no flicker back to a scheme)', () => {
+  it('clears scheme selection without flicker when switching to 规则/公式', () => {
     // 订阅 uiSelection，记录 selectedTreeNodeId 的变化序列。
-    // 修复前：点文件夹后自愈 effect 会把选中抢回第一个 scheme，trace 末尾变成 scheme id。
+    // 不变量：切到非 ui 视图时清空界面选中（对齐主树「高亮随 view 变」），且清空过程不闪烁——
+    // 不会先回跳到别的 scheme 再变 null。
     const trace: Array<string | null> = []
     let last: string | null = useUiSelection.getState().selectedTreeNodeId
     trace.push(last)
@@ -114,22 +115,21 @@ describe('NewSidebar interface folder selection', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '展开 界面' }))
-    // 选中「基础界面」文件夹（uit-main 的 aria-label = `选择文件夹 ${label}`）。
-    fireEvent.click(screen.getByRole('button', { name: '选择文件夹 基础界面' }))
+    // 展开「基础界面」文件夹（文件夹行点击只展开，不选中），再选中其下方案。
+    fireEvent.click(screen.getByRole('button', { name: '基础界面 文件夹' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择界面方案 方案A' }))
 
-    // 切到规则 → 公式，期间 uiSelection 不应被改写。
+    // 切到规则 → 公式：每次切走都应清空界面选中。
     fireEvent.click(screen.getByText('规则'))
     fireEvent.click(screen.getByText('公式'))
 
     unsub()
 
-    // 选中文件夹后必须保持稳定：trace 末尾应是文件夹 id，而非被自愈抢回的 scheme id。
-    expect(trace[trace.length - 1]).toBe('ui-folder:basic')
-    // 且「基础界面」选中后不应再出现任何 scheme id 的回跳。
-    const folderIndex = trace.indexOf('ui-folder:basic')
-    expect(folderIndex).toBeGreaterThan(-1)
-    expect(trace.slice(folderIndex + 1)).toEqual([])
-    // 切规则/公式期间 uiSelection 完全不变。
-    expect(useUiSelection.getState().selectedTreeNodeId).toBe('ui-folder:basic')
+    // 末态：界面选中被清空。
+    expect(useUiSelection.getState().selectedTreeNodeId).toBeNull()
+    // 选中方案后到清空之间，不应出现回跳到别的 scheme id（无闪烁）。
+    const schemeIndex = trace.indexOf('ui-scheme:scheme-a')
+    expect(schemeIndex).toBeGreaterThan(-1)
+    expect(trace.slice(schemeIndex + 1)).toEqual([null])
   })
 })

@@ -1,15 +1,12 @@
 import type {
   CreateKinoResourceInput,
-  DirectUploadInstruction,
-  DirectUploadResponse,
+  KinoCosStsUploadResponse,
   KinoMediaType,
   KinoResourceDTO,
   KinoVideoClient,
 } from './kino-api'
 import { KinoClientError } from './kino-api'
-import { rewriteUrl } from '@forgeax/workbench-host/browser'
-import { getActiveRewriteRules } from '../../lib/forgeax-http'
-import { getWorkbenchHost } from '../../lib/workbench-host'
+import COS from 'cos-js-sdk-v5'
 
 export const MAX_VIDEO_UPLOAD_BYTES = 104_857_600
 export const VIDEO_UPLOAD_MIME = 'video/mp4' as const
@@ -99,7 +96,7 @@ const inFlightUploads = new Set<string>()
 export interface UploadTransport {
   put(
     file: File,
-    instruction: DirectUploadInstruction,
+    upload: KinoCosStsUploadResponse,
     onProgress?: (percent: number) => void,
     signal?: AbortSignal,
   ): Promise<void>
@@ -125,9 +122,8 @@ export interface PreparedVideoUpload {
   gameId: string
   replacementResourceId?: string
   fileIdentity: VideoFileIdentity
-  response: DirectUploadResponse
+  response: KinoCosStsUploadResponse
   objectUrl: string
-  uploadToken: string
   uploaded: boolean
   createInput: PreparedVideoCreateInput
 }
@@ -218,12 +214,12 @@ export async function uploadProviderResource(options: UploadProviderResourceOpti
     bytes: options.file.size,
     extension: fileExtension(options.file.name),
   }, requestOptions)
-  const transport = options.transport ?? createDefaultXhrUploadTransport()
-  await transport.put(options.file, response.upload, options.onProgress, options.signal)
+  const transport = options.transport ?? createDefaultCosUploadTransport()
+  await transport.put(options.file, response, options.onProgress, options.signal)
   return options.client.create({
     game_id: options.gameId,
     media_type: options.mediaType,
-    url: response.object_url,
+    url: buildCosObjectUrl(response.bucket_url, response.object_key),
     name: options.name ?? options.file.name,
     type: options.type ?? 'UPLOAD',
     source: options.source ?? 'upload',
@@ -343,122 +339,112 @@ function truncateMessage(text: string): string {
   return text.slice(0, MAX_UPLOAD_ERROR_BODY_LENGTH)
 }
 
-interface ValidatedUploadInstruction {
-  url: string
+interface ValidatedCosUpload {
+  secretId: string
+  secretKey: string
+  sessionToken: string
+  bucket: string
+  region: string
+  key: string
   headers: Record<string, string>
-  chunkSize: number
-  chunkCount: number
+  contentType: string
 }
 
-function resolveInstructionUrl(rawUrl: string): string {
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
+}
+
+/** Safely joins the provider-returned public bucket URL with its raw COS key. */
+export function buildCosObjectUrl(bucketUrl: string, objectKey: string): string {
   try {
-    const absolute = new URL(rawUrl)
-    if (absolute.protocol !== 'http:' && absolute.protocol !== 'https:') {
-      throw new Error('Invalid upload instruction')
+    const url = new URL(bucketUrl)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
     }
-    return absolute.toString()
+    if (
+      !objectKey
+      || objectKey.startsWith('/')
+      || objectKey.includes('\\')
+      || objectKey.split('/').some((segment) => segment === '.' || segment === '..')
+    ) {
+      throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+    }
+    const basePath = url.pathname.replace(/\/+$/, '')
+    const encodedKey = objectKey.split('/').map(encodeURIComponent).join('/')
+    url.pathname = `${basePath}/${encodedKey}`
+    return url.toString()
   } catch {
-    if (!rawUrl || rawUrl.startsWith('//') || /^[a-z][a-z\d+.-]*:/iu.test(rawUrl) || /[\s\\]/.test(rawUrl)) {
-      throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
-    }
-    try {
-      return getWorkbenchHost().extension.url(rawUrl)
-    } catch {
-      throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
-    }
+    throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
   }
 }
 
-function validateUploadInstruction(
-  instruction: DirectUploadInstruction,
-): ValidatedUploadInstruction {
-  if ((instruction as { method?: unknown }).method !== 'PUT') {
-    throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
-  }
-  const url = resolveInstructionUrl(instruction.url)
-  if (!Number.isSafeInteger(instruction.chunk_size) || instruction.chunk_size <= 0
-    || !Number.isSafeInteger(instruction.chunk_count) || instruction.chunk_count <= 0) {
-    throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
-  }
+function validateCosUpload(upload: KinoCosStsUploadResponse, file: File): ValidatedCosUpload {
   if (
-    !instruction.headers ||
-    typeof instruction.headers !== 'object' ||
-    Array.isArray(instruction.headers)
+    !upload.required_headers ||
+    typeof upload.required_headers !== 'object' ||
+    Array.isArray(upload.required_headers)
   ) {
     throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
   }
+  const secretId = nonEmptyString(upload.tmp_secret_id)
+  const secretKey = nonEmptyString(upload.tmp_secret_key)
+  const sessionToken = nonEmptyString(upload.session_token)
+  const bucket = nonEmptyString(upload.bucket)
+  const region = nonEmptyString(upload.region)
+  const key = nonEmptyString(upload.object_key)
+  if (!secretId || !secretKey || !sessionToken || !bucket || !region || !key) {
+    throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+  }
+  const headers = sanitizeInstructionHeaders(upload.required_headers)
+  const suppliedContentType = Object.entries(headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1]
+  if (suppliedContentType !== undefined && suppliedContentType !== file.type) {
+    throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
+  }
   return {
-    url,
-    headers: sanitizeInstructionHeaders(instruction.headers),
-    chunkSize: instruction.chunk_size,
-    chunkCount: instruction.chunk_count,
+    secretId,
+    secretKey,
+    sessionToken,
+    bucket,
+    region,
+    key,
+    headers,
+    contentType: suppliedContentType ?? file.type,
   }
 }
 
-export function createDefaultXhrUploadTransport(): UploadTransport {
+export function createDefaultCosUploadTransport(): UploadTransport {
   return {
-    async put(file, instruction, onProgress, signal) {
-      const { url, headers, chunkSize, chunkCount } = validateUploadInstruction(instruction)
-      if (Math.ceil(file.size / chunkSize) !== chunkCount) {
-        throw new VideoUploadError('Invalid upload instruction', 'invalid_upload_instruction')
-      }
+    async put(file, upload, onProgress, signal) {
+      const { secretId, secretKey, sessionToken, bucket, region, key, headers, contentType } = validateCosUpload(upload, file)
       assertNotAborted(signal)
       const report = createProgressReporter(onProgress)
-      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
-        assertNotAborted(signal)
-        const start = chunkIndex * chunkSize
-        const end = Math.min(file.size, start + chunkSize)
-        const chunk = file.slice(start, end)
-        await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest()
-          let settled = false
-          const cleanup = () => signal?.removeEventListener('abort', handleSignalAbort)
-          const succeed = () => {
-            if (settled) return
-            settled = true
-            cleanup()
-            resolve()
-          }
-          const fail = (error: VideoUploadError) => {
-            if (settled) return
-            settled = true
-            cleanup()
-            reject(error)
-          }
-          const handleSignalAbort = () => {
-            try { xhr.abort() } finally { fail(new VideoUploadError('Upload aborted', 'upload_aborted')) }
-          }
-
-          signal?.addEventListener('abort', handleSignalAbort, { once: true })
-          if (signal?.aborted) {
-            handleSignalAbort()
-            return
-          }
-          xhr.upload.onprogress = (event) => {
-            const total = event.lengthComputable && event.total > 0 ? event.total : chunk.size
-            if (total > 0) report(((start + Math.min(event.loaded, total)) / file.size) * 100)
-          }
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              succeed()
-              return
-            }
-            fail(new VideoUploadError(xhr.responseText || `Upload failed with HTTP ${xhr.status}`, 'upload_failed'))
-          }
-          xhr.onerror = () => fail(new VideoUploadError('Upload network error', 'upload_network_error'))
-          xhr.onabort = () => fail(new VideoUploadError('Upload aborted', 'upload_aborted'))
-          try {
-            xhr.open(instruction.method, rewriteUrl(url, getActiveRewriteRules()), true)
-            for (const [key, value] of Object.entries(headers)) xhr.setRequestHeader(key, value)
-            // Host resumable media writes are byte-offset based; the server owns
-            // recovery/idempotency instead of this extension persisting chunks.
-            xhr.setRequestHeader('upload-offset', String(start))
-            xhr.send(chunk)
-          } catch (error) {
-            fail(new VideoUploadError(error instanceof Error ? error.message : 'Upload failed', 'upload_failed'))
-          }
+      const cos = new COS({
+        SecretId: secretId,
+        SecretKey: secretKey,
+        SecurityToken: sessionToken,
+      })
+      let taskId: string | undefined
+      const cancel = () => {
+        if (taskId) cos.cancelTask(taskId)
+      }
+      signal?.addEventListener('abort', cancel, { once: true })
+      try {
+        await cos.putObject({
+          Bucket: bucket,
+          Region: region,
+          Key: key,
+          Body: file,
+          ContentType: contentType,
+          Headers: headers,
+          onTaskReady: (id) => { taskId = id },
+          onProgress: ({ percent }) => report(percent * 100),
         })
-        report(((end / file.size) * 100))
+        assertNotAborted(signal)
+      } catch (error) {
+        if (signal?.aborted) throw new VideoUploadError('Upload aborted', 'upload_aborted')
+        throw new VideoUploadError(error instanceof Error ? error.message : 'Upload failed', 'upload_failed')
+      } finally {
+        signal?.removeEventListener('abort', cancel)
       }
       report(100, true)
     },
@@ -491,8 +477,7 @@ async function prepareVideoUpload(
     replacementResourceId,
     fileIdentity: fileIdentity(file),
     response,
-    objectUrl: response.object_url,
-    uploadToken: response.upload_token,
+    objectUrl: buildCosObjectUrl(response.bucket_url, response.object_key),
     uploaded: false,
     createInput,
   }
@@ -506,7 +491,7 @@ async function transferPreparedVideoUpload(
   signal?: AbortSignal,
 ): Promise<PreparedVideoUpload> {
   assertNotAborted(signal)
-  await transport.put(file, prepared.response.upload, onProgress, signal)
+  await transport.put(file, prepared.response, onProgress, signal)
   return { ...prepared, uploaded: true }
 }
 
@@ -565,7 +550,7 @@ async function runVideoResourceUpload(
   options: UploadVideoResourceOptions,
   replacementResourceId?: string,
 ): Promise<KinoResourceDTO> {
-  const transport = options.transport ?? createDefaultXhrUploadTransport()
+  const transport = options.transport ?? createDefaultCosUploadTransport()
   const report = createProgressReporter(options.onProgress)
 
   const createInput: PreparedVideoCreateInput = {

@@ -10,7 +10,7 @@ import { create, useStore } from 'zustand'
 import { temporal } from 'zundo'
 import type { TemporalState, ZundoOptions } from 'zundo'
 import type {
-  BlueprintDoc, GameGraph, GameScenario, GraphLibraryDocument, GraphTextStylePreset, ScenarioMetaFields, UiTree,
+  BlueprintDoc, GameGraph, GameScenario, GraphLibraryDocument, GraphTextStylePreset, Overlay, ScenarioMetaFields, UiTree, UiTreeNode,
 } from '../../runtime/schema/graph-schema'
 import type { TextStyleGroup } from '../text/text-style'
 import { loadStore, saveProject, clearDraft, loadDraft, commitVersion, checkpointTip, currentVersion, listVersions, restoreVersionToTip, type VersionEntry, type GameVersion } from './persist-client'
@@ -34,12 +34,18 @@ import { NODIA_DEMO_PROJECT } from '../demo/demo'
 import {
   addUiTreeFolder as addTreeFolder,
   addUiTreeScheme as addTreeScheme,
+  BASIC_UI_FOLDER_ID,
+  collectUiTreeNodeIds,
   ensureUiTree,
+  findUiTreeNode,
   moveUiTreeNode as moveTreeNode,
   removeUiTreeNode as removeTreeNode,
   renameUiTreeFolder as renameTreeFolder,
 } from './ui-tree'
 import { broadcastBlueprintIntent } from './graphBlueprintSync'
+import { broadcastUiTreeIntent } from './graphUiTreeSync'
+import { nextUniqueOverlayTitle, overlayTitleExists } from '../shell/overlay-title'
+import { useUiSelection } from './uiSelectionStore'
 
 
 export type BlueprintTitleActionOk = { ok: true; id?: string }
@@ -75,6 +81,26 @@ const EMPTY_GRAPH: GameGraph = { nodes: [], edges: [] }
  */
 function resolveActiveDoc(state: Pick<GraphScenarioStore, 'blueprints' | 'activeBlueprintId'>): BlueprintDoc | undefined {
   return state.blueprints[state.activeBlueprintId]
+}
+
+/** 生成 `${prefix}${index}` 且不与已用 id 冲突的下一个 id。 */
+function nextUiId(prefix: string, used: Set<string>): string {
+  let index = used.size
+  let id = `${prefix}${index}`
+  while (used.has(id)) id = `${prefix}${++index}`
+  return id
+}
+
+/** 收集一个 uiTree 节点子树下的所有 overlay id（scheme 节点）。 */
+function collectOverlayIdsFrom(node: UiTreeNode): string[] {
+  if (node.kind === 'scheme') return [node.overlayId]
+  return node.children.flatMap(collectOverlayIdsFrom)
+}
+
+/** 收集一个 uiTree 节点子树下的所有节点 id（含自身）。 */
+function collectNodeIdsFrom(node: UiTreeNode): string[] {
+  if (node.kind === 'scheme') return [node.id]
+  return [node.id, ...node.children.flatMap(collectNodeIdsFrom)]
 }
 
 /** ui.overlays 缺失基础覆盖物则补（作用于共享 meta，不覆盖已有）。 */
@@ -174,6 +200,14 @@ interface GraphScenarioStore {
   removeUiTreeNode: (id: string) => void
   moveUiTreeNode: (id: string, parentId: string | null, index?: number) => void
   renameUiTreeFolder: (id: string, name: string) => void
+  /** 新建一个界面方案（建树节点 + 建 overlay + 选中）一次原子写入；返回新节点/overlay id 或 null。 */
+  createUiScheme: (parentId: string, name?: string) => { nodeId: string; overlayId: string } | null
+  /** 新建一个界面文件夹（建树节点 + 选中）一次原子写入；返回新节点 id 或 null。 */
+  createUiFolder: (parentId: string | null, name?: string) => string | null
+  /** 重命名界面树节点：文件夹走 uiTree，方案走 overlay 标题。返回是否成功。 */
+  renameUiNode: (nodeId: string, name: string) => boolean
+  /** 删除界面树节点及其下 overlay；选中若被删则清空。返回是否成功。 */
+  removeUiNode: (nodeId: string) => boolean
   renameScenarioId: (rename: ScenarioIdRename) => ScenarioIdRenameActionResult
   /** 原子写回整份 scenario（graph + meta 一次 set，避免拆两次 set 产生额外历史步）；写主蓝图。 */
   setScenario: (s: GameScenario) => void
@@ -675,6 +709,110 @@ export const useGraphScenario = create<GraphScenarioStore>()(temporal((set, get)
         return { blueprints, graph: id === st.activeBlueprintId ? next : st.graph }
       })
       if (changed) scheduleDraft()
+    },
+
+    createUiScheme: (parentId, name) => {
+      // 一次 set 原子写 uiTree + overlays，再 selectUiNode + 广播——天然无中间态，
+      // 取代旧 uiNavSync 的「setMeta + selectUiNode 两次写入 → 两次 snapshot → 闪烁」。
+      const st = get()
+      const overlays = st.meta.ui?.overlays ?? {}
+      const tree = ensureUiTree(st.meta.uiTree, overlays)
+      if (findUiTreeNode(tree, parentId)?.kind !== 'folder') return null
+      const overlayId = nextUiId('scheme-', new Set(Object.keys(overlays)))
+      const nodeId = nextUiId('ui-scheme:', collectUiTreeNodeIds(tree))
+      const nextTree = addTreeScheme(tree, parentId, { id: nodeId, overlayId })
+      if (nextTree === tree) return null
+      const title = name?.trim() || nextUniqueOverlayTitle(overlays)
+      const nextOverlay: Overlay = { id: overlayId, title, children: [] }
+      set((s) => ({
+        meta: {
+          ...s.meta,
+          ui: { ...s.meta.ui, overlays: { [overlayId]: nextOverlay, ...overlays } },
+          uiTree: nextTree,
+        },
+      }))
+      scheduleDraft()
+      useUiSelection.getState().selectUiNode(nodeId, overlayId)
+      broadcastUiTreeIntent({ type: 'scheme-added', parentId, nodeId, overlayId, title })
+      return { nodeId, overlayId }
+    },
+    createUiFolder: (parentId, name) => {
+      const st = get()
+      const overlays = st.meta.ui?.overlays ?? {}
+      const tree = ensureUiTree(st.meta.uiTree, overlays)
+      if (parentId !== null && findUiTreeNode(tree, parentId)?.kind !== 'folder') return null
+      const nodeId = nextUiId('ui-folder:', collectUiTreeNodeIds(tree))
+      const label = name?.trim() || '新文件夹'
+      const nextTree = addTreeFolder(tree, parentId, { id: nodeId, name: label })
+      if (nextTree === tree) return null
+      set((s) => ({ meta: { ...s.meta, uiTree: nextTree } }))
+      scheduleDraft()
+      useUiSelection.getState().selectUiNode(nodeId, null)
+      broadcastUiTreeIntent({ type: 'folder-added', parentId, nodeId, name: label })
+      return nodeId
+    },
+    renameUiNode: (nodeId, name) => {
+      const trimmed = name.trim()
+      if (!trimmed) return false
+      const st = get()
+      const overlays = st.meta.ui?.overlays ?? {}
+      const tree = ensureUiTree(st.meta.uiTree, overlays)
+      const node = findUiTreeNode(tree, nodeId)
+      if (!node || node.id === BASIC_UI_FOLDER_ID) return false
+      if (node.kind === 'folder') {
+        const nextTree = renameTreeFolder(tree, node.id, trimmed)
+        if (nextTree === tree) return false
+        set((s) => ({ meta: { ...s.meta, uiTree: nextTree } }))
+        scheduleDraft()
+        broadcastUiTreeIntent({ type: 'renamed', nodeId, name: trimmed })
+        return true
+      }
+      if (node.overlayId.startsWith('base:') || overlayTitleExists(overlays, trimmed, node.overlayId)) return false
+      const overlay = overlays[node.overlayId]
+      if (!overlay) return false
+      set((s) => ({
+        meta: {
+          ...s.meta,
+          ui: {
+            ...s.meta.ui,
+            overlays: { ...(s.meta.ui?.overlays ?? {}), [node.overlayId]: { ...overlay, title: trimmed } },
+          },
+        },
+      }))
+      scheduleDraft()
+      broadcastUiTreeIntent({ type: 'overlay-renamed', overlayId: node.overlayId, title: trimmed })
+      return true
+    },
+    removeUiNode: (nodeId) => {
+      const st = get()
+      const overlays = st.meta.ui?.overlays ?? {}
+      const tree = ensureUiTree(st.meta.uiTree, overlays)
+      const node = findUiTreeNode(tree, nodeId)
+      if (!node) return false
+      const removedOverlayIds = collectOverlayIdsFrom(node)
+      const removedNodeIds = collectNodeIdsFrom(node)
+      if (node.id === BASIC_UI_FOLDER_ID || removedOverlayIds.some((id) => id.startsWith('base:'))) return false
+      const nextTree = removeTreeNode(tree, node.id)
+      if (nextTree === tree) return false
+      const nextOverlays = { ...overlays }
+      for (const overlayId of removedOverlayIds) delete nextOverlays[overlayId]
+      set((s) => ({
+        meta: {
+          ...s.meta,
+          ui: { ...s.meta.ui, overlays: nextOverlays },
+          uiTree: nextTree,
+        },
+      }))
+      scheduleDraft()
+      const sel = useUiSelection.getState()
+      if (
+        removedNodeIds.includes(sel.selectedTreeNodeId ?? '')
+        || removedOverlayIds.includes(sel.selectedOverlayId ?? '')
+      ) {
+        sel.clearUiSelection()
+      }
+      broadcastUiTreeIntent({ type: 'removed', nodeId, removedOverlayIds, removedNodeIds })
+      return true
     },
 
     // 引用环是阻塞级错误：一旦落盘运行时会无限下钻栈溢出，必须写盘前挡住（在 runSave 内）。

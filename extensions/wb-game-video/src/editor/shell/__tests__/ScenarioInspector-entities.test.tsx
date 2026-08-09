@@ -24,7 +24,9 @@ describe('ScenarioInspector entity attributes', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '＋ 新建实体' }))
     expect(screen.getByRole('dialog', { name: '新建实体' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '确认' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '确认' })).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('未填入实体名称')
     fireEvent.change(screen.getByLabelText('实体名称'), { target: { value: '主角' } })
     fireEvent.change(screen.getByLabelText('实体id'), { target: { value: 'hero' } })
     fireEvent.click(screen.getByRole('button', { name: '确认' }))
@@ -32,9 +34,14 @@ describe('ScenarioInspector entity attributes', () => {
     expect(screen.getByLabelText('hero 的属性名称')).toHaveValue('属性1')
 
     fireEvent.click(screen.getByRole('button', { name: '新增属性' }))
+    expect(screen.getByRole('dialog', { name: '新建属性' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '确认' })).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.change(screen.getByLabelText('属性名称'), { target: { value: '生命值' } })
+    fireEvent.change(screen.getByLabelText('属性id'), { target: { value: 'hp' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认' }))
     const names = screen.getAllByLabelText('hero 的属性名称')
     expect(names[0]).toHaveValue('属性1')
-    expect(names[1]).toHaveValue('属性2')
+    expect(names[1]).toHaveValue('生命值')
   })
 
   it('renders existing property IDs as editable controls', () => {
@@ -53,10 +60,10 @@ describe('ScenarioInspector entity attributes', () => {
 
     const idInput = screen.getByRole('textbox', { name: 'hero 的属性 ID' })
     expect(idInput).toHaveValue('attr0')
-    expect(idInput).not.toHaveAttribute('readonly')
+    expect(idInput).toHaveAttribute('readonly')
     const entityIdInput = screen.getByRole('textbox', { name: '实体 ID' })
     expect(entityIdInput).toHaveValue('hero')
-    expect(entityIdInput).not.toHaveAttribute('readonly')
+    expect(entityIdInput).toHaveAttribute('readonly')
   })
 
   it('closes an entity overflow menu when clicking outside', () => {
@@ -87,7 +94,7 @@ describe('ScenarioInspector entity attributes', () => {
 
     fireEvent.click(overflow)
     fireEvent.click(screen.getByRole('button', { name: '删除' }))
-    expect(screen.getByRole('dialog', { name: '删除实体 主角' })).toHaveTextContent('确认删除主角吗？')
+    expect(screen.getByRole('dialog', { name: '删除实体 主角' })).toHaveTextContent('确认删除[主角]吗？')
   })
 
   it('stores each attribute initial value independently', () => {

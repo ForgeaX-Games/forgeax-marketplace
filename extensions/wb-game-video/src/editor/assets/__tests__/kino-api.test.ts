@@ -8,6 +8,22 @@ import {
 
 const FIXTURE_BYTES = 6
 
+const STS_UPLOAD = {
+  tmp_secret_id: 'test-secret-id',
+  tmp_secret_key: 'test-secret-key',
+  session_token: 'test-session-token',
+  expiration: '2099-01-01T00:00:00Z',
+  bucket: 'kino-test-1250000000',
+  bucket_url: 'https://kino-test-1250000000.cos.ap-guangzhou.myqcloud.com',
+  region: 'ap-guangzhou',
+  prefix: 'kino/demo/',
+  object_key: 'kino/demo/clip.mp4',
+  allowed_extensions: ['mp4'],
+  allowed_content_types: ['video/mp4'],
+  max_file_size_bytes: 104857600,
+  required_headers: { 'Content-Type': 'video/mp4' },
+}
+
 function envelope<T>(data: T) {
   return { code: 0, message: 'ok', data }
 }
@@ -106,16 +122,7 @@ describe('createKinoVideoClient', () => {
       })
       return new Response(
         JSON.stringify(
-          envelope({
-            upload: {
-              method: 'PUT',
-              url: 'http://127.0.0.1:18900/api/v1/kino/uploads/token?game_id=demo',
-              headers: { 'content-type': 'video/mp4' },
-              expires_at: '2099-01-01T00:00:00.000Z',
-            },
-            object_url: 'http://127.0.0.1:18900/api/v1/kino/uploads/token',
-            upload_token: 'token',
-          }),
+          envelope(STS_UPLOAD),
         ),
         { status: 200, headers: { 'content-type': 'application/json' } },
       )
@@ -128,7 +135,7 @@ describe('createKinoVideoClient', () => {
       bytes: FIXTURE_BYTES,
       extension: 'mp4',
     })
-    expect(prepared.upload_token).toBe('token')
+    expect(prepared).toEqual(STS_UPLOAD)
   })
 
   it('accepts audio resource and upload MIME types', async () => {
@@ -136,9 +143,11 @@ describe('createKinoVideoClient', () => {
       if (init?.method === 'POST') {
         expect(JSON.parse(String(init.body))).toMatchObject({ mime_type: 'audio/ogg' })
         return new Response(JSON.stringify(envelope({
-          upload: { method: 'PUT', url: 'https://storage.example/upload', headers: {}, expires_at: '2099-01-01' },
-          object_url: 'https://storage.example/object',
-          upload_token: 'token',
+          ...STS_UPLOAD,
+          object_key: 'kino/demo/theme.ogg',
+          allowed_extensions: ['ogg'],
+          allowed_content_types: ['audio/ogg'],
+          required_headers: { 'Content-Type': 'audio/ogg' },
         })), { status: 200, headers: { 'content-type': 'application/json' } })
       }
       expect(String(input)).toBe('/api/v1/kino/resources?game_id=demo&media_type=audio&page=1&page_size=20')
@@ -164,16 +173,7 @@ describe('createKinoVideoClient', () => {
         replace_existing: true,
       })
       return new Response(
-        JSON.stringify(envelope({
-          upload: {
-            method: 'PUT',
-            url: 'http://127.0.0.1:18900/upload',
-            headers: {},
-            expires_at: '2099-01-01T00:00:00.000Z',
-          },
-          object_url: 'http://127.0.0.1:18900/object',
-          upload_token: 'token',
-        })),
+        JSON.stringify(envelope(STS_UPLOAD)),
         { status: 200, headers: { 'content-type': 'application/json' } },
       )
     })

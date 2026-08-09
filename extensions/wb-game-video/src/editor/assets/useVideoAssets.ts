@@ -293,7 +293,7 @@ export function useVideoAssets(
           return undefined
         }
         setUploadError(safeErrorMessage(err))
-        if (err instanceof VideoUploadError && err.retryState) {
+        if (err instanceof VideoUploadError && err.code === 'complete_failed' && err.retryState?.uploaded) {
           setRetryPrepared(err.retryState)
         }
         return undefined
@@ -443,7 +443,7 @@ export function useVideoAssets(
         return undefined
       }
       setUploadError(safeErrorMessage(err))
-      if (err instanceof VideoUploadError && err.retryState) {
+      if (err instanceof VideoUploadError && err.code === 'complete_failed' && err.retryState?.uploaded) {
         setRetryPrepared(err.retryState)
       }
       return undefined

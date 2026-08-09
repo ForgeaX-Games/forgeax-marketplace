@@ -33,12 +33,10 @@ import {
   type FormulaCreateRequest,
   type VariableCreateRequest,
 } from './metaCatalog'
-import type { ScenarioIdRename } from '../persist/scenario-id'
 import { collectItemIds } from './itemCatalog'
 import { overlayTitleExists } from './overlay-title'
 import { ensureUiTree } from '../persist/ui-tree'
 import { useUiSelection } from '../persist/uiSelectionStore'
-import { executeUiNavCommand } from '../persist/uiNavSync'
 import { useRuleSelection } from '../persist/ruleSelectionStore'
 
 export interface ConfigTab {
@@ -62,7 +60,8 @@ export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = 
   const meta = useGraphScenario((s) => s.meta)
   const blueprints = useGraphScenario((s) => s.blueprints)
   const setMeta = useGraphScenario((s) => s.setMeta)
-  const renameScenarioId = useGraphScenario((s) => s.renameScenarioId)
+  const renameUiNode = useGraphScenario((s) => s.renameUiNode)
+  const removeUiNode = useGraphScenario((s) => s.removeUiNode)
 
   // 键盘撤销/重做：Ctrl/⌘+Z 撤销，Ctrl/⌘+Shift+Z 或 Ctrl+Y 重做；输入框内不拦截（留给原生文本撤销）。
   useEffect(() => {
@@ -102,29 +101,16 @@ export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = 
   // 界面 tab 保持新建方案置顶；其它方案选择器继续沿用通用排序。
   const schemeIds = useMemo(() => listInterfaceCustomSchemeIds(allOverlays), [allOverlays])
   const baseIds = useMemo(() => listBaseHudIds(allOverlays), [allOverlays])
-  const selectedTreeNodeId = useUiSelection((state) => state.selectedTreeNodeId)
   const selectedOverlayId = useUiSelection((state) => state.selectedOverlayId)
-  const selectUiNode = useUiSelection((state) => state.selectUiNode)
-  // 主区展示用的方案：选中项不在当前方案集（全局 + 基础）里（删除/首次/选中了文件夹）
+  // 主区展示用的方案：选中项不在当前方案集（全局 + 基础）里（删除/首次/空选中）
   // 时回落到第一个全局方案，保证 OverlaySchemeEditor 始终有内容可渲染。
+  // 注意：这里只做「渲染回落」，不回写选中态——选中态纯用户驱动（与左栏主树一致），
+  // 否则新建方案时 add-scheme 的 selectUiNode 会与此处回写抢态，导致 is-selected 闪烁。
   const selectable = [...schemeIds, ...baseIds]
   const selOverlay = selectedOverlayId && selectable.includes(selectedOverlayId)
     ? selectedOverlayId
     : (schemeIds[0] ?? baseIds[0] ?? '')
   const uiTree = ensureUiTree(meta.uiTree, allOverlays)
-  useEffect(() => {
-    if (!overlaysMode) return
-    // 仅在「确实没有任何树节点选中」（首次进入 / 删除后）时自愈到第一个方案。
-    // 用户主动选中文件夹时 selectedTreeNodeId 非 null、selectedOverlayId 为 null，
-    // 此时不应把选中抢回 scheme——否则 is-selected 会在文件夹与方案行间反复跳变。
-    if (selectedTreeNodeId !== null) return
-    if (!selOverlay) {
-      if (selectedOverlayId !== null) selectUiNode(null, null)
-      return
-    }
-    if (selectedOverlayId === selOverlay) return
-    selectUiNode(findSchemeNodeId(uiTree.root, selOverlay) ?? null, selOverlay)
-  }, [overlaysMode, selOverlay, selectUiNode, selectedTreeNodeId, selectedOverlayId, uiTree])
   // 基础覆盖物方案只锁结构：单组件不可增删；inputs/layout 可编辑。
   const selLocked = selOverlay.startsWith(BASE_HUD_PREFIX)
 
@@ -158,16 +144,17 @@ export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = 
   }
   const renameScheme = (oid: string, title: string) => {
     if (!allOverlays[oid]) return
-    if (overlayTitleExists(allOverlays, title, oid)) {
-      window.alert(`界面方案名称「${title.trim()}」已存在`)
-      return
-    }
     const nodeId = findSchemeNodeId(uiTree.root, oid)
-    if (nodeId) executeUiNavCommand({ type: 'rename', nodeId, name: title })
+    if (nodeId && !renameUiNode(nodeId, title)) {
+      // store action 拦截了重名/基础方案等情形；重名时给作者一个提示。
+      if (overlayTitleExists(allOverlays, title, oid)) {
+        window.alert(`界面方案名称「${title.trim()}」已存在`)
+      }
+    }
   }
   const removeScheme = (oid: string) => {
     const nodeId = findSchemeNodeId(uiTree.root, oid)
-    if (nodeId) executeUiNavCommand({ type: 'remove', nodeId })
+    if (nodeId) removeUiNode(nodeId)
   }
   const addSchemeChild = (
     oid: string,
@@ -285,7 +272,6 @@ export function GraphConfigView({ tabs, title: _title = '配置', icon: _icon = 
               focusItemId={activeRuleItemId}
               overlayUsage={overlayUsage}
               onChange={setMeta}
-              onRenameId={(rename: ScenarioIdRename) => renameScenarioId(rename)}
             />
           </div>
         )}

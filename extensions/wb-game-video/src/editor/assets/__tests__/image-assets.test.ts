@@ -10,6 +10,18 @@ const extension = vi.hoisted(() => ({
   fetch: vi.fn((path: string, init?: RequestInit) => fetch(path, init)),
   url: vi.fn((path: string) => `https://host.test/extension/runtime/${path.replace(/^\/+/, '')}`),
 }))
+const cosState = vi.hoisted(() => ({
+  options: [] as unknown[],
+  puts: [] as unknown[],
+}))
+
+vi.mock('cos-js-sdk-v5', () => ({
+  default: class MockCOS {
+    constructor(options: unknown) { cosState.options.push(options) }
+    async putObject(params: unknown) { cosState.puts.push(params) }
+    cancelTask = vi.fn()
+  },
+}))
 
 vi.mock('../../../lib/workbench-host', () => ({
   getWorkbenchHost: () => ({ extension, ready: vi.fn(async () => undefined) }),
@@ -17,6 +29,8 @@ vi.mock('../../../lib/workbench-host', () => ({
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  cosState.options.length = 0
+  cosState.puts.length = 0
 })
 
 describe('gvaImageUrl', () => {
@@ -61,29 +75,6 @@ describe('deleteReferenceImage', () => {
 
 describe('uploadReferenceImage', () => {
   it('preserves the real Kino resource id in provider metadata', async () => {
-    type XhrMock = {
-      onload: (() => void) | null
-      upload: { onprogress: ((event: ProgressEvent<EventTarget>) => void) | null }
-      status: number
-      responseText: string
-    }
-    const xhrInstances: XhrMock[] = []
-    class MockXHR {
-      onload: XhrMock['onload'] = null
-      onerror: (() => void) | null = null
-      onabort: (() => void) | null = null
-      upload = { onprogress: null as XhrMock['upload']['onprogress'] }
-      status = 200
-      responseText = ''
-      open = vi.fn()
-      send = vi.fn()
-      setRequestHeader = vi.fn()
-      abort = vi.fn()
-      constructor() {
-        xhrInstances.push(this as unknown as XhrMock)
-      }
-    }
-    vi.stubGlobal('XMLHttpRequest', MockXHR)
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string'
         ? input
@@ -95,16 +86,19 @@ describe('uploadReferenceImage', () => {
           code: 0,
           message: 'ok',
           data: {
-            upload: {
-              method: 'PUT',
-              url: 'https://upload.example/image-token',
-              headers: { 'content-type': 'image/png' },
-              expires_at: '2099-01-01T00:00:00.000Z',
-              chunk_size: 3,
-              chunk_count: 1,
-            },
-            object_url: 'https://media.example/reference.png',
-            upload_token: 'opaque-token',
+            tmp_secret_id: 'test-secret-id',
+            tmp_secret_key: 'test-secret-key',
+            session_token: 'test-session-token',
+            expiration: '2099-01-01T00:00:00Z',
+            bucket: 'kino-test-1250000000',
+            bucket_url: 'https://media.example',
+            region: 'ap-guangzhou',
+            prefix: 'kino/demo/',
+            object_key: 'kino/demo/reference.png',
+            allowed_extensions: ['png'],
+            allowed_content_types: ['image/png'],
+            max_file_size_bytes: 20 * 1024 * 1024,
+            required_headers: { 'Content-Type': 'image/png' },
           },
         }), { status: 200, headers: { 'content-type': 'application/json' } })
       }
@@ -128,8 +122,6 @@ describe('uploadReferenceImage', () => {
       new File(['png'], 'reference.png', { type: 'image/png' }),
       'scene',
     )
-    await vi.waitFor(() => expect(xhrInstances).toHaveLength(1))
-    xhrInstances[0]?.onload?.()
 
     await expect(upload).resolves.toMatchObject({
       id: 'kino-image-resource',
@@ -139,5 +131,17 @@ describe('uploadReferenceImage', () => {
         upstreamResourceId: 'kino-image-resource',
       },
     })
+    expect(cosState.options).toEqual([{
+      SecretId: 'test-secret-id',
+      SecretKey: 'test-secret-key',
+      SecurityToken: 'test-session-token',
+    }])
+    expect(cosState.puts).toEqual([expect.objectContaining({
+      Bucket: 'kino-test-1250000000',
+      Region: 'ap-guangzhou',
+      Key: 'kino/demo/reference.png',
+      ContentType: 'image/png',
+      Headers: { 'Content-Type': 'image/png' },
+    })])
   })
 })

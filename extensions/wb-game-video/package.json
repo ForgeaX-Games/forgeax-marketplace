@@ -1,6 +1,6 @@
 {
   "name": "@forgeax-extension/wb-game-video",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "ForgeaX workbench plugin — Video Game (gameplay-on-video) editor & player. 视频游戏（玩法优先）编辑器：Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点热点 + 视频分支（fork of wb-reel）",
   "private": false,
   "repository": {
@@ -19,7 +19,6 @@
     "SKILL.md",
     "!**/*.mp4",
     "!**/*.map",
-    "!dist/HYShangWei-*.woff2",
     "!dist/**/*.map"
   ],
   "exports": {
@@ -44,7 +43,7 @@
     "dev:backend": "tsup --watch",
     "build": "bun run build:frontend && bun run build:backend && bun run build:standalone && bun run check:release",
     "build:frontend": "tsc -p tsconfig.build.json && vite build",
-    "build:backend": "tsup",
+    "build:backend": "tsup && node scripts/inline-react-flow-styles.mjs",
     "build:standalone": "tsc -p src/runtime/sdk/tsconfig.json && vite build --config src/runtime/sdk/server/vite.config.ts",
     "build:nodia-seed": "bun scripts/build-nodia-seed.mjs",
     "start:standalone": "bun run build:standalone && vite preview --config src/runtime/sdk/server/vite.config.ts",
@@ -61,6 +60,7 @@
     "@dagrejs/dagre": "^3.0.0",
     "@xyflow/react": "^12.10.2",
     "ajv": "^8.17.1",
+    "cos-js-sdk-v5": "^1.10.1",
     "mammoth": "^1.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

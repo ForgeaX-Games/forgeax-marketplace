@@ -75,11 +75,9 @@ vi.mock('../editor/persist/graphViewStore', () => ({
   useGraphView: (selector: (state: { view: string; setView: () => void }) => unknown) => selector({ view: 'graph', setView: vi.fn() }),
   installGraphViewSync: () => vi.fn(),
 }))
-vi.mock('../editor/persist/uiNavSync', () => ({
-  installUiNavSync: () => vi.fn(),
-  sendUiNavCommand: vi.fn(),
-  useUiNavMirror: (selector: (state: { role: string; snapshot: null }) => unknown) =>
-    selector({ role: 'standalone', snapshot: null }),
+vi.mock('../editor/persist/graphUiTreeSync', () => ({
+  installGraphUiTreeSync: () => vi.fn(),
+  broadcastUiTreeIntent: vi.fn(),
 }))
 vi.mock('../editor/persist/uiSelectionStore', () => ({
   useUiSelection: (selector: (state: { selectedTreeNodeId: null; selectUiNode: () => void }) => unknown) =>

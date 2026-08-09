@@ -464,4 +464,24 @@ describe('ComponentPropertyPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '#F0F0F0' }))
     expect(document.querySelector('.gc-cp-panel')).toBeTruthy()
   })
+
+  it('stretches to fill a host slot that is flex flex-col (height pull-through)', () => {
+    // 宿主 slot（wb-game-video-inspector-slot）是 display:flex; flex-direction:column。
+    // .cpp-panel 作为其 flex 子项，主轴=垂直：flex-grow 必须 > 0 才会沿主轴拉满高度，
+    // 否则 height:100% 在 flex 子项上不可靠、会塌成内容高（即「高度没拉通」）。
+    const { container } = render(
+      <div style={{ display: 'flex', flexDirection: 'column', height: 600 }}>
+        <ComponentPropertyPanel
+          {...baseProps}
+          overlay={{ id: 'hud', children: [] }}
+        />
+      </div>,
+    )
+    const panel = screen.getByTestId('component-property-panel')
+    const cs = getComputedStyle(panel)
+    // flex:1 1 auto → flexGrow=1（沿垂直主轴拉伸）；旧的 flex:0 0 ... → flexGrow=0（不拉通）。
+    expect(cs.flexGrow).toBe('1')
+    // 宽度钳制仍保留（查注入的 CSS 文本，不依赖 happy-dom 对 clamp() 的计算解析）。
+    expect(container.querySelector('style')?.textContent).toContain('width: clamp(360px, 36vw, 480px)')
+  })
 })

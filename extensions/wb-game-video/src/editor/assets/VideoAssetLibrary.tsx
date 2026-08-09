@@ -861,7 +861,9 @@ export function VideoAssetLibrary({
             ) : null}
             {controller.uploadError ? (
               <>
-                <span className="val-head-fail">{t('videoAssets.completeFailed')}</span>
+                <span className="val-head-fail">
+                  {controller.canRetryComplete ? t('videoAssets.completeFailed') : controller.uploadError}
+                </span>
                 {controller.canRetryComplete ? (
                   <button
                     type="button"

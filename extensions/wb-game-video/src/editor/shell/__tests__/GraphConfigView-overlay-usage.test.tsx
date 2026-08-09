@@ -4,7 +4,6 @@ import type { BlueprintDoc, GameGraph, GameScenario } from '../../../runtime/sch
 import { registerTestComponents } from '../../../runtime/__tests__/test-components'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
 import { CUSTOM_UI_FOLDER_ID } from '../../persist/ui-tree'
-import { executeUiNavCommand } from '../../persist/uiNavSync'
 import { useUiSelection } from '../../persist/uiSelectionStore'
 import { GraphConfigView } from '../GraphConfigView'
 import { NewSidebar } from '../NewSidebar'
@@ -143,7 +142,7 @@ describe('GraphConfigView overlay usage', () => {
       graph,
       meta: { ui: { overlays } },
     })
-    expect(executeUiNavCommand({ type: 'add-scheme', parentId: CUSTOM_UI_FOLDER_ID })).toBe(true)
+    expect(useGraphScenario.getState().createUiScheme(CUSTOM_UI_FOLDER_ID)).not.toBeNull()
     const scenario: GameScenario = { version: 'test', graph, ui: { overlays } }
     render(<GraphConfigView tabs={[{ section: 'overlays', label: '界面' }]} scenario={scenario} />)
 
@@ -151,11 +150,7 @@ describe('GraphConfigView overlay usage', () => {
       .some((overlay) => overlay.title === '新方案 2')).toBe(true)
 
     const selectedTreeNodeId = useUiSelection.getState().selectedTreeNodeId!
-    expect(executeUiNavCommand({
-      type: 'rename',
-      nodeId: selectedTreeNodeId,
-      name: '战斗 HUD',
-    })).toBe(false)
+    expect(useGraphScenario.getState().renameUiNode(selectedTreeNodeId, '战斗 HUD')).toBe(false)
     expect((useGraphScenario.getState().meta.ui?.overlays?.['scheme-2'])?.title).toBe('新方案 2')
   })
 
