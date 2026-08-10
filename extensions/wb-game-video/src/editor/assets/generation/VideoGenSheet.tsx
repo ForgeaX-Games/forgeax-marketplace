@@ -11,6 +11,7 @@ import {
 import { useT } from '../../../i18n'
 import { injectStyleOnce } from '../../../styles/injectStyle'
 import generationEmptyIcon from '../../../assets/video-generation-empty.svg?url'
+import generationStyleIcon from '../../../assets/video-generation-style.svg?url'
 import generationFrameIcon from '../../../assets/video-generation-frame.svg?url'
 import generationSwapIcon from '../../../assets/video-generation-swap.svg?url'
 import generationUndoIcon from '../../../assets/video-generation-undo.svg?url'
@@ -463,9 +464,22 @@ export function VideoGenSheet({
                 ))}
               </div>
 
-              {mode !== 't2v' ? <div className="vgen-media-row">
+              <div className="vgen-media-row">
+                <button
+                  type="button"
+                  className={`vgen-style-tile${selectedVisualStyle ? ' has-style' : ''}`}
+                  style={imageBackground(selectedVisualStyle?.cdnUrl)}
+                  aria-label={selectedVisualStyle
+                    ? `${t('videoAssets.generate.style')}: ${selectedVisualStyle.label}`
+                    : t('videoAssets.generate.style')}
+                  onClick={openStylePicker}
+                >
+                  {selectedVisualStyle ? null : <img src={generationStyleIcon} alt="" />}
+                  <span>{selectedVisualStyle?.label ?? t('videoAssets.generate.style')}</span>
+                </button>
                 {mode === 'strict' || mode === 'firstref' ? (
                   <>
+                    <span className="vgen-media-divider" aria-hidden />
                     <FrameTile
                       asset={firstFrame}
                       label={t('videoAssets.generate.firstFrame')}
@@ -486,7 +500,7 @@ export function VideoGenSheet({
                   </>
                 ) : null}
                 {mode === 'ref' ? (
-                  <div className="vgen-page-refs">
+                  <><span className="vgen-media-divider" aria-hidden /><div className="vgen-page-refs">
                     {references.map((asset) => (
                       <button
                         key={asset.id}
@@ -504,9 +518,9 @@ export function VideoGenSheet({
                         <img src={generationFrameIcon} alt="" /><span>{t('videoAssets.generate.addRef')}</span>
                       </button>
                     ) : null}
-                  </div>
+                  </div></>
                 ) : null}
-              </div> : null}
+              </div>
 
               {errors.frames ? <div className="vgen-design-error" role="alert">{errors.frames}</div> : null}
               {errors.first ? <div className="vgen-design-error" role="alert">{errors.first}</div> : null}
@@ -526,23 +540,11 @@ export function VideoGenSheet({
                 />
                 {errors.prompt ? <div className="vgen-design-error" role="alert">{errors.prompt}</div> : null}
                 <div className="vgen-prompt-tools">
-                  <div className="vgen-prompt-options">
-                    <button
-                      type="button"
-                      className={`vgen-style-button${selectedVisualStyle ? ' has-style' : ''}`}
-                      aria-label={selectedVisualStyle
-                        ? `${t('videoAssets.generate.style')}: ${selectedVisualStyle.label}`
-                        : t('videoAssets.generate.style')}
-                      onClick={openStylePicker}
-                    >
-                      {selectedVisualStyle?.label ?? t('videoAssets.generate.style')}
-                    </button>
-                    <label className="vgen-audio-toggle">
-                      <span className="vgen-audio-label">{t('videoAssets.generate.audio')}</span>
-                      <input id={audioId} type="checkbox" checked={generateAudio} onChange={(event) => setGenerateAudio(event.target.checked)} />
-                      <span className="vgen-audio-switch" aria-hidden />
-                    </label>
-                  </div>
+                  <label className="vgen-audio-toggle">
+                    <input id={audioId} type="checkbox" checked={generateAudio} onChange={(event) => setGenerateAudio(event.target.checked)} />
+                    <span aria-hidden />
+                    {t('videoAssets.generate.audio')}
+                  </label>
                   <div className="vgen-prompt-actions">
                     {running ? (
                       <button type="button" className="vgen-prompt-undo" aria-label={t('videoAssets.generate.cancel')} onClick={onCancel}>
@@ -555,11 +557,11 @@ export function VideoGenSheet({
                     )}
                     <button type="button" className="vgen-prompt-helper" disabled title={t('videoAssets.generate.promptHelperComing')}>{t('videoAssets.generate.promptHelper')} <span aria-hidden>⌄</span></button>
                     <button
-                      type="button"
-                      className={`vgen-send${running ? ' running' : ''}`}
-                      aria-label={submitLabel}
-                      disabled={running}
-                      onClick={submit}
+                    type="button"
+                    className={`vgen-send${running ? ' running' : ''}`}
+                    aria-label={submitLabel}
+                    disabled={running}
+                    onClick={submit}
                     >
                       <img src={generationSendIcon} alt="" />
                     </button>

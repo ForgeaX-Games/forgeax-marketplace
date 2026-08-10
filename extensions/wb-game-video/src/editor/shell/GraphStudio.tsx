@@ -42,7 +42,6 @@ import type { Formula } from '../persist/formula-authoring'
 import { docToPack, metaFromDocument, packToDoc } from '../persist/blueprint-project'
 import { wouldCreateCycle } from '../../graph/edit/blueprint-refs'
 import { useRevealOnScopeChange } from './useRevealOnScopeChange'
-import { blueprintSidebarPath } from './blueprintNav'
 import {
   graphPathLabels, resolveGraphAtPath, resolveGraphEntryAtPath, updateGraphAtPath, validGraphPath,
 } from '../../graph/edit/graph-scope'
@@ -847,20 +846,6 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
     setDrillStack([])
     setSelected(null)
   }
-  /** 画布面包屑 = 该蓝图在侧栏里的位置（蓝图根 → …文件夹 → 蓝图）+ 蓝图内的下钻层。 */
-  const crumbs: { id: string; label: string; onClick?: () => void }[] = [
-    ...blueprintSidebarPath(blueprints, activeBlueprintId).map((crumb) => ({
-      id: crumb.id,
-      label: crumb.label,
-      // 侧栏文件夹层在画布里无落点；只有「蓝图本体」这层可点（退出下钻回到该蓝图根图）。
-      onClick: crumb.id === activeBlueprintId ? leaveToRoot : undefined,
-    })),
-    ...drillLabels.map((item, i) => ({
-      id: item.id,
-      label: item.name,
-      onClick: () => setDrillStack(drillStack.slice(0, i + 1)),
-    })),
-  ]
   return (
     <div
       onPointerDownCapture={clearPreviewFocusFromPointer}
@@ -909,25 +894,27 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           }}
         >
           {/* 面包屑本体需要可点击；bar 整体 pointerEvents:none 让空白区不挡画布，交互元素单独开启。
-       Figma 15229_78005：每层用 › 分隔，最后一层用品牌橙 #FF9C2A。 */}
-          <span style={{ display: 'flex', gap: 8, alignItems: 'center', pointerEvents: 'auto' }}>
-            {crumbs.map((crumb, i) => {
-              const color = i === crumbs.length - 1 ? '#FF9C2A' : '#FFFFFF'
+       Figma 15229_78005：以「当前蓝图名」开头（无「根」字），每层用 › 分隔，最后一层用品牌橙 #FF9C2A。 */}
+   <span style={{ display: 'flex', gap: 8, alignItems: 'center', pointerEvents: 'auto' }}>
+            <button
+          onClick={leaveToRoot}
+    style={{ background: 'none', border: 'none', color: drillStack.length === 0 ? '#FF9C2A' : '#FFFFFF', cursor: 'pointer', padding: 0, fontSize: 14, fontWeight: 400 }}
+      >
+        {blueprints[activeBlueprintId]?.title ?? '主蓝图'}
+      </button>
+            {drillLabels.map((item, i) => {
+          const isLast = i === drillStack.length - 1
               return (
-                <span key={crumb.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {i > 0 ? <span style={{ color: 'rgba(255,255,255,0.40)' }}>›</span> : null}
-                  {crumb.onClick ? (
-                    <button
-                      onClick={crumb.onClick}
-                      style={{ background: 'none', border: 'none', color, cursor: 'pointer', padding: 0, fontSize: 14, fontWeight: 400 }}
-                    >
-                      {crumb.label}
-                    </button>
-                  ) : (
-                    <span style={{ color }}>{crumb.label}</span>
-                  )}
-                </span>
-              )
+       <span key={item.id} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+  <span style={{ color: 'rgba(255,255,255,0.40)' }}>›</span>
+      <button
+          onClick={() => setDrillStack(drillStack.slice(0, i + 1))}
+                    style={{ background: 'none', border: 'none', color: isLast ? '#FF9C2A' : '#FFFFFF', cursor: 'pointer', padding: 0, fontSize: 14, fontWeight: 400 }}
+>
+  {item.name}
+          </button>
+        </span>
+   )
             })}
           </span>
         </div>

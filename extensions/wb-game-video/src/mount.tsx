@@ -37,7 +37,7 @@ import {
 } from './host-init'
 import type { DocumentType } from './editor/assets/registry-types'
 import { useDocumentNav } from './editor/persist/documentNavStore'
-import { topViewOf, useGraphView, type TopView } from './editor/persist/graphViewStore'
+import { useGraphView } from './editor/persist/graphViewStore'
 import { setPendingDocumentTypes as writePendingDocumentTypes } from './editor/persist/pendingDocumentsStore'
 import { initLocaleSync } from './i18n'
 import './styles/global.css'
@@ -46,9 +46,6 @@ export type { WorkbenchInitOptions }
 export { forgeaxHttp, type RewriteRule } from './lib/forgeax-http'
 export { applyHostInit } from './host-init'
 export type { WorkbenchHostClient } from './lib/workbench-host'
-
-/** 宿主顶栏两档切换器的档位；所有编辑视图共用 `workfile`。 */
-export type GameVideoTopView = TopView
 
 export interface GameVideoMountHandle {
   unmount(): void
@@ -59,14 +56,6 @@ export interface GameVideoMountHandle {
    * 预览抽屉与挂在画布上的开关拉片一并收起（拉片在扩展 DOM 里，宿主藏不掉）。
    */
   setInspectorActive(active: boolean): void
-  getTopView(): GameVideoTopView
-  /**
-   * 顶栏两档切换。与侧栏「试玩」写的是同一个 view store，所以两处入口天然同步；
-   * `'workfile'` 回到进试玩前的那个编辑视图，不硬编码回蓝图。
-   */
-  setTopView(view: GameVideoTopView): void
-  /** 只在档位真的换了时回调——侧栏在编辑视图之间跳不该惊动顶栏。 */
-  subscribeTopView(listener: (view: GameVideoTopView) => void): () => void
 }
 
 export function mount(
@@ -112,21 +101,6 @@ export function mount(
       writePendingDocumentTypes(types)
     },
     setInspectorActive,
-    getTopView(): GameVideoTopView {
-      return topViewOf(useGraphView.getState().view)
-    },
-    setTopView(view: GameVideoTopView): void {
-      useGraphView.getState().setTopView(view)
-    },
-    subscribeTopView(listener: (view: GameVideoTopView) => void): () => void {
-      let current = topViewOf(useGraphView.getState().view)
-      return useGraphView.subscribe((state) => {
-        const next = topViewOf(state.view)
-        if (next === current) return
-        current = next
-        listener(next)
-      })
-    },
     unmount: () => {
       reactRoot.unmount()
       addedScopeElements.forEach((element) => element.classList.remove('ks-app-host'))

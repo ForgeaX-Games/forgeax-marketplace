@@ -2,7 +2,6 @@ import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { gameMediaPlugin } from './game-media-middleware'
-import { resolveViteDevPort } from '../../../../scripts/vite-dev-port'
 
 const configDir = dirname(fileURLToPath(import.meta.url))
 const extensionRoot = resolve(configDir, '..', '..', '..', '..')
@@ -29,14 +28,14 @@ export default {
   },
   server: {
     host: true,
-    port: resolveViteDevPort(),
+    port: process.env.VITE_DEV_PORT ? Number(process.env.VITE_DEV_PORT) : 15185,
     strictPort: true,
     allowedHosts: true,
     proxy,
   },
   preview: {
     host: true,
-    port: resolveViteDevPort(),
+    port: process.env.VITE_DEV_PORT ? Number(process.env.VITE_DEV_PORT) : 15185,
     strictPort: true,
     allowedHosts: true,
     proxy,

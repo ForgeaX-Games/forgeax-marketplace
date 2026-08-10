@@ -128,44 +128,6 @@ test('openDocument sets document nav and graph view', async () => {
   act(() => handle.unmount())
 })
 
-test('setTopView drives the shared view store and reports back through subscribeTopView', async () => {
-  const { useGraphView } = await import('../editor/persist/graphViewStore')
-  useGraphView.setState({ view: 'documents', lastEditView: 'documents' })
-  const seen: string[] = []
-
-  const handle = mountInto({})
-  const unsubscribe = handle.subscribeTopView((view) => seen.push(view))
-
-  expect(handle.getTopView()).toBe('workfile')
-  act(() => handle.setTopView('play'))
-  expect(useGraphView.getState().view).toBe('play')
-  expect(handle.getTopView()).toBe('play')
-
-  // 「工作文件」回到进试玩前的那个编辑视图，而不是默认蓝图。
-  act(() => handle.setTopView('workfile'))
-  expect(useGraphView.getState().view).toBe('documents')
-
-  expect(seen).toEqual(['play', 'workfile'])
-  unsubscribe()
-  act(() => handle.unmount())
-})
-
-test('subscribeTopView ignores view changes that stay inside 工作文件', async () => {
-  const { useGraphView } = await import('../editor/persist/graphViewStore')
-  useGraphView.setState({ view: 'graph', lastEditView: 'graph' })
-  const seen: string[] = []
-
-  const handle = mountInto({})
-  const unsubscribe = handle.subscribeTopView((view) => seen.push(view))
-
-  act(() => useGraphView.getState().setView('rule'))
-  act(() => useGraphView.getState().setView('assets'))
-
-  expect(seen).toEqual([])
-  unsubscribe()
-  act(() => handle.unmount())
-})
-
 test('stores docActionSlotEl and clears it on unmount', async () => {
   const { getDocumentMountOptions } = await import('../host-init')
   const docActionSlotEl = document.createElement('div')

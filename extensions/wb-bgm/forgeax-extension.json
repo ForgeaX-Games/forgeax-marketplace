@@ -196,15 +196,6 @@
         }
       },
       {
-        "id": "generate-audio-assets",
-        "args": "./schemas/generate-audio-assets.args.json",
-        "exposedToAI": true,
-        "description": {
-          "zh": "使用 Seed Audio 1.0 批量生成 BGM、SFX 或语音，直接保存到游戏 audio/generated 并幂等更新 manifest；单项失败不影响其余项目。",
-          "en": "Batch-generate BGM, SFX, or voice with Seed Audio 1.0, save directly into the game's audio/generated directory, and idempotently update its manifest."
-        }
-      },
-      {
         "id": "search-audio-v2",
         "args": "./schemas/search-audio-v2.args.json",
         "exposedToAI": false,

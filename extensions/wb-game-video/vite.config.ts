@@ -5,9 +5,6 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 import { createViteWorkbenchPlugin } from '@forgeax/workbench-host/vite'
 import { createDevWorkbenchHost } from './server/dev-host'
-import { resolveViteDevPort } from './scripts/vite-dev-port'
-
-export { resolveViteDevPort } from './scripts/vite-dev-port'
 
 export default defineConfig(({ command }: ConfigEnv) => ({
   base: process.env.VITE_PLUGIN_BASE
@@ -26,7 +23,7 @@ export default defineConfig(({ command }: ConfigEnv) => ({
   },
   server: {
     host: true,
-    port: resolveViteDevPort(),
+    port: 15185,
     strictPort: true,
     allowedHosts: true as const,
     // Asset CRUD still uses extension-owned `/api/*` routes in standalone dev.

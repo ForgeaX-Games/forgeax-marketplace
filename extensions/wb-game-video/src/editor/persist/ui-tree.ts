@@ -221,8 +221,8 @@ function makeDefaultTree(overlays: Record<string, Overlay>): UiTree {
   }
   return {
     root: [
-      { kind: 'folder', id: CUSTOM_UI_FOLDER_ID, name: '自定义界面', children: custom },
       { kind: 'folder', id: BASIC_UI_FOLDER_ID, name: '基础界面', children: basic },
+      { kind: 'folder', id: CUSTOM_UI_FOLDER_ID, name: '自定义界面', children: custom },
     ],
   }
 }
@@ -275,13 +275,6 @@ export function ensureUiTree(raw: unknown, overlays: Record<string, Overlay> | u
     for (const overlayId of missingOther) {
       next = addUiTreeScheme(next, UNGROUPED_UI_FOLDER_ID, { id: uniqueSchemeId(overlayId, used), overlayId })
     }
-  }
-  // 「基础界面」是内置参考分组，钉到 root 末尾：用户区（自定义界面 + 新建顶层组）都在它前面，
-  // 新建顶层文件夹插末尾时自然落在基础界面前。仅在它不在末尾时才重排，避免无谓新引用。
-  const basicIndex = next.root.findIndex((n) => n.id === BASIC_UI_FOLDER_ID)
-  if (basicIndex !== -1 && basicIndex !== next.root.length - 1) {
-    const basic = next.root[basicIndex]!
-    next = { root: [...next.root.slice(0, basicIndex), ...next.root.slice(basicIndex + 1), basic] }
   }
   return next
 }
