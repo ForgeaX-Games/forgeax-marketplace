@@ -12,7 +12,6 @@ import { useT } from '../../../i18n'
 import { injectStyleOnce } from '../../../styles/injectStyle'
 import generationEmptyIcon from '../../../assets/video-generation-empty.svg?url'
 import generationFrameIcon from '../../../assets/video-generation-frame.svg?url'
-import generationStyleSwapIcon from '../../../assets/video-generation-style-swap.svg?url'
 import generationSwapIcon from '../../../assets/video-generation-swap.svg?url'
 import generationUndoIcon from '../../../assets/video-generation-undo.svg?url'
 import generationSendIcon from '../../../assets/video-generation-send.svg?url'
@@ -536,12 +535,7 @@ export function VideoGenSheet({
                         : t('videoAssets.generate.style')}
                       onClick={openStylePicker}
                     >
-                      <span className="vgen-style-label">
-                        {selectedVisualStyle?.label ?? t('videoAssets.generate.style')}
-                      </span>
-                      <span className="vgen-style-swap" aria-hidden>
-                        <img src={generationStyleSwapIcon} alt="" />
-                      </span>
+                      {selectedVisualStyle?.label ?? t('videoAssets.generate.style')}
                     </button>
                     <label className="vgen-audio-toggle">
                       <span className="vgen-audio-label">{t('videoAssets.generate.audio')}</span>
@@ -559,10 +553,7 @@ export function VideoGenSheet({
                         <img src={generationUndoIcon} alt="" />
                       </button>
                     )}
-                    <button type="button" className="vgen-prompt-helper" disabled title={t('videoAssets.generate.promptHelperComing')}>
-                      {t('videoAssets.generate.promptHelper')}
-                      <span className="vgen-prompt-helper-chevron" aria-hidden />
-                    </button>
+                    <button type="button" className="vgen-prompt-helper" disabled title={t('videoAssets.generate.promptHelperComing')}>{t('videoAssets.generate.promptHelper')} <span aria-hidden>⌄</span></button>
                     <button
                       type="button"
                       className={`vgen-send${running ? ' running' : ''}`}

@@ -27,9 +27,8 @@ describe('FormulaTextEditor hole guidance', () => {
     })
     const highlight = container.querySelector('.gc-fx-highlight')
     expect(highlight?.textContent).toBe('?攻击力 +\n?加成')
-    // 默认输出纯文本（无彩色 tag）；需要高亮时给 FormulaSyntax 传 tagged。
-    expect(highlight?.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(0)
-    expect(container.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(0)
+    expect(highlight?.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(2)
+    expect(container.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(2)
   })
 
   it('highlights function names as ref tags when followed by (', () => {
@@ -43,23 +42,34 @@ describe('FormulaTextEditor hole guidance', () => {
       target: { value: 'max(?攻击力, 0) + floor(?倍率)' },
     })
     const highlight = container.querySelector('.gc-fx-highlight')
-    // 默认输出纯文本：不再有 fn-tag / hole-tag 包裹，textContent 仍逐字还原输入。
-    expect(highlight?.querySelectorAll('.gc-fx-fn-tag')).toHaveLength(0)
-    expect(highlight?.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(0)
-    expect(highlight?.textContent).toBe('max(?攻击力, 0) + floor(?倍率)')
+    // max(...) / floor(...) 各被包成一个 .gc-fx-fn-tag（含括号及内部内容），?参数 仍是 hole tag。
+    const fnTags = highlight?.querySelectorAll('.gc-fx-fn-tag')
+    expect(fnTags?.length).toBe(2)
+    expect(fnTags?.[0]?.textContent).toBe('max(?攻击力, 0)')
+    expect(fnTags?.[1]?.textContent).toBe('floor(?倍率)')
+    // 括号内的 ?参数 仍单独高亮成 hole tag
+    expect(highlight?.querySelectorAll('.gc-fx-hole-tag')).toHaveLength(2)
   })
 
-  it('renders nested function calls as plain text by default (tags opt-in)', () => {
+  it('nests function tags with descending background opacity', () => {
     const { container } = render(
       <FormulaTextEditor ast={{ t: 'num', id: 'n0', v: 0 }} onChange={vi.fn()} />,
     )
     fireEvent.change(screen.getByRole('textbox', { name: '公式表达式' }), {
       target: { value: 'max(floor(?x), 1)' },
     })
-    const highlight = container.querySelector('.gc-fx-highlight')
-    // 默认无彩色 tag，括号嵌套仍以纯文本完整还原。
-    expect(highlight?.querySelectorAll('.gc-fx-fn-tag')).toHaveLength(0)
-    expect(highlight?.textContent).toBe('max(floor(?x), 1)')
+    const fnTags = container.querySelectorAll('.gc-fx-fn-tag')
+    // 外层 max(...) + 内层 floor(...)，两层嵌套
+    expect(fnTags.length).toBe(2)
+    const outer = fnTags[0]! as HTMLElement
+    const inner = fnTags[1]! as HTMLElement
+    expect(outer.textContent).toBe('max(floor(?x), 1)')
+    expect(inner.textContent).toBe('floor(?x)')
+    // 外层透明度高（0.18），内层减半（0.09）
+    const outerAlpha = parseFloat(outer.style.background.match(/[\d.]+(?=\))/)?.[0] ?? '0')
+    const innerAlpha = parseFloat(inner.style.background.match(/[\d.]+(?=\))/)?.[0] ?? '0')
+    expect(outerAlpha).toBeGreaterThan(innerAlpha)
+    expect(outerAlpha).toBeCloseTo(0.18, 2)
   })
 })
 
@@ -346,10 +356,8 @@ describe('FormulaTextEditor authoring syntax', () => {
       />,
     )
 
-    // 默认输出纯文本（无 gc-fx-ref-tag）；ref 仍以原文本出现在高亮层中。
-    expect(container.querySelector('.gc-fx-ref-tag')).toBeNull()
-    expect(container.querySelector('.gc-fx-highlight')?.textContent)
-      .toContain('entity.ent-player.attr.attack-power')
+    expect(container.querySelector('.gc-fx-ref-tag')?.textContent)
+      .toBe('entity.ent-player.attr.attack-power')
     expect(container.querySelector('.gc-fx-score-tag')).toBeNull()
     expect(screen.queryByRole('button', { name: '插入局面分' })).toBeNull()
     expect(screen.queryByText(/局面分/)).toBeNull()

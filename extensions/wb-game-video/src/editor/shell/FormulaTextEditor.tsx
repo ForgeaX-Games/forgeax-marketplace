@@ -95,8 +95,8 @@ function varName(id: string, variables?: Record<string, Variable>): string {
 }
 
 /** 把参数和状态引用渲染成不同 token，短横线因此明确属于整段引用。 */
-export function FormulaSyntax({ text, tagged = false }: { text: string; tagged?: boolean }): JSX.Element {
-  return <>{parseFormulaSyntax(text, 0, tagged)}</>
+export function FormulaSyntax({ text }: { text: string }): JSX.Element {
+  return <>{parseFormulaSyntax(text, 0)}</>
 }
 
 // 非 token 字符（用于切分）：函数名后跟 ( 才算函数调用；?参数 / entity.x.attr.y / var.x 是独立 token。
@@ -109,11 +109,8 @@ const NON_FN_TOKEN_RE = /\?[\p{L}_][\p{L}\p{N}_]*|entity\.[\p{L}\p{N}_-]+\.attr\
  *    （外层 rgba(255,255,255,.18)，每往内一层透明度减半）；
  *  - 括号内的 ?参数 / entity.x.attr.y / var.x 仍单独成 tag，叠在函数 tag 背景上；
  *  - 平衡括号匹配，支持嵌套 max(floor(?x), 1)。
- *
- * `tagged=false`（默认）只输出纯文本（无彩色 tag），用于「简化公式」展示；
- * `tagged=true` 恢复彩色 tag（函数/引用/空位三种 badge），需要高亮时再打开。
  */
-function parseFormulaSyntax(text: string, depth: number, tagged = false): JSX.Element[] {
+function parseFormulaSyntax(text: string, depth: number): JSX.Element[] {
   const parts: JSX.Element[] = []
   let cursor = 0
   let key = 0
@@ -144,30 +141,20 @@ function parseFormulaSyntax(text: string, depth: number, tagged = false): JSX.El
       if (close === -1) {
         // 括号不平衡：函数名 + 之后全部当一个 tag（容错）
         parts.push(
-          tagged ? (
-            <span className="gc-fx-fn-tag" style={fnTagStyle(depth)} key={`fn-${key++}`}>
-              {fnName + text.slice(openParen)}
-            </span>
-          ) : (
-            <Fragment key={`t-${key++}`}>{fnName + text.slice(openParen)}</Fragment>
-          ),
+          <span className="gc-fx-fn-tag" style={fnTagStyle(depth)} key={`fn-${key++}`}>
+            {fnName + text.slice(openParen)}
+          </span>,
         )
         break
       }
       const inner = text.slice(openParen + 1, close)
       parts.push(
-        tagged ? (
-          <span className="gc-fx-fn-tag" style={fnTagStyle(depth)} key={`fn-${key++}`}>
-            {fnName}
-            <span style={{ color: 'inherit' }}>(</span>
-            {inner.length > 0 ? parseFormulaSyntax(inner, depth + 1, true) : null}
-            <span style={{ color: 'inherit' }}>)</span>
-          </span>
-        ) : (
-          <Fragment key={`t-${key++}`}>
-            {fnName}({inner.length > 0 ? parseFormulaSyntax(inner, depth + 1, false) : null})
-          </Fragment>
-        ),
+        <span className="gc-fx-fn-tag" style={fnTagStyle(depth)} key={`fn-${key++}`}>
+          {fnName}
+          <span style={{ color: 'inherit' }}>(</span>
+          {inner.length > 0 ? parseFormulaSyntax(inner, depth + 1) : null}
+          <span style={{ color: 'inherit' }}>)</span>
+        </span>,
       )
       cursor = close + 1
       continue
@@ -176,18 +163,12 @@ function parseFormulaSyntax(text: string, depth: number, tagged = false): JSX.El
       const token = tokMatch![0]
       const tokStart = cursor + tokIndex
       if (tokIndex > 0) parts.push(<Fragment key={`t-${key++}`}>{text.slice(cursor, tokStart)}</Fragment>)
+      const className = token.startsWith('?') ? 'gc-fx-hole-tag' : 'gc-fx-ref-tag'
+      const style = token.startsWith('?') ? undefined : refTokenStyle
       parts.push(
-        tagged ? (
-          <span
-            className={token.startsWith('?') ? 'gc-fx-hole-tag' : 'gc-fx-ref-tag'}
-            style={token.startsWith('?') ? undefined : refTokenStyle}
-            key={`tok-${key++}`}
-          >
-            {token}
-          </span>
-        ) : (
-          <Fragment key={`t-${key++}`}>{token}</Fragment>
-        ),
+        <span className={className} style={style} key={`tok-${key++}`}>
+          {token}
+        </span>,
       )
       cursor = tokStart + token.length
       continue
@@ -235,7 +216,7 @@ export function FormulaHelpContent(): JSX.Element {
       </li>
       <li>
         <strong>参数留空</strong>
-        <p>插入 <code>?参数</code> 作为留空位，应用公式时再绑定具体值，也可改成 <code>?攻击力</code> 等业务名称。</p>
+        <p>插入 <code className="gc-fx-hole-tag">?参数</code> 作为留空位，应用公式时再绑定具体值，也可改成 <code>?攻击力</code> 等业务名称。</p>
       </li>
       <li>
         <strong>公式示例</strong>

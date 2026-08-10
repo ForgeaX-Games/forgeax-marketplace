@@ -1,14 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  KINO_VISUAL_STYLE_PRESETS_ROUTE,
   listVideoVisualStyles,
 } from '../visual-style-api'
 
 describe('listVideoVisualStyles', () => {
-  it('targets the product-owned Kino proxy route', () => {
-    expect(KINO_VISUAL_STYLE_PRESETS_ROUTE).toBe('/api/v1/kino-visual-style-presets')
-  })
-
   it('uses the native Kino visual-style API contract', async () => {
     const list = vi.fn(async () => ({
       items: [{

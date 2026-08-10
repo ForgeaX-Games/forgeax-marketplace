@@ -68,16 +68,12 @@ describe('NewSidebar video asset hierarchy', () => {
     const css = document.querySelector('style[data-reel-style="new-sidebar"]')?.textContent
     expect(css).toContain('width: 196px')
     expect(css).toContain('padding: 0')
-    expect(css).toContain('.ns-sidebar button.ns-leading svg { display: block; width: 12px; height: 12px; flex: none; }')
-    expect(css).toContain('.ns-sidebar button.ns-chev')
-    expect(css).toContain('.ns-sidebar button.ns-add')
-    expect(css).toContain('.ns-sidebar button.ns-act')
+    expect(css).toContain('.ns-leading svg { display: block; width: 12px; height: 12px; }')
     const assetLibraryIcon = sidebar.querySelector('.ns-leading > svg')
     expect(sidebar.querySelector('.ns-leading img')).toBeNull()
     expect(assetLibraryIcon).toHaveAttribute('width', '12')
     expect(assetLibraryIcon).toHaveAttribute('height', '12')
     expect(assetLibraryIcon?.querySelector('path')).toHaveAttribute('fill', 'currentColor')
-    expect(screen.queryByText('新增文件夹')).toBeNull()
 
     const folderRow = screen.getByText('户外').closest<HTMLElement>('.ns-row')!
     const untaggedRow = screen.getByText('无标签视频.mp4').closest<HTMLElement>('.ns-row')!
@@ -126,4 +122,26 @@ describe('NewSidebar video asset hierarchy', () => {
     expect(screen.getByText('战斗')).toBeTruthy()
   })
 
+  it('creates a video folder from the sidebar on Enter and validates only after an attempt', () => {
+    render(<NewSidebar videoItems={videos} />)
+
+    fireEvent.click(screen.getByText('新增文件夹').closest<HTMLElement>('.ns-row')!)
+    const input = screen.getByLabelText('文件夹名称')
+    expect(input.closest('form')).toBeNull()
+    expect(screen.queryByText('文件夹名称不能为空')).toBeNull()
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByRole('alert')).toHaveTextContent('文件夹名称不能为空')
+
+    fireEvent.change(input, { target: { value: '剧情' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(screen.queryByLabelText('文件夹名称')).toBeNull()
+    expect(screen.getByText('剧情')).toBeInTheDocument()
+    expect(useGraphView.getState().view).toBe('video')
+    expect(useVideoLibraryNav.getState()).toMatchObject({
+      folder: { kind: 'tag', name: '剧情' },
+      entryId: null,
+    })
+  })
 })

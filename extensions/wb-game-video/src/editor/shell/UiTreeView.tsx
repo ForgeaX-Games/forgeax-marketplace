@@ -43,15 +43,14 @@ const UI_TREE_CSS = `
 .uit-main:focus-visible,.uit-icon-btn:focus-visible {
   outline:1px solid rgba(255,255,255,.45); outline-offset:-1px;
 }
-.ns-sidebar button.uit-toggle {
-  box-sizing:border-box;
+.uit-toggle {
   width:20px; height:20px; flex:none; display:inline-flex; align-items:center; justify-content:center;
-  min-width:0; min-height:0; border:0; padding:0; background:transparent; color:var(--ns-text, #fff); cursor:pointer;
+  border:0; padding:0; background:transparent; color:var(--ns-text, #fff); cursor:pointer;
   transition:transform .18s ease, color .18s ease;
 }
-.ns-sidebar button.uit-toggle svg { width:20px; height:20px; flex:none; display:block; }
+.uit-toggle svg { width:20px; height:20px; display:block; }
 /* 收起态变暗，与主树 .ns-chev.is-collapsed 一致。 */
-.ns-sidebar button.uit-toggle.is-collapsed { color:var(--ns-text-40, rgba(255,255,255,.40)); transform:rotate(-90deg); }
+.uit-toggle.is-collapsed { color:var(--ns-text-40, rgba(255,255,255,.40)); transform:rotate(-90deg); }
 /* 叶子方案无 chevron：用等宽占位补齐，使同级文件夹与方案的标签左边缘对齐（同主树 .ns-chev-spacer）。 */
 .uit-chev-spacer { width:20px; height:20px; flex:none; }
 .uit-label {
@@ -65,15 +64,15 @@ const UI_TREE_CSS = `
 .uit-row:hover .uit-row-actions,
 .uit-row:focus-within .uit-row-actions,
 .uit-row-actions:has(.is-open) { display:inline-flex; }
-.ns-sidebar button.uit-icon-btn {
+.uit-icon-btn {
   all:unset; box-sizing:border-box; width:16px; height:16px; flex:none;
   display:inline-flex; align-items:center; justify-content:center; border-radius:3px;
   color:rgba(255,255,255,.40); cursor:pointer;
   transition:color .12s, background .12s;
 }
-.ns-sidebar button.uit-icon-btn:hover,.ns-sidebar button.uit-icon-btn.is-open { background:rgba(255,255,255,.10); color:#fff; }
-.ns-sidebar button.uit-icon-btn.is-danger:hover,.ns-sidebar button.uit-icon-btn.is-danger.is-open { color:#ff8e8e; }
-.ns-sidebar button.uit-icon-btn svg { width:14px; height:14px; flex:none; display:block; }
+.uit-icon-btn:hover,.uit-icon-btn.is-open { background:rgba(255,255,255,.10); color:#fff; }
+.uit-icon-btn.is-danger:hover,.uit-icon-btn.is-danger.is-open { color:#ff8e8e; }
+.uit-icon-btn svg { width:14px; height:14px; display:block; }
 .uit-children { display:flex; flex-direction:column; width:100%; min-width:0; }
 .uit-edit { flex:1; min-width:0; display:flex; gap:4px; }
 .uit-edit input {

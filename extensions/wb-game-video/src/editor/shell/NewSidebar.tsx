@@ -6,6 +6,7 @@
  */
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useT } from '../../i18n'
 import { injectStyleOnce } from '../../styles/injectStyle'
 import { countOverlayReferences } from '../../graph/edit/overlay-edit'
 import { useGraphScenario } from '../persist/graphScenarioStore'
@@ -33,9 +34,11 @@ import { useAssetBrowser } from '../assets/use-asset-browser'
 import { useVideoAssets, type VideoAssetListItem } from '../assets/useVideoAssets'
 import {
   listVideoLibraryFolderNames,
+  normalizeVideoLibraryFolderName,
   readVideoLibraryMetadata,
   resolveVideoLibraryEntryTag,
   subscribeVideoLibraryMetadata,
+  writeVideoLibraryFolderName,
   type VideoLibraryMetadata,
 } from '../assets/video-library-metadata'
 import type { AssetLibraryRootKind, DocumentType } from '../assets/registry-types'
@@ -57,7 +60,7 @@ export interface NavNode {
   blueprint?: boolean
   /** 是否为入口蓝图。 */
   isEntry?: boolean
-  leadingIcon?: 'asset-library'
+  leadingIcon?: 'asset-library' | 'add-folder'
   assetLocation?: { root: AssetLibraryRootKind, folderId?: string, entryKey?: string }
   ruleTarget?: { section: RuleSection, itemId?: string }
   documentType?: DocumentType
@@ -133,6 +136,12 @@ function buildNavTree(
     },
     assets,
     rules,
+    {
+      id: 'new-folder',
+      label: '新增文件夹',
+      kind: 'entry',
+      leadingIcon: 'add-folder',
+    },
   ]
 }
 
@@ -334,13 +343,10 @@ const NEW_SIDEBAR_CSS = `
   background: rgba(255, 255, 255, 0.10);
 }
 .ns-row:focus-visible { outline: 1px solid rgba(255,255,255,0.45); outline-offset: -1px; }
-.ns-sidebar button.ns-chev {
-  box-sizing: border-box;
+.ns-chev {
   flex: none;
   width: 20px;
   height: 20px;
-  min-width: 0;
-  min-height: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -352,21 +358,18 @@ const NEW_SIDEBAR_CSS = `
   color: var(--ns-text);
   transition: transform .18s ease;
 }
-.ns-sidebar button.ns-chev svg { width: 20px; height: 20px; flex: none; display: block; }
-.ns-sidebar button.ns-chev.is-collapsed { color: var(--ns-text-40); transform: rotate(-90deg); }
+.ns-chev svg { width: 20px; height: 20px; display: block; }
+.ns-chev.is-collapsed { color: var(--ns-text-40); transform: rotate(-90deg); }
 .ns-chev-spacer {
   flex: none;
   width: 20px;
   height: 20px;
   margin-right: 8px;
 }
-.ns-sidebar button.ns-leading {
-  box-sizing: border-box;
+.ns-leading {
   flex: none;
   width: 20px;
   height: 20px;
-  min-width: 0;
-  min-height: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -376,8 +379,10 @@ const NEW_SIDEBAR_CSS = `
   background: transparent;
   color: var(--ns-text-80);
 }
-.ns-sidebar button.ns-leading { cursor: pointer; }
-.ns-sidebar button.ns-leading svg { display: block; width: 12px; height: 12px; flex: none; }
+button.ns-leading { cursor: pointer; }
+.ns-leading svg { display: block; width: 12px; height: 12px; }
+.ns-leading.is-add { width: 18px; height: 18px; }
+.ns-leading.is-add svg { display: block; width: 14px; height: 14px; }
 .ns-label {
   flex: 1;
   min-width: 0;
@@ -390,13 +395,10 @@ const NEW_SIDEBAR_CSS = `
   text-overflow: ellipsis;
 }
 .ns-add-anchor { flex: none; position: relative; display: inline-flex; }
-.ns-sidebar button.ns-add {
-  box-sizing: border-box;
+.ns-add {
   flex: none;
   width: 20px;
   height: 20px;
-  min-width: 0;
-  min-height: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -408,8 +410,8 @@ const NEW_SIDEBAR_CSS = `
   border-radius: 4px;
   transition: background .12s;
 }
-.ns-sidebar button.ns-add:hover, .ns-sidebar button.ns-add.is-on { color: var(--ns-text); background: rgba(255,255,255,0.10); }
-.ns-sidebar button.ns-add svg { width: 14px; height: 14px; flex: none; display: block; }
+.ns-add:hover, .ns-add.is-on { background: rgba(255,255,255,0.10); }
+.ns-add svg { width: 14px; height: 14px; display: block; }
 .ns-row-actions {
   flex: none;
   display: none;
@@ -421,12 +423,9 @@ const NEW_SIDEBAR_CSS = `
 .ns-row:hover .ns-row-actions,
 .ns-row-actions:has(.is-on) { display: inline-flex; }
 .ns-act-anchor { position: relative; display: inline-flex; }
-.ns-sidebar button.ns-act {
-  box-sizing: border-box;
+.ns-act {
   width: 16px;
   height: 16px;
-  min-width: 0;
-  min-height: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -438,9 +437,9 @@ const NEW_SIDEBAR_CSS = `
   border-radius: 3px;
   transition: color .12s, background .12s;
 }
-.ns-sidebar button.ns-act:hover, .ns-sidebar button.ns-act.is-on { color: var(--ns-text); background: rgba(255,255,255,0.10); }
-.ns-sidebar button.ns-act.is-danger:hover, .ns-sidebar button.ns-act.is-danger.is-on { color: #ff8e8e; }
-.ns-sidebar button.ns-act svg { width: 14px; height: 14px; flex: none; display: block; }
+.ns-act:hover, .ns-act.is-on { color: var(--ns-text); background: rgba(255,255,255,0.10); }
+.ns-act.is-danger:hover, .ns-act.is-danger.is-on { color: #ff8e8e; }
+.ns-act svg { width: 14px; height: 14px; display: block; }
 /* portal 到 body 的删除确认；位置 / --ns-arrow 由 placeAdaptivePop 写入。 */
 .ns-pop-confirm {
   box-sizing: border-box;
@@ -844,6 +843,9 @@ function NsRow({
             {AssetLibraryIcon}
           </button>
         ) : null}
+        {node.leadingIcon === 'add-folder' ? (
+          <span className="ns-leading is-add" aria-hidden>{PlusIcon}</span>
+        ) : null}
         {isEditing ? (
           <input
             ref={inlineRenameRef}
@@ -952,6 +954,7 @@ interface NewSidebarContentProps {
 
 function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): JSX.Element {
   injectStyleOnce('new-sidebar', NEW_SIDEBAR_CSS)
+  const t = useT()
   const view = useGraphView((s) => s.view)
   const setView = useGraphView((s) => s.setView)
   const setAssetLocation = useAssetNav((s) => s.setLocation)
@@ -1028,6 +1031,9 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
   )
   const [uiGroupComposing, setUiGroupComposing] = useState(false)
   const [uiGroupDraft, setUiGroupDraft] = useState('')
+  const [videoFolderComposing, setVideoFolderComposing] = useState(false)
+  const [videoFolderDraft, setVideoFolderDraft] = useState('')
+  const [videoFolderError, setVideoFolderError] = useState<string | null>(null)
 
   const activeRuleId = ruleItemId
     ? `rule-${ruleSection}:${ruleItemId}`
@@ -1069,6 +1075,12 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
     const leaveUi = (): void => {
       clearUiSelection()
       broadcastUiTreeIntent({ type: 'select', treeNodeId: null, overlayId: null })
+    }
+    if (node.id === 'new-folder') {
+      setVideoFolderDraft('')
+      setVideoFolderError(null)
+      setVideoFolderComposing(true)
+      return
     }
     if (node.videoLocation) {
       leaveUi()
@@ -1149,6 +1161,24 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
     console.log('[NewSidebar] delete', node.id)
   }
 
+  const confirmVideoFolder = (): void => {
+    const folderName = normalizeVideoLibraryFolderName(videoFolderDraft)
+    if (!folderName) {
+      setVideoFolderError(t('videoAssets.folder.emptyName'))
+      return
+    }
+    const result = writeVideoLibraryFolderName(gameId, folderName)
+    if (result.status !== 'written') {
+      setVideoFolderError(t('videoAssets.folder.writeFailed'))
+      return
+    }
+    setExpanded((current) => new Set(current).add('asset-root:video'))
+    setVideoLocation({ folder: { kind: 'tag', name: folderName }, entryId: null })
+    setView('video')
+    setVideoFolderError(null)
+    setVideoFolderComposing(false)
+  }
+
   return (
     <aside className="ns-sidebar" aria-label="视频游戏工坊（新版侧栏）">
       <div className="ns-scroll" role="tree" aria-label="工坊导航树">
@@ -1170,6 +1200,43 @@ function NewSidebarContent({ uiNavMode, videoItems }: NewSidebarContentProps): J
               onMockRename={onMockRename}
               onMockDelete={onMockDelete}
             />
+            {node.id === 'new-folder' && videoFolderComposing ? (
+              <div
+                className="ns-row is-editing"
+                style={{ paddingLeft: 8 }}
+              >
+                <input
+                  autoFocus
+                  className="ns-inline-edit"
+                  aria-label={t('videoAssets.folder.name')}
+                  aria-invalid={videoFolderError != null}
+                  aria-describedby={videoFolderError ? 'ns-video-folder-error' : undefined}
+                  value={videoFolderDraft}
+                  maxLength={32}
+                  onChange={(event) => {
+                    setVideoFolderDraft(event.target.value)
+                    if (videoFolderError) setVideoFolderError(null)
+                  }}
+                  onBlur={confirmVideoFolder}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      confirmVideoFolder()
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      setVideoFolderDraft('')
+                      setVideoFolderError(null)
+                      setVideoFolderComposing(false)
+                    }
+                  }}
+                />
+                {videoFolderError ? (
+                  <span id="ns-video-folder-error" className="ns-inline-error" role="alert">
+                    {videoFolderError}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             {node.id === 'ui' && uiGroupComposing ? (
               <div className="ns-row is-editing" style={{ paddingLeft: 8 }}>
                 <input
