@@ -109,7 +109,7 @@ describe('VideoGenSheet', () => {
 
     expect(screen.getByRole('tab', { name: '文生视频' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('开始创造独属自己的资源，建造独一无二的游戏体验')).toBeInTheDocument()
-    expect(screen.getByLabelText('生成音频')).toBeChecked()
+    expect(screen.getByLabelText('音频')).toBeChecked()
 
     fireEvent.click(screen.getByRole('tab', { name: '文生视频' }))
     fillPrompt('海港中的追逐镜头')
@@ -155,6 +155,20 @@ describe('VideoGenSheet', () => {
       mode: 't2v',
       visualStyleKey: 'bwcinema',
     }))
+  })
+
+  it('places the text-only style control before audio and uses the Figma send button', () => {
+    const { container } = renderSheet({ variant: 'page' })
+    const options = container.querySelector('.vgen-prompt-options')
+    const style = screen.getByRole('button', { name: '风格' })
+    const audio = screen.getByLabelText('音频')
+    const submit = screen.getByRole('button', { name: '生成视频' })
+
+    expect(options?.children[0]).toBe(style)
+    expect(options?.children[1]).toContainElement(audio)
+    expect(style.querySelector('img')).toBeNull()
+    expect(container.querySelector('.vgen-media-row')).toBeNull()
+    expect(submit).toHaveClass('vgen-send')
   })
 
   it('shows the real generated video in the designed player and applies its asset id', () => {
@@ -288,7 +302,7 @@ describe('VideoGenSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: '选择尾帧' }))
     pickImage('Street')
     fireEvent.change(screen.getByLabelText('时长（秒）'), { target: { value: '12' } })
-    fireEvent.click(screen.getByLabelText('生成音频'))
+    fireEvent.click(screen.getByLabelText('音频'))
     fireEvent.click(screen.getByRole('button', { name: '生成视频' }))
 
     expect(onSubmit).toHaveBeenCalledWith({

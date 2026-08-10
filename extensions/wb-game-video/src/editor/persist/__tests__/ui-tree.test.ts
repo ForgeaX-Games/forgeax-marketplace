@@ -137,4 +137,35 @@ describe('uiTree migration and persistence', () => {
     const rebuilt = documentFromBlueprints(doc.manifest.packs, MAIN_ID, metaFromDocument(doc))
     expect(rebuilt.uiTree).toEqual(tree)
   })
+
+  it('defaults to 自定义界面 before 基础界面', () => {
+    const tree = ensureUiTree(undefined, overlays)
+    expect(tree.root.map((n) => n.id)).toEqual([CUSTOM_UI_FOLDER_ID, BASIC_UI_FOLDER_ID])
+  })
+
+  it('pins 基础界面 to the root tail so new top-level folders land before it', () => {
+    // 既有树把基础界面放在前面：规范化应把它挪到末尾，用户区都在它前面。
+    const existing: UiTree = {
+      root: [
+        { kind: 'folder', id: BASIC_UI_FOLDER_ID, name: '基础界面', children: [{ kind: 'scheme', id: 's-base', overlayId: 'base:hp' }] },
+        { kind: 'folder', id: CUSTOM_UI_FOLDER_ID, name: '自定义界面', children: [
+          { kind: 'scheme', id: 's-combat', overlayId: 'combat' },
+          { kind: 'scheme', id: 's-dialogue', overlayId: 'dialogue' },
+        ] },
+      ],
+    }
+    const migrated = ensureUiTree(existing, overlays)
+    // 基础界面被钉到末尾，自定义界面在前；无遗漏 overlay 故不补未分组。
+    expect(migrated.root.map((n) => n.id)).toEqual([CUSTOM_UI_FOLDER_ID, BASIC_UI_FOLDER_ID])
+    // 幂等：再规范一次不产生新引用。
+    expect(ensureUiTree(migrated, overlays)).toBe(migrated)
+
+    // 新建顶层文件夹插末尾（insertNode 默认），落在基础界面之前（基础界面已被钉末尾）。
+    let withNew = addUiTreeFolder(migrated, null, { id: 'ui-folder:boss', name: '首领战' })
+    withNew = ensureUiTree(withNew, overlays)
+    const ids = withNew.root.map((n) => n.id)
+    expect(ids[ids.length - 1]).toBe(BASIC_UI_FOLDER_ID)
+    expect(ids).toContain('ui-folder:boss')
+    expect(ids.indexOf('ui-folder:boss')).toBeLessThan(ids.indexOf(BASIC_UI_FOLDER_ID))
+  })
 })

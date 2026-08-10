@@ -42,7 +42,7 @@ import {
   type VideoLibraryMetadata,
 } from '../assets/video-library-metadata'
 import type { AssetLibraryRootKind, DocumentType } from '../assets/registry-types'
-import { blueprintListItems } from './blueprintNav'
+import { blueprintListItems, BLUEPRINT_NAV_ROOT } from './blueprintNav'
 import { useBlueprintNavActions, type BlueprintNavActions } from './useBlueprintNavActions'
 import { UiTreeView, type UiTreeViewNode } from './UiTreeView'
 
@@ -118,14 +118,13 @@ function buildNavTree(
   return [
     buildDocumentNavNode(),
     {
-      id: 'graph',
-      label: '蓝图',
+      id: BLUEPRINT_NAV_ROOT.id,
+      label: BLUEPRINT_NAV_ROOT.label,
       kind: 'entry',
       view: 'graph',
       canAddChild: true,
       children: bpChildren,
     },
-    { id: 'play', label: '试玩', kind: 'entry', view: 'play' },
     {
       id: 'ui',
       label: '界面',
@@ -788,8 +787,11 @@ function NsRow({
     // 文件夹行：只展开/收起展示子项，不切换当前选中视图。
     if (isExpandable) {
       onToggle(node.id)
-      // 视频根和一级标签既是目录也是素材页筛选项：点击行时同步进入对应列表。
-      if (!node.videoLocation) return
+      // 资产根、分类和文件夹既是目录也是素材页筛选项：点击行时同步进入对应列表。
+      const navigatesToAssets = node.id === 'assets'
+        || node.assetLocation !== undefined
+        || node.videoLocation !== undefined
+      if (!navigatesToAssets) return
     }
     onSelect(node)
   }

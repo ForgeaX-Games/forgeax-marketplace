@@ -54,7 +54,8 @@ bun run build:standalone
 bun run start:standalone
 ```
 
-`bun run dev` 启动 Vite 开发适配器（固定 `15185`）和后端 watch。适配器只挂载
+`bun run dev` 启动 Vite 开发适配器（独立运行时默认 `15185`；Studio launcher 可通过
+`VITE_DEV_PORT` 注入端口）和后端 watch。适配器只挂载
 `/__workbench__/v1` 的标准 Workbench HTTP 契约；用宿主 iframe 的 nonce-bound
 handshake 注入 game id、runtime id 和端点后再打开编辑器。它不提供旧的兼容业务路由。
 本地游戏包保存在被忽略的 `.workbench-dev/games/<gameId>/`，首次 `initialize` 时由

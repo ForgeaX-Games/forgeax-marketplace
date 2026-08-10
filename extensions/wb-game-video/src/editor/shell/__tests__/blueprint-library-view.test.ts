@@ -2,7 +2,7 @@
  * 蓝图列表纯派生逻辑测试。不 mount 侧栏/画布——只测 `blueprintListItems`。
  */
 import { describe, it, expect } from 'vitest'
-import { blueprintListItems } from '../blueprintNav'
+import { blueprintListItems, blueprintSidebarPath, BLUEPRINT_NAV_ROOT } from '../blueprintNav'
 import type { BlueprintDoc } from '../../../runtime/schema/graph-schema'
 
 function doc(id: string, title: string): BlueprintDoc {
@@ -43,5 +43,25 @@ describe('blueprintListItems', () => {
 
   it('handles an empty blueprint map', () => {
     expect(blueprintListItems({}, 'bp-main')).toEqual([])
+  })
+})
+
+describe('blueprintSidebarPath', () => {
+  const blueprints: Record<string, BlueprintDoc> = {
+    'bp-main': doc('bp-main', '主蓝图'),
+    'bp-a': doc('bp-a', 'A 子蓝图'),
+  }
+
+  it('walks from the sidebar blueprint root down to the blueprint itself', () => {
+    expect(blueprintSidebarPath(blueprints, 'bp-a')).toEqual([
+      { id: BLUEPRINT_NAV_ROOT.id, label: BLUEPRINT_NAV_ROOT.label },
+      { id: 'bp-a', label: 'A 子蓝图' },
+    ])
+  })
+
+  it('keeps the root crumb when the blueprint is unknown', () => {
+    expect(blueprintSidebarPath(blueprints, 'gone')).toEqual([
+      { id: BLUEPRINT_NAV_ROOT.id, label: BLUEPRINT_NAV_ROOT.label },
+    ])
   })
 })

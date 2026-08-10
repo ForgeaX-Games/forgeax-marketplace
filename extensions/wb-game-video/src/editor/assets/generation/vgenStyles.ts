@@ -117,15 +117,7 @@ export const VGEN_CSS = `
 .vgen-mode-tabs button:hover, .vgen-mode-tabs button:focus-visible { color: #fff; outline: none; }
 .vgen-mode-tabs button.is-on { background: #fff; color: #000; }
 .vgen-media-row { display: flex; min-height: 95px; flex: none; align-items: center; gap: 12px; overflow-x: auto; }
-.vgen-style-tile, .vgen-frame-tile, .vgen-page-ref-add { box-sizing: border-box; display: flex; width: 79px; height: 95px; flex: 0 0 79px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; overflow: hidden; border: 0; border-radius: 8px; color: #fff; font: inherit; font-size: 12px; }
-.vgen-style-tile { position: relative; padding: 0; background: linear-gradient(145deg,#ffae68 0%,#cd7656 40%,#4b3027 100%) center/cover no-repeat; cursor: pointer; }
-.vgen-style-tile::after { content: ''; position: absolute; right: 0; bottom: 0; width: 45px; height: 45px; border-radius: 50%; background: rgba(255,255,255,.16); filter: blur(14px); }
-.vgen-style-tile img { position: relative; z-index: 1; width: 29px; height: 31px; }
-.vgen-style-tile span { position: relative; z-index: 1; }
-.vgen-style-tile.has-style { justify-content: flex-end; box-shadow: inset 0 0 0 1px #e8864a; }
-.vgen-style-tile.has-style::after { display: none; }
-.vgen-style-tile.has-style span { box-sizing: border-box; width: 100%; overflow: hidden; padding: 7px 5px; background: rgba(0,0,0,.62); text-overflow: ellipsis; white-space: nowrap; }
-.vgen-style-tile:hover, .vgen-style-tile:focus-visible { box-shadow: inset 0 0 0 1px #e8864a; outline: none; }
+.vgen-frame-tile, .vgen-page-ref-add { box-sizing: border-box; display: flex; width: 79px; height: 95px; flex: 0 0 79px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; overflow: hidden; border: 0; border-radius: 8px; color: #fff; font: inherit; font-size: 12px; }
 .vgen-media-divider { width: 1px; height: 74px; flex: 0 0 1px; margin: 0 2px; background: rgba(255,255,255,.16); }
 .vgen-frame-tile, .vgen-page-ref-add { padding: 0; background: rgba(0,0,0,.2) center/cover no-repeat; color: rgba(255,255,255,.6); cursor: pointer; }
 .vgen-frame-tile:hover, .vgen-frame-tile:focus-visible, .vgen-page-ref-add:hover, .vgen-page-ref-add:focus-visible { box-shadow: inset 0 0 0 1px #e8864a; outline: none; }
@@ -141,24 +133,32 @@ export const VGEN_CSS = `
 .vgen-prompt-box textarea { box-sizing: border-box; width: 100%; min-height: 48px; flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: #fff; font: inherit; font-size: 14px; line-height: 1.5; }
 .vgen-prompt-box textarea::placeholder { color: rgba(255,255,255,.4); }
 .vgen-prompt-tools { display: flex; min-height: 32px; align-items: center; gap: 12px; }
+.vgen-prompt-options { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .vgen-prompt-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.vgen-style-button { box-sizing: border-box; max-width: 180px; height: 24px; overflow: hidden; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.vgen-style-button:hover, .vgen-style-button:focus-visible, .vgen-style-button.has-style { background: rgba(255,255,255,.08); color: #fff; outline: none; }
+.vgen-style-button:focus-visible { box-shadow: 0 0 0 2px rgba(255,156,42,.42); }
 .vgen-audio-toggle { display: inline-flex; align-items: center; gap: 7px; color: rgba(255,255,255,.82); font-size: 12px; cursor: pointer; }
 .vgen-audio-toggle input { position: absolute; opacity: 0; pointer-events: none; }
-.vgen-audio-toggle > span { position: relative; display: block; width: 28px; height: 16px; border-radius: 999px; background: rgba(255,255,255,.2); transition: background .15s ease; }
-.vgen-audio-toggle > span::after { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: transform .15s ease; }
-.vgen-audio-toggle input:checked + span { background: #e8864a; }
-.vgen-audio-toggle input:checked + span::after { transform: translateX(12px); }
+.vgen-audio-switch { position: relative; display: block; width: 38px; height: 18px; box-sizing: border-box; padding: 2px; border: 1px solid rgba(255,255,255,.05); border-radius: 999px; background: rgba(255,255,255,.1); transition: background .15s ease; }
+.vgen-audio-switch::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,.22); transition: transform .15s ease, background .15s ease; }
+.vgen-audio-toggle input:checked + .vgen-audio-switch { background: linear-gradient(90deg,#ff7001,#ff9c2a); }
+.vgen-audio-toggle input:checked + .vgen-audio-switch::after { transform: translateX(20px); background: #fff; }
+.vgen-audio-toggle input:focus-visible + .vgen-audio-switch { outline: 2px solid rgba(255,156,42,.48); outline-offset: 2px; }
 .vgen-prompt-undo, .vgen-prompt-helper { height: 28px; border: 0; border-radius: 6px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; }
 .vgen-prompt-undo { display: grid; width: 28px; place-items: center; padding: 0; }
 .vgen-prompt-undo img { width: 12px; height: 12px; }
 .vgen-prompt-undo:hover:not(:disabled), .vgen-prompt-helper:hover:not(:disabled) { background: rgba(255,255,255,.1); }
 .vgen-prompt-undo:disabled, .vgen-prompt-helper:disabled { opacity: .45; cursor: not-allowed; }
 .vgen-prompt-helper { padding: 0 8px; }
-.vgen-send { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #e8864a; cursor: pointer; }
-.vgen-send img { width: 21px; height: 18px; }
-.vgen-send:disabled { opacity: .45; cursor: not-allowed; }
-.vgen-send.running::before { content: ''; position: absolute; width: 16px; height: 16px; border: 2px solid rgba(0,0,0,.25); border-top-color: #000; border-radius: 50%; animation: vgen-spin .8s linear infinite; }
-.vgen-send.running img { opacity: 0; }
+.vgen-prompt-actions .vgen-send { position: relative; display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #ff9c2a; box-shadow: 0 2px 8px rgba(255,112,1,.18); cursor: pointer; transition: transform .12s ease, background .12s ease, box-shadow .12s ease; }
+.vgen-prompt-actions .vgen-send img { width: 21px; height: 18px; }
+.vgen-prompt-actions .vgen-send:hover:not(:disabled) { background: #ffad4d; box-shadow: 0 4px 12px rgba(255,112,1,.28); }
+.vgen-prompt-actions .vgen-send:active:not(:disabled) { transform: scale(.94); background: #ff8a14; box-shadow: 0 1px 4px rgba(255,112,1,.2); }
+.vgen-prompt-actions .vgen-send:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.vgen-prompt-actions .vgen-send:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.vgen-prompt-actions .vgen-send.running::before { content: ''; position: absolute; width: 16px; height: 16px; border: 2px solid rgba(0,0,0,.25); border-top-color: #000; border-radius: 50%; animation: vgen-spin .8s linear infinite; }
+.vgen-prompt-actions .vgen-send.running img { opacity: 0; }
 .vgen-style-layer { position: fixed; inset: 0; z-index: 330; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.68); }
 .vgen-style-dialog { box-sizing: border-box; width: min(971px,calc(100vw - 48px)); max-height: min(760px,calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; padding: 24px 40px 32px; border: 1px solid rgba(255,255,255,.2); border-radius: 14px; background: #141414; color: #fff; box-shadow: 0 24px 72px rgba(0,0,0,.5); }
 .vgen-style-head { display: flex; align-items: center; }
