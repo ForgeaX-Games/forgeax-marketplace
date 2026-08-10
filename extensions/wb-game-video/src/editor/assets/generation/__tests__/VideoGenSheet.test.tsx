@@ -157,7 +157,7 @@ describe('VideoGenSheet', () => {
     }))
   })
 
-  it('places the text-only style control before audio and uses the Figma send button', () => {
+  it('places the borderless style control with its trailing Figma icon before audio', () => {
     const { container } = renderSheet({ variant: 'page' })
     const options = container.querySelector('.vgen-prompt-options')
     const style = screen.getByRole('button', { name: '风格' })
@@ -166,7 +166,8 @@ describe('VideoGenSheet', () => {
 
     expect(options?.children[0]).toBe(style)
     expect(options?.children[1]).toContainElement(audio)
-    expect(style.querySelector('img')).toBeNull()
+    expect(style.querySelector('.vgen-style-label')).toHaveTextContent('风格')
+    expect(style.querySelector('.vgen-style-swap img')).toBeTruthy()
     expect(container.querySelector('.vgen-media-row')).toBeNull()
     expect(submit).toHaveClass('vgen-send')
   })

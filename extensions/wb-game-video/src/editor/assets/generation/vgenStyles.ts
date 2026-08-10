@@ -129,36 +129,45 @@ export const VGEN_CSS = `
 .vgen-page-refs { display: flex; align-items: center; gap: 8px; }
 .vgen-page-ref { position: relative; width: 79px; height: 95px; flex: 0 0 79px; border: 0; border-radius: 8px; background: #1a1a1a center/cover no-repeat; cursor: pointer; }
 .vgen-page-ref span { position: absolute; top: 4px; right: 4px; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; background: rgba(0,0,0,.62); color: #fff; }
-.vgen-prompt-box { display: flex; min-height: 120px; flex: 1; flex-direction: column; overflow: hidden; padding: 15px 19px; border-radius: 12px; background: rgba(0,0,0,.2); }
-.vgen-prompt-box textarea { box-sizing: border-box; width: 100%; min-height: 48px; flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: #fff; font: inherit; font-size: 14px; line-height: 1.5; }
+.vgen-prompt-box { box-sizing: border-box; display: flex; height: 164px; min-height: 164px; flex: 0 0 164px; flex-direction: column; overflow: hidden; padding: 15px 19px; border-radius: 12px; background: rgba(0,0,0,.2); }
+.vgen-prompt-box textarea { box-sizing: border-box; width: 100%; min-height: 48px; flex: 1; resize: none; padding: 0; border: 0; outline: 0; background: transparent; color: #fff; box-shadow: none; font: inherit; font-size: 14px; line-height: 1.5; }
+.vgen-prompt-box:focus-within { box-shadow: 0 0 0 2px rgba(255,156,42,.42); }
+.vgen-prompt-box textarea:focus { border: 0; box-shadow: none; }
 .vgen-prompt-box textarea::placeholder { color: rgba(255,255,255,.4); }
-.vgen-prompt-tools { display: flex; min-height: 32px; align-items: center; gap: 12px; }
-.vgen-prompt-options { display: flex; min-width: 0; align-items: center; gap: 8px; }
-.vgen-prompt-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.vgen-style-button { box-sizing: border-box; max-width: 180px; height: 24px; overflow: hidden; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.vgen-style-button:hover, .vgen-style-button:focus-visible, .vgen-style-button.has-style { background: rgba(255,255,255,.08); color: #fff; outline: none; }
-.vgen-style-button:focus-visible { box-shadow: 0 0 0 2px rgba(255,156,42,.42); }
-.vgen-audio-toggle { display: inline-flex; align-items: center; gap: 7px; color: rgba(255,255,255,.82); font-size: 12px; cursor: pointer; }
+.vgen-prompt-tools { box-sizing: border-box; display: flex; width: 100%; min-height: 32px; align-items: center; justify-content: space-between; }
+.vgen-prompt-options { display: flex; min-width: 0; align-items: flex-start; gap: 8px; }
+.vgen-prompt-actions { display: flex; width: 289px; flex: 0 0 289px; align-items: center; justify-content: flex-end; gap: 15px; }
+.vgen-prompt-options .vgen-style-button { box-sizing: border-box; display: inline-flex; max-width: 180px; height: 24px; align-items: center; gap: 8px; overflow: hidden; padding: 0 8px; border: 0; border-bottom: 0; border-radius: 4px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; font-weight: 400; line-height: 18px; white-space: nowrap; }
+.vgen-prompt-options .vgen-style-button:hover, .vgen-prompt-options .vgen-style-button:focus-visible { background: rgba(255,255,255,.08); color: #fff; outline: none; }
+.vgen-prompt-options .vgen-style-button:focus-visible { box-shadow: 0 0 0 2px rgba(255,156,42,.42); }
+.vgen-style-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vgen-style-swap { display: grid; width: 12px; height: 12px; flex: 0 0 12px; place-items: center; }
+.vgen-style-swap img { display: block; width: 10px; height: 8.5px; }
+.vgen-audio-toggle { box-sizing: border-box; display: inline-flex; width: 86px; height: 24px; flex: 0 0 86px; align-items: center; gap: 8px; padding: 0 8px; color: rgba(255,255,255,.8); font-size: 12px; line-height: 18px; cursor: pointer; }
 .vgen-audio-toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .vgen-audio-switch { position: relative; display: block; width: 38px; height: 18px; box-sizing: border-box; padding: 2px; border: 1px solid rgba(255,255,255,.05); border-radius: 999px; background: rgba(255,255,255,.1); transition: background .15s ease; }
 .vgen-audio-switch::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,.22); transition: transform .15s ease, background .15s ease; }
 .vgen-audio-toggle input:checked + .vgen-audio-switch { background: linear-gradient(90deg,#ff7001,#ff9c2a); }
 .vgen-audio-toggle input:checked + .vgen-audio-switch::after { transform: translateX(20px); background: #fff; }
 .vgen-audio-toggle input:focus-visible + .vgen-audio-switch { outline: 2px solid rgba(255,156,42,.48); outline-offset: 2px; }
-.vgen-prompt-undo, .vgen-prompt-helper { height: 28px; border: 0; border-radius: 6px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; }
-.vgen-prompt-undo { display: grid; width: 28px; place-items: center; padding: 0; }
-.vgen-prompt-undo img { width: 12px; height: 12px; }
+.vgen-prompt-actions .vgen-prompt-undo, .vgen-prompt-actions .vgen-prompt-helper { box-sizing: border-box; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; font-weight: 400; line-height: 18px; }
+.vgen-prompt-actions .vgen-prompt-undo { display: grid; width: 16px; flex: 0 0 16px; place-items: center; }
+.vgen-prompt-actions .vgen-prompt-undo img { width: 16px; height: 16px; }
 .vgen-prompt-undo:hover:not(:disabled), .vgen-prompt-helper:hover:not(:disabled) { background: rgba(255,255,255,.1); }
 .vgen-prompt-undo:disabled, .vgen-prompt-helper:disabled { opacity: .45; cursor: not-allowed; }
-.vgen-prompt-helper { padding: 0 8px; }
+.vgen-prompt-actions .vgen-prompt-helper { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; white-space: nowrap; }
+.vgen-prompt-helper-chevron { box-sizing: border-box; width: 8px; height: 8px; margin-top: -3px; transform: rotate(45deg); border-right: 1.4px solid rgba(255,255,255,.8); border-bottom: 1.4px solid rgba(255,255,255,.8); }
 .vgen-prompt-actions .vgen-send { position: relative; display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #ff9c2a; box-shadow: 0 2px 8px rgba(255,112,1,.18); cursor: pointer; transition: transform .12s ease, background .12s ease, box-shadow .12s ease; }
-.vgen-prompt-actions .vgen-send img { width: 21px; height: 18px; }
+.vgen-prompt-actions .vgen-send img { width: 20.1912px; height: 17.9477px; transform: translate(-1.37px, -1.37px) rotate(45deg) scaleX(-1); }
 .vgen-prompt-actions .vgen-send:hover:not(:disabled) { background: #ffad4d; box-shadow: 0 4px 12px rgba(255,112,1,.28); }
 .vgen-prompt-actions .vgen-send:active:not(:disabled) { transform: scale(.94); background: #ff8a14; box-shadow: 0 1px 4px rgba(255,112,1,.2); }
 .vgen-prompt-actions .vgen-send:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .vgen-prompt-actions .vgen-send:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .vgen-prompt-actions .vgen-send.running::before { content: ''; position: absolute; width: 16px; height: 16px; border: 2px solid rgba(0,0,0,.25); border-top-color: #000; border-radius: 50%; animation: vgen-spin .8s linear infinite; }
 .vgen-prompt-actions .vgen-send.running img { opacity: 0; }
+@media (max-width: 620px) {
+  .vgen-prompt-actions { width: auto; flex-basis: auto; }
+}
 .vgen-style-layer { position: fixed; inset: 0; z-index: 330; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.68); }
 .vgen-style-dialog { box-sizing: border-box; width: min(971px,calc(100vw - 48px)); max-height: min(760px,calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; padding: 24px 40px 32px; border: 1px solid rgba(255,255,255,.2); border-radius: 14px; background: #141414; color: #fff; box-shadow: 0 24px 72px rgba(0,0,0,.5); }
 .vgen-style-head { display: flex; align-items: center; }
