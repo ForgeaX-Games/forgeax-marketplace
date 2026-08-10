@@ -26,13 +26,14 @@ import { installAssetNavSync } from './editor/persist/assetNavStore'
 import { installDocumentNavSync } from './editor/persist/documentNavStore'
 import { installRuleSelectionSync } from './editor/persist/ruleSelectionStore'
 import { installVideoLibraryNavSync } from './editor/persist/videoLibraryNavStore'
-import { getGameSlug, setSyncGameId } from './editor/persist/gameScope'
+import { setSyncGameId } from './editor/persist/gameScope'
 import { injectStyleOnce } from './styles/injectStyle'
 import { GameBootstrap } from './editor/bootstrap/GameBootstrap'
 import { useGlobalVideoGenerationTracker } from './editor/assets/generation/videoGenerationStore'
 import { useVideoAssets, type VideoAssetsController } from './editor/assets/useVideoAssets'
 import { installKinoVideoCacheSync } from './editor/assets/kinoVideoCacheStore'
 import { installTipSyncPolling } from './editor/persist/tipSyncPolling'
+import { getWorkbenchHost } from './lib/workbench-host'
 
 export type GraphAppPane = 'left' | 'center' | null
 
@@ -52,10 +53,6 @@ function readPane(): GraphAppPane {
   } catch {
     return null
   }
-}
-
-function resolveGameSlug(explicit?: string): string {
-  return explicit ?? getGameSlug() ?? 'game-nodia-fighting'
 }
 
 /** 主区——当前 tab 对应的内容。center pane 的全部内容。 */
@@ -118,13 +115,37 @@ function CombinedWorkspace({
   )
 }
 
-function LeftPane({ gameSlug }: { gameSlug: string }): JSX.Element {
+function LeftPane({ gameId }: { gameId?: string }): JSX.Element {
   const ensureBoot = useGraphScenario((state) => state.ensureBoot)
+  const [bootReady, setBootReady] = useState(false)
+  const [bootError, setBootError] = useState<string | null>(null)
 
   useEffect(() => {
-    // 侧栏不包 GameBootstrap（避免 package guide 顶掉导航），但仍需加载同一 persist。
-    void ensureBoot(gameSlug)
-  }, [ensureBoot, gameSlug])
+    let disposed = false
+    const boot = async (): Promise<void> => {
+      try {
+        // Split panes must derive their channel scope from the same host
+        // handshake. Falling back to a URL/default game makes the left and
+        // center panes join different BroadcastChannels.
+        const targetGameId = gameId ?? (await getWorkbenchHost().ready()).gameId
+        await ensureBoot(targetGameId)
+        if (!disposed) setBootReady(true)
+      } catch (cause) {
+        if (!disposed) {
+          setBootError(cause instanceof Error ? cause.message : String(cause))
+        }
+      }
+    }
+    void boot()
+    return () => { disposed = true }
+  }, [ensureBoot, gameId])
+
+  if (bootError) {
+    return <section className="ga-bootstrap" role="alert"><p>工作台连接失败：{bootError}</p></section>
+  }
+  if (!bootReady) {
+    return <section className="ga-bootstrap" aria-live="polite"><p>正在连接工作台…</p></section>
+  }
 
   return (
     <div className="ga-root is-pane-left">
@@ -138,7 +159,6 @@ export function GraphApp({ pane: explicitPane, gameId, autoInitialize }: GraphAp
   const [pane] = useState(() => (explicitPane === undefined ? readPane() : explicitPane))
   const ensureBoot = useGraphScenario((state) => state.ensureBoot)
   const booted = useGraphScenario((state) => state.booted)
-  const gameSlug = resolveGameSlug(gameId)
   // 权威 game 来源：boot 后由 store 写入（center 来自宿主握手的 context.gameId，
   // left 来自 ensureBoot）。频道命名必须等它到位，否则同源多 tab 会共用空后缀串台。
   const activeGame = useGraphScenario((state) => state.game)
@@ -173,7 +193,7 @@ export function GraphApp({ pane: explicitPane, gameId, autoInitialize }: GraphAp
   }, [booted])
 
   if (pane === 'left') {
-    return <LeftPane gameSlug={gameSlug} />
+    return <LeftPane gameId={gameId} />
   }
   if (pane === 'center') {
     return (

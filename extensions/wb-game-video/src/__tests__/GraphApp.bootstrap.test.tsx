@@ -4,9 +4,10 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { GraphApp } from '../GraphApp'
 import { installTipSyncPolling } from '../editor/persist/tipSyncPolling'
 
-const { ensureBoot, bootstrapProps } = vi.hoisted(() => ({
+const { ensureBoot, bootstrapProps, ready } = vi.hoisted(() => ({
   ensureBoot: vi.fn(),
   bootstrapProps: vi.fn(),
+  ready: vi.fn(async () => ({ gameId: 'handshake-game' })),
 }))
 
 const mockScenarioState = vi.hoisted(() => {
@@ -42,12 +43,18 @@ vi.mock('../editor/bootstrap/GameBootstrap', () => ({
     return <div data-testid="bootstrap">{children}</div>
   },
 }))
+vi.mock('../lib/workbench-host', () => ({
+  getWorkbenchHost: () => ({ ready }),
+}))
 vi.mock('../editor/assets/catalog', () => ({
   ZHANDOU_VIDEOS: {},
   zhandouUrl: () => '',
 }))
 vi.mock('../editor/assets/useVideoAssets', () => ({
   useVideoAssets: () => ({ items: [] }),
+}))
+vi.mock('../editor/assets/generation/videoGenerationStore', () => ({
+  useGlobalVideoGenerationTracker: vi.fn(),
 }))
 vi.mock('../editor/assets/use-asset-browser', () => ({
   useAssetBrowser: () => ({
@@ -100,16 +107,17 @@ vi.mock('../editor/persist/tipSyncPolling', () => ({
 afterEach(() => {
   ensureBoot.mockClear()
   bootstrapProps.mockClear()
+  ready.mockClear()
   vi.mocked(installTipSyncPolling).mockClear()
   window.history.replaceState({}, '', '/')
 })
 
-test('boots the left pane without GameBootstrap chrome and lists real blueprints', () => {
+test('boots the left pane from the host handshake without GameBootstrap chrome and lists real blueprints', async () => {
   window.history.replaceState({}, '', '/?pane=left')
   render(<GraphApp />)
-  expect(screen.getByRole('complementary')).toBeTruthy()
+  expect(await screen.findByRole('complementary')).toBeTruthy()
   expect(screen.queryByTestId('bootstrap')).toBeNull()
-  expect(ensureBoot).toHaveBeenCalled()
+  expect(ensureBoot).toHaveBeenCalledWith('handshake-game')
   fireEvent.click(screen.getByRole('button', { name: '展开 蓝图' }))
   expect(screen.getByText('主蓝图')).toBeTruthy()
   expect(screen.getByText('子蓝图')).toBeTruthy()
@@ -138,6 +146,14 @@ test('passes the handshake game id to the single boot owner', () => {
   ensureBoot.mockClear()
   render(<GraphApp />)
   expect(ensureBoot).toHaveBeenCalledWith('猫')
+})
+
+test('uses an explicit in-process game id for the left pane without a handshake', async () => {
+  render(<GraphApp pane="left" gameId="arrival-game" />)
+
+  expect(await screen.findByRole('complementary')).toBeTruthy()
+  expect(ensureBoot).toHaveBeenCalledWith('arrival-game')
+  expect(ready).not.toHaveBeenCalled()
 })
 
 test('uses explicit in-process pane and game id without changing the host URL', () => {

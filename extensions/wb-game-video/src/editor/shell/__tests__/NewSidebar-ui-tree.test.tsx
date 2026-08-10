@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlueprintDoc, GameGraph } from '../../../runtime/schema/graph-schema'
+import { useAssetNav } from '../../persist/assetNavStore'
 import { findUiTreeNode } from '../../persist/ui-tree'
 import { useGraphScenario } from '../../persist/graphScenarioStore'
 import { useGraphView } from '../../persist/graphViewStore'
@@ -33,6 +34,7 @@ const main: BlueprintDoc = { id: 'main', title: '主蓝图', entry: 'entry', gra
 
 beforeEach(() => {
   useGraphView.setState({ view: 'ui' })
+  useAssetNav.getState().setLocation({ root: null })
   useDocumentNav.setState({ documentType: 'intake' })
   useRuleSelection.setState({ section: 'entities', itemId: null })
   useUiSelection.getState().clearUiSelection()
@@ -83,24 +85,43 @@ describe('NewSidebar interface tree', () => {
     expect(sidebar).toBeTruthy()
     expect(document.querySelector('style[data-reel-style="new-sidebar"]')?.textContent).toContain('width: 196px')
     expect(sidebar.querySelector('.ns-label[title="蓝图"]')?.textContent).toContain('蓝图')
-    expect(sidebar.querySelector('.ns-label[title="试玩"]')?.textContent).toContain('试玩')
     expect(sidebar.querySelector('.ns-label[title="视频"]')?.textContent).toContain('视频')
     expect(sidebar.querySelector('.ns-label[title="界面"]')?.textContent).toContain('界面')
     expect(sidebar.querySelector('.ns-label[title="文档"]')?.textContent).toContain('文档')
     expect(sidebar.querySelector('.ns-label[title="控件"]')?.textContent).toContain('控件')
-    // Top-level order: 文档 → 蓝图 → 试玩 → 界面 → …
+    // Top-level order: 文档 → 蓝图 → 界面 → …（试玩已改由顶部视图切换器承载，侧栏不再列）
     const topLabels = [...sidebar.querySelectorAll('[role="tree"] > [role="treeitem"] .ns-label')]
       .map((el) => el.getAttribute('title'))
-    expect(topLabels.indexOf('蓝图')).toBeLessThan(topLabels.indexOf('试玩'))
-    expect(topLabels.indexOf('试玩')).toBeLessThan(topLabels.indexOf('界面'))
+    expect(topLabels).not.toContain('试玩')
+    expect(topLabels.indexOf('文档')).toBeLessThan(topLabels.indexOf('蓝图'))
+    expect(topLabels.indexOf('蓝图')).toBeLessThan(topLabels.indexOf('界面'))
   })
 
-  it('reserves the disclosure icon column for top-level leaves', () => {
+  it('routes expandable asset categories and the asset-library root', () => {
     render(<NewSidebar />)
 
-    const playLabel = document.querySelector('.ns-label[title="试玩"]')
-    const playRow = playLabel?.closest('[role="treeitem"]')
-    expect(playRow?.querySelector('.ns-chev-spacer')).toBeTruthy()
+    for (const [label, root] of [
+      ['图标', 'image'],
+      ['控件', 'control'],
+      ['音频', 'audio'],
+      ['字体', 'font'],
+    ] as const) {
+      fireEvent.click(screen.getByText(label).closest('[role="treeitem"]')!)
+      expect(useGraphView.getState().view).toBe('assets')
+      expect(useAssetNav.getState()).toMatchObject({ root, folderId: null, entryKey: null })
+    }
+
+    fireEvent.click(screen.getByText('资产库').closest('[role="treeitem"]')!)
+    expect(useGraphView.getState().view).toBe('assets')
+    expect(useAssetNav.getState()).toMatchObject({ root: null, folderId: null, entryKey: null })
+  })
+
+  it('reserves the disclosure icon column for leaves', () => {
+    render(<NewSidebar />)
+
+    fireEvent.click(screen.getByRole('button', { name: '展开 文档' }))
+    const leafRow = screen.getByText('需求').closest('[role="treeitem"]')
+    expect(leafRow?.querySelector('.ns-chev-spacer')).toBeTruthy()
   })
 
   it('opens the fixed document category even when the project has no documents', () => {
@@ -172,8 +193,9 @@ describe('NewSidebar interface tree', () => {
     fireEvent.click(screen.getByRole('button', { name: '选择界面方案 战斗 HUD' }))
     expect(useUiSelection.getState().selectedTreeNodeId).toBe('hud-node')
 
-    // 切去点「试玩」叶子（非 ui 视图）：界面选中态应被清空，界面子树行不再高亮。
-    fireEvent.click(screen.getByText('试玩'))
+    // 切去点蓝图叶子（非 ui 视图）：界面选中态应被清空，界面子树行不再高亮。
+    fireEvent.click(screen.getByRole('button', { name: '展开 蓝图' }))
+    fireEvent.click(screen.getByText('主蓝图'))
     expect(useUiSelection.getState().selectedTreeNodeId).toBeNull()
   })
 

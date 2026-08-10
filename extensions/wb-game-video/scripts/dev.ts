@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import { resolveViteDevPort } from './vite-dev-port'
 
 const cwd = resolve(import.meta.dir, '..')
 const standalone = Bun.argv.includes('--standalone')
@@ -14,7 +15,7 @@ const children = scripts.map((script) => ({
 }))
 
 if (standalone) {
-  console.log('[dev] local host shell: http://localhost:15185/dev.html')
+  console.log(`[dev] local host shell: http://localhost:${resolveViteDevPort()}/dev.html`)
 }
 
 let stopping = false

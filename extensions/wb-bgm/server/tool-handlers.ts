@@ -14,6 +14,7 @@
  * project root comes from `ctx.projectRoot` or `ctx.env.FORGEAX_PROJECT_ROOT`.
  */
 
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -57,6 +58,7 @@ import {
 } from './audio-project-store.ts';
 import { compileAudioRuntime } from './audio-runtime-compiler.ts';
 import { verifyAudioProject } from './audio-project-verify.ts';
+import { generateSeedAudio, seedConfigFromEnv } from './seed-audio.ts';
 
 interface ToolCtx {
   caller: { kind: string; id?: string };
@@ -127,6 +129,43 @@ interface ChangeCustomAudioKindArgs { assetId?: string; kind?: CustomAudioKind }
 interface AudioProjectArgs { slug?: string; projectId?: string }
 interface PatchProjectArgs extends Partial<PatchAudioProjectArgs> { slug?: string }
 interface ApplyProjectArgs extends AudioProjectArgs { expectedRevision?: number }
+interface GenerateAudioAssetItem {
+  eventId?: string;
+  assetId?: string;
+  name?: string;
+  kind?: string;
+  prompt?: string;
+  durationSeconds?: number;
+  instrumental?: boolean;
+  loop?: boolean;
+  speed?: number;
+  filename?: string;
+  format?: 'mp3' | 'wav';
+}
+interface GenerateAudioAssetsArgs {
+  slug?: string;
+  concurrency?: number;
+  items?: GenerateAudioAssetItem[];
+}
+
+// Same prompt+event always yields the same id, so a re-run reuses the existing
+// file instead of piling up near-duplicate takes.
+function generatedAssetId(slug: string, item: GenerateAudioAssetItem): string {
+  if (item.assetId?.trim()) return item.assetId.trim();
+  const digest = createHash('sha256')
+    .update(JSON.stringify([slug, item.eventId, item.kind, item.prompt]))
+    .digest('hex')
+    .slice(0, 20);
+  return `seed-${item.kind}-${digest}`;
+}
+
+function errorDetails(error: unknown): { code: string; error: string } {
+  const value = error as { code?: unknown; message?: unknown };
+  return {
+    code: typeof value?.code === 'string' ? value.code : 'generation-failed',
+    error: typeof value?.message === 'string' ? value.message : String(error),
+  };
+}
 
 const tools = {
   'search-audio': async (args: SearchArgs, ctx: ToolCtx) => {
@@ -219,6 +258,77 @@ const tools = {
     const compiled = await compileAudioRuntime(gameDir, project, runtimeSource);
     const applied = await writeAppliedAudioProject(gameDir, project);
     return { project: applied, files: compiled.files };
+  },
+
+  'generate-audio-assets': async (args: GenerateAudioAssetsArgs, ctx: ToolCtx) => {
+    const slug = slugOf(args, ctx);
+    const items = Array.isArray(args.items) ? args.items.slice(0, 50) : [];
+    if (!items.length) {
+      throw Object.assign(new Error('items must contain at least one audio request'), { code: 'bad_input' });
+    }
+    const concurrency = Math.min(3, Math.max(1, Math.floor(args.concurrency ?? 2)));
+    const config = seedConfigFromEnv(ctx.env ?? {});
+    const results: Array<Record<string, unknown>> = new Array(items.length);
+    let cursor = 0;
+
+    const worker = async () => {
+      while (cursor < items.length) {
+        const index = cursor++;
+        const item = items[index]!;
+        const eventId = String(item.eventId ?? '').trim();
+        const kind = asKind(item.kind);
+        const assetId = generatedAssetId(slug, item);
+        try {
+          if (!eventId) throw Object.assign(new Error('eventId is required'), { code: 'bad_input' });
+          if (!kind) throw Object.assign(new Error("kind must be 'bgm', 'sfx', or 'voice'"), { code: 'invalid-kind' });
+          if (!item.prompt?.trim()) throw Object.assign(new Error('prompt is required'), { code: 'invalid-prompt' });
+          const generated = await generateSeedAudio(config, {
+            kind,
+            prompt: item.prompt,
+            durationSeconds: item.durationSeconds,
+            instrumental: item.instrumental,
+            loop: item.loop,
+            speed: item.speed,
+            format: item.format,
+          });
+          const attached = await attachGeneratedAudio({
+            projectRoot: projectRootOf(ctx),
+            slug,
+            assetId,
+            name: String(item.name ?? '').trim() || eventId,
+            kind,
+            base64: generated.bytes.toString('base64'),
+            mimeType: generated.mimeType,
+            filename: item.filename,
+            provider: 'seed-audio',
+            model: generated.model,
+            addedBy: ctx.caller?.kind === 'ai' ? 'ai' : 'human',
+          });
+          results[index] = {
+            ok: true,
+            eventId,
+            assetId,
+            kind,
+            file: attached.file,
+            bytes: attached.bytes,
+            reused: attached.reused,
+            traceId: generated.traceId,
+            model: generated.model,
+          };
+        } catch (error) {
+          // One bad prompt must not discard the takes that already succeeded.
+          results[index] = { ok: false, eventId, assetId, kind: item.kind, ...errorDetails(error) };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+    const generated = results.filter((result) => result.ok === true).length;
+    return {
+      ok: generated === items.length,
+      slug,
+      summary: { total: items.length, generated, failed: items.length - generated },
+      results,
+    };
   },
 
   'verify-audio-project': async (args: AudioProjectArgs, ctx: ToolCtx) => {
