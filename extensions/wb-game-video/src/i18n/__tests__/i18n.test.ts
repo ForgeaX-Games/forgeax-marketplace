@@ -13,7 +13,7 @@ describe('game video i18n', () => {
 
     setLocale('zh')
 
-    expect(t('videoAssets.rename')).toBe('改名')
+    expect(t('videoAssets.rename')).toBe('重命名')
     expect(tf('videoAssets.renameAria', { name: '序章' })).toBe('重命名 序章')
   })
 

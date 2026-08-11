@@ -78,36 +78,68 @@ export function addNode(graph: GameGraph, node: GameNode): GameGraph {
 }
 
 /**
- * 在指定节点后方插入新演出节点并自动接线。
+ * 在指定节点的某个出口后方插入新演出节点并自动接线：该出口原有的下游边改从新节点的默认出口继续。
+ * sourceHandle 缺省 = 'default'（默认推进出口）；gapY 供多出口时按出口行错开，避免新节点叠在一起。
  */
 export function insertNodeAfter(
   graph: GameGraph,
   afterId: string,
-  opts: { name?: string; gapX?: number; node?: GameNode } = {},
+  opts: { name?: string; gapX?: number; gapY?: number; node?: GameNode; sourceHandle?: string } = {},
 ): { graph: GameGraph; nodeId: string } {
   const after = graph.nodes.find((n) => n.id === afterId)
   if (!after) return { graph, nodeId: afterId }
+  const sourceHandle = opts.sourceHandle ?? 'default'
   const gapX = opts.gapX ?? 220
   const node: GameNode = opts.node ?? {
     id: newId('n'),
     type: 'perf',
-    position: { x: after.position.x + gapX, y: after.position.y },
+    position: { x: after.position.x + gapX, y: after.position.y + (opts.gapY ?? 0) },
     inputs: [],
     outputs: [],
     data: { name: opts.name ?? '新演出节点' },
   }
   const id = node.id
   let g = addNode(graph, node)
-  const outEdges = g.edges.filter((e) => e.source === afterId && (e.sourceHandle ?? 'default') === 'default')
-  if (outEdges.length === 0) {
-    g = connect(g, { source: afterId, sourceHandle: 'default', target: id })
-  } else {
-    for (const e of outEdges) {
-      g = disconnect(g, e.id)
-      g = connect(g, { source: id, sourceHandle: 'default', target: e.target, data: e.data })
-    }
-    g = connect(g, { source: afterId, sourceHandle: 'default', target: id })
+  for (const e of g.edges.filter((e) => e.source === afterId && (e.sourceHandle ?? 'default') === sourceHandle)) {
+    g = disconnect(g, e.id)
+    g = connect(g, { source: id, sourceHandle: 'default', target: e.target, data: e.data })
   }
+  g = connect(g, { source: afterId, sourceHandle, target: id })
+  return { graph: g, nodeId: id }
+}
+
+/**
+ * 在指定节点前方插入新演出节点并自动接线：所有指向该节点的入边改接到新节点，
+ * 再从新节点的默认出口连到该节点。新节点落在左侧（默认 gapX=220）。
+ */
+export function insertNodeBefore(
+  graph: GameGraph,
+  beforeId: string,
+  opts: { name?: string; gapX?: number; gapY?: number; node?: GameNode } = {},
+): { graph: GameGraph; nodeId: string } {
+  const before = graph.nodes.find((n) => n.id === beforeId)
+  if (!before) return { graph, nodeId: beforeId }
+  const gapX = opts.gapX ?? 220
+  const node: GameNode = opts.node ?? {
+    id: newId('n'),
+    type: 'perf',
+    position: { x: before.position.x - gapX, y: before.position.y + (opts.gapY ?? 0) },
+    inputs: [],
+    outputs: [],
+    data: { name: opts.name ?? '新演出节点' },
+  }
+  const id = node.id
+  let g = addNode(graph, node)
+  for (const e of g.edges.filter((e) => e.target === beforeId)) {
+    g = disconnect(g, e.id)
+    g = connect(g, {
+      source: e.source,
+      sourceHandle: e.sourceHandle ?? 'default',
+      target: id,
+      data: e.data,
+    })
+  }
+  g = connect(g, { source: id, sourceHandle: 'default', target: beforeId })
   return { graph: g, nodeId: id }
 }
 
@@ -453,12 +485,12 @@ export function reconnect(
     edges: graph.edges.map((e) =>
       e.id === edgeId
         ? {
-            ...e,
-            source: patch.source ?? e.source,
-            target: patch.target ?? e.target,
-            sourceHandle: patch.sourceHandle ?? e.sourceHandle,
-            targetHandle: patch.targetHandle ?? e.targetHandle,
-          }
+          ...e,
+          source: patch.source ?? e.source,
+          target: patch.target ?? e.target,
+          sourceHandle: patch.sourceHandle ?? e.sourceHandle,
+          targetHandle: patch.targetHandle ?? e.targetHandle,
+        }
         : e,
     ),
   }
@@ -576,11 +608,11 @@ export function patchSettlementSpawnLayout(
   return updateNodeData(graph, nodeId, {
     reactions: reactions.map((candidate, reactionIndex) => reactionIndex === absolute
       ? {
-          ...candidate,
-          do: candidate.do.map((candidateAction, candidateActionIndex) => candidateActionIndex === actionIndex
-            ? { ...action, layout }
-            : candidateAction),
-        }
+        ...candidate,
+        do: candidate.do.map((candidateAction, candidateActionIndex) => candidateActionIndex === actionIndex
+          ? { ...action, layout }
+          : candidateAction),
+      }
       : candidate),
   })
 }
@@ -609,11 +641,11 @@ export function setSettlementSpawnTtlMs(
   return updateNodeData(graph, nodeId, {
     reactions: reactions.map((candidate, reactionIndex) => reactionIndex === absolute
       ? {
-          ...candidate,
-          do: candidate.do.map((candidateAction, candidateActionIndex) => candidateActionIndex === actionIndex
-            ? { ...action, ttlMs: next }
-            : candidateAction),
-        }
+        ...candidate,
+        do: candidate.do.map((candidateAction, candidateActionIndex) => candidateActionIndex === actionIndex
+          ? { ...action, ttlMs: next }
+          : candidateAction),
+      }
       : candidate),
   })
 }
@@ -717,11 +749,11 @@ export function setSettlementAdvanceTarget(
   next = updateNodeData(next, nodeId, {
     reactions: nextReactions.map((candidate, index) => index === nextAbsolute
       ? {
-          ...candidate,
-          do: candidate.do.map((candidateAction, candidateIndex) => candidateIndex === actionIndex
-            ? { kind: 'advance' as const, edgeId: edge.id }
-            : candidateAction),
-        }
+        ...candidate,
+        do: candidate.do.map((candidateAction, candidateIndex) => candidateIndex === actionIndex
+          ? { kind: 'advance' as const, edgeId: edge.id }
+          : candidateAction),
+      }
       : candidate),
   })
   return removeOrphanSettlementAdvanceEdge(next, currentEdge?.id === edge.id ? undefined : currentEdge?.id)

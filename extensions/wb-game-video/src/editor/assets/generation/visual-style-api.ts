@@ -1,6 +1,7 @@
 import { requestKinoEnvelope, type KinoRequestOptions } from '../kino-api'
 
 export const LIST_VIDEO_VISUAL_STYLES_TOOL_ID = 'wb-game-video:list-video-visual-styles'
+export const KINO_VISUAL_STYLE_PRESETS_ROUTE = '/api/v1/kino-visual-style-presets'
 
 export interface KinoVisualStylePreset {
   key: string
@@ -15,7 +16,7 @@ export interface VisualStyleApiPort {
 }
 
 const defaultClient: VisualStyleApiPort = {
-  list: (options) => requestKinoEnvelope('/api/v1/kino/visual-style-presets', options),
+  list: (options) => requestKinoEnvelope(KINO_VISUAL_STYLE_PRESETS_ROUTE, options),
 }
 
 export async function listVideoVisualStyles(
@@ -48,7 +49,7 @@ function parseVisualStyles(value: unknown): readonly KinoVisualStylePreset[] {
       tags: Array.isArray(item.tag) ? item.tag : [item.tag],
       order: item.order,
     }
-  })
+  }).sort((left, right) => left.order - right.order || left.label.localeCompare(right.label, 'zh-CN'))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

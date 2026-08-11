@@ -1,4 +1,17 @@
 import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+  type DndContextProps,
+} from '@dnd-kit/core'
+import {
   useEffect,
   useId,
   useMemo,
@@ -14,6 +27,7 @@ import generateToolbarIcon from '../../assets/asset-toolbar-generate.svg?url'
 import localToolbarIcon from '../../assets/asset-toolbar-local.svg?url'
 import externalToolbarIcon from '../../assets/asset-toolbar-external.svg?url'
 import searchToolbarIcon from '../../assets/asset-toolbar-search.svg?url'
+import cardMoreIcon from '../../assets/asset-card-more.svg?url'
 import type { MediaStatus } from './registry-types'
 import { findVideoReferences } from './video-references'
 import type { VideoAssetsController, VideoAssetListItem } from './useVideoAssets'
@@ -46,6 +60,69 @@ export interface VideoLibraryEntry {
 }
 
 export type { VideoAssetsController }
+
+function OptionalVideoDndContext({ enabled, children, ...props }: DndContextProps & { enabled: boolean }): JSX.Element {
+  return enabled ? <DndContext {...props}>{children}</DndContext> : <>{children}</>
+}
+
+interface DraggableVideoCardProps {
+  entry: VideoLibraryEntry
+  disabled: boolean
+  className: string
+  children: (dragHandle: {
+    attributes: ReturnType<typeof useDraggable>['attributes']
+    listeners: ReturnType<typeof useDraggable>['listeners']
+    setActivatorNodeRef: ReturnType<typeof useDraggable>['setActivatorNodeRef']
+  }) => JSX.Element
+}
+
+function DraggableVideoCard({ entry, disabled, className, children }: DraggableVideoCardProps): JSX.Element {
+  const draggable = useDraggable({
+    id: `video:${entry.id}`,
+    data: { kind: 'video', entry },
+    disabled,
+  })
+  const transform = draggable.transform
+    ? `translate3d(${draggable.transform.x}px, ${draggable.transform.y}px, 0)`
+    : undefined
+  return (
+    <div
+      ref={draggable.setNodeRef}
+      className={`${className}${draggable.isDragging ? ' is-dragging' : ''}`}
+      style={{ transform }}
+    >
+      {children({
+        attributes: draggable.attributes,
+        listeners: draggable.listeners,
+        setActivatorNodeRef: draggable.setActivatorNodeRef,
+      })}
+    </div>
+  )
+}
+
+function DroppableVideoFolder({
+  folder,
+  disabled,
+  children,
+}: {
+  folder: string
+  disabled: boolean
+  children: JSX.Element
+}): JSX.Element {
+  const droppable = useDroppable({
+    id: `folder:${folder}`,
+    data: { kind: 'folder', folder },
+    disabled,
+  })
+  return (
+    <article
+      ref={droppable.setNodeRef}
+      className={`val-folder-card${droppable.isOver ? ' is-drop-target' : ''}`}
+    >
+      {children}
+    </article>
+  )
+}
 
 function ConfirmDialog({
   title,
@@ -421,9 +498,12 @@ export function VideoAssetLibrary({
   const [batchUpload, setBatchUpload] = useState<BatchUploadState | null>(null)
   const [selectionMode, setSelectionMode] = useState(false)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false)
+  const [cardMenuEntryId, setCardMenuEntryId] = useState<string | null>(null)
+  const [draggedEntry, setDraggedEntry] = useState<VideoLibraryEntry | null>(null)
   const [batchSelection, setBatchSelection] = useState<Set<string>>(() => new Set())
   const [pendingBatchDelete, setPendingBatchDelete] = useState(false)
   const renameTriggerRef = useRef<HTMLElement | null>(null)
+  const cardMenuTriggerRef = useRef<HTMLButtonElement | null>(null)
   const deleteTriggerRef = useRef<HTMLElement | null>(null)
   const folderTriggerRef = useRef<HTMLElement | null>(null)
   const tagTriggerRef = useRef<HTMLElement | null>(null)
@@ -450,6 +530,30 @@ export function VideoAssetLibrary({
     || deleteBusy
     || metadataBusy
     || batchUploading
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor),
+  )
+
+  useEffect(() => {
+    if (!cardMenuEntryId) return
+    const closeOnPointerDown = (event: PointerEvent): void => {
+      if (!(event.target instanceof Element) || !event.target.closest('.val-card-actions')) {
+        setCardMenuEntryId(null)
+      }
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      setCardMenuEntryId(null)
+      cardMenuTriggerRef.current?.focus()
+    }
+    document.addEventListener('pointerdown', closeOnPointerDown)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointerDown)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [cardMenuEntryId])
 
   const apiEntries = controller.items.map((item) => mapApiItem(item, uploadGroup))
 
@@ -512,6 +616,8 @@ export function VideoAssetLibrary({
     const query = searchQuery.trim().toLocaleLowerCase()
     return folderNames.filter((folder) => !query || folder.toLocaleLowerCase().includes(query))
   }, [activeFolder, folderNames, searchQuery])
+  const dragToFolderEnabled = visibleFolders.length > 0
+    && filteredEntries.some((entry) => !entry.generationId)
   const selectedLibraryEntry = entries.find((entry) => entry.id === selectedId)
 
   const showUploadStatus = batchUpload != null
@@ -543,6 +649,20 @@ export function VideoAssetLibrary({
     if (result.status === 'written') {
       setMetadata({ tagsByEntryId: result.tagsByEntryId, folderNames: result.folderNames })
     }
+  }
+
+  const finishDrag = ({ active, over }: DragEndEvent): void => {
+    setDraggedEntry(null)
+    const entry = active.data.current?.entry as VideoLibraryEntry | undefined
+    const folder = over?.data.current?.folder as string | undefined
+    if (!entry || !folder || entryTag(entry) === folder) return
+    applyEntryTag(entry, folder)
+  }
+
+  const startDrag = ({ active }: DragStartEvent): void => {
+    const entry = active.data.current?.entry as VideoLibraryEntry | undefined
+    setCardMenuEntryId(null)
+    setDraggedEntry(entry ?? null)
   }
 
   const confirmTag = (tag: string): void => {
@@ -902,11 +1022,18 @@ export function VideoAssetLibrary({
           {metadataError || metadataOperationError ? (
             <div className="val-meta-warning" role="status">{metadataOperationError ?? metadataError}</div>
           ) : null}
+          <OptionalVideoDndContext
+            enabled={dragToFolderEnabled}
+            sensors={sensors}
+            onDragStart={startDrag}
+            onDragCancel={() => setDraggedEntry(null)}
+            onDragEnd={finishDrag}
+          >
           <div className="gc-list-body" ref={listBodyRef}>
             {visibleFolders.map((folder) => {
               const previews = entries.filter((entry) => entryTag(entry) === folder).slice(0, 6)
               return (
-                <article key={folder} className="val-folder-card">
+                <DroppableVideoFolder key={folder} folder={folder} disabled={metadataBusy}>
                   <button
                     type="button"
                     className="val-folder-open"
@@ -924,7 +1051,7 @@ export function VideoAssetLibrary({
                     </span>
                     <span className="val-folder-name" title={folder}>{folder}</span>
                   </button>
-                </article>
+                </DroppableVideoFolder>
               )
             })}
 
@@ -945,12 +1072,21 @@ export function VideoAssetLibrary({
               const isBound = entry.id === boundId
               const label = displayLabel(entry)
               return (
-                <div key={entry.id} className={`val-row${isSelected ? ' is-on' : ''}${selectionMode ? ' is-selecting' : ''}`}>
+                <DraggableVideoCard
+                  key={entry.id}
+                  entry={entry}
+                  disabled={selectionMode || actionsBusy || Boolean(entry.generationId)}
+                  className={`val-row${isSelected ? ' is-on' : ''}${selectionMode ? ' is-selecting' : ''}${cardMenuEntryId === entry.id ? ' has-open-menu' : ''}`}
+                >
+                  {({ attributes, listeners, setActivatorNodeRef }) => <>
                   <button
+                    ref={setActivatorNodeRef}
                     type="button"
                     data-clip-id={entry.id}
                     className={`gc-row${isSelected ? ' is-on' : ''}`}
                     aria-label={label}
+                    {...attributes}
+                    {...listeners}
                     onClick={() => {
                       if (entry.generationId) {
                         onOpenGeneration?.(entry.generationId)
@@ -987,38 +1123,72 @@ export function VideoAssetLibrary({
                     ) : null}
                   </button>
                   {entry.fromApi && !selectionMode ? (
-                    <>
+                    <div className="val-card-actions">
                       <button
                         type="button"
-                        className="val-row-action val-row-rename"
-                        aria-label={tf('videoAssets.renameAria', { name: entry.label })}
+                        className="val-card-more"
+                        aria-label={tf('videoAssets.cardMenuAria', { name: entry.label })}
+                        aria-expanded={cardMenuEntryId === entry.id}
                         disabled={actionsBusy}
                         onClick={(event) => {
                           event.stopPropagation()
-                          openRenameDialog(entry, event.currentTarget)
+                          cardMenuTriggerRef.current = event.currentTarget
+                          setCardMenuEntryId((current) => current === entry.id ? null : entry.id)
                         }}
                       >
-                        <span aria-hidden>✎</span><span className="sr-only">{t('videoAssets.rename')}</span>
+                        <img src={cardMoreIcon} alt="" />
                       </button>
-                      <button
-                        type="button"
-                        className="val-row-action val-row-delete"
-                        aria-label={tf('videoAssets.deleteAria', { name: entry.label })}
-                        disabled={actionsBusy}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          openDeleteDialog(entry, event.currentTarget)
-                        }}
-                      >
-                        <span aria-hidden>×</span><span className="sr-only">{t('videoAssets.delete')}</span>
-                      </button>
-                    </>
+                      {cardMenuEntryId === entry.id ? (
+                        <div className="val-card-menu" role="menu">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              const trigger = event.currentTarget.closest('.val-row')
+                                ?.querySelector<HTMLElement>('.val-card-more') ?? event.currentTarget
+                              setCardMenuEntryId(null)
+                              openRenameDialog(entry, trigger)
+                            }}
+                          >
+                            {t('videoAssets.rename')}
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              const trigger = event.currentTarget.closest('.val-row')
+                                ?.querySelector<HTMLElement>('.val-card-more') ?? event.currentTarget
+                              setCardMenuEntryId(null)
+                              openDeleteDialog(entry, trigger)
+                            }}
+                          >
+                            {t('videoAssets.delete')}
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   ) : null}
                   {selectionMode && entry.fromApi ? <label className="val-row-select"><input type="checkbox" checked={batchSelection.has(entry.id)} disabled={actionsBusy} onChange={() => toggleBatchSelection(entry.id)} aria-label={`选择 ${entry.label}`} /></label> : null}
-                </div>
+                  </>}
+                </DraggableVideoCard>
               )
             })}
           </div>
+          <DragOverlay dropAnimation={null}>
+            {draggedEntry ? (
+              <div className="val-drag-overlay" aria-hidden>
+                <span className="val-card-thumb">
+                  {draggedEntry.url
+                    ? <video src={draggedEntry.url} muted playsInline preload="metadata" />
+                    : <span>▶</span>}
+                </span>
+                <span className="val-card-copy"><span className="gc-row-label">{displayLabel(draggedEntry)}</span></span>
+              </div>
+            ) : null}
+          </DragOverlay>
+          </OptionalVideoDndContext>
 
           {controller.hasMore ? (
             <button

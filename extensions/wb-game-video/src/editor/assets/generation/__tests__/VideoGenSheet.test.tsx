@@ -123,6 +123,28 @@ describe('VideoGenSheet', () => {
     }))
   })
 
+  it('keeps the Figma duration slider, value field, and steppers in sync', () => {
+    renderSheet({ variant: 'page' })
+
+    const slider = screen.getByRole('slider', { name: '时长滑杆' })
+    const value = screen.getByRole('spinbutton', { name: '时长（秒）' })
+    expect(slider).toHaveAttribute('min', '1')
+    expect(slider).toHaveAttribute('max', '15')
+    expect(slider).toHaveValue('5')
+    expect(value).toHaveValue(5)
+
+    fireEvent.click(screen.getByRole('button', { name: '增加时长' }))
+    expect(slider).toHaveValue('6')
+    expect(value).toHaveValue(6)
+
+    fireEvent.click(screen.getByRole('button', { name: '减少时长' }))
+    expect(slider).toHaveValue('5')
+    expect(value).toHaveValue(5)
+
+    fireEvent.change(slider, { target: { value: '12' } })
+    expect(value).toHaveValue(12)
+  })
+
   it('keeps the page submit action responsive and shows prompt validation when empty', () => {
     const { onSubmit } = renderSheet({ variant: 'page' })
     const submit = screen.getByRole('button', { name: '生成视频' })
@@ -157,7 +179,7 @@ describe('VideoGenSheet', () => {
     }))
   })
 
-  it('places the text-only style control before audio and uses the Figma send button', () => {
+  it('places the borderless style control with its trailing Figma icon before audio', () => {
     const { container } = renderSheet({ variant: 'page' })
     const options = container.querySelector('.vgen-prompt-options')
     const style = screen.getByRole('button', { name: '风格' })
@@ -166,7 +188,8 @@ describe('VideoGenSheet', () => {
 
     expect(options?.children[0]).toBe(style)
     expect(options?.children[1]).toContainElement(audio)
-    expect(style.querySelector('img')).toBeNull()
+    expect(style.querySelector('.vgen-style-label')).toHaveTextContent('风格')
+    expect(style.querySelector('.vgen-style-swap img')).toBeTruthy()
     expect(container.querySelector('.vgen-media-row')).toBeNull()
     expect(submit).toHaveClass('vgen-send')
   })

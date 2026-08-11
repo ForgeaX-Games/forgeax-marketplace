@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, makeEmptySubFlowPack, patchSettlementSpawnLayout, reconnect, removeNode, removeSettlementSpawn, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, setSettlementAdvanceTarget, setSettlementReactionMs, setSettlementSpawnTtlMs, updateEventRouteTiming } from '../edit/graph-edit'
+import { addNode, attachSubProcess, connect, disconnect, duplicateNodes, insertNodeAfter, insertNodeBefore, makeEmptySubFlowPack, patchSettlementSpawnLayout, reconnect, removeNode, removeSettlementSpawn, setLifecycleReactionMs, setNodePosition, setRoutingSettlementMs, setSettlementAdvanceTarget, setSettlementReactionMs, setSettlementSpawnTtlMs, updateEventRouteTiming } from '../edit/graph-edit'
 import type { GameGraph, GameNode } from '../../runtime/schema/graph-schema'
 import { getSubProcess } from '../../runtime/schema/graph-schema'
 
@@ -371,6 +371,29 @@ describe('graph-edit', () => {
     expect(next.edges.some((e) => e.source === 'a' && e.target === nodeId && (e.sourceHandle ?? 'default') === 'default')).toBe(true)
     expect(next.edges.some((e) => e.source === nodeId && e.target === 'b')).toBe(true)
     expect(next.edges.some((e) => e.id === 'e-ab')).toBe(false)
+  })
+
+  it('insertNodeAfter: 指定出口只改接该出口的下游边', () => {
+    let g = connect(g0(), { source: 'a', sourceHandle: 'fail', target: 'b', id: 'e-fail' })
+    g = connect(g, { source: 'a', sourceHandle: 'default', target: 'b', id: 'e-default' })
+    const { graph: next, nodeId } = insertNodeAfter(g, 'a', { sourceHandle: 'fail', gapY: 140 })
+    expect(next.edges.some((e) => e.source === 'a' && e.target === nodeId && e.sourceHandle === 'fail')).toBe(true)
+    expect(next.edges.some((e) => e.source === nodeId && e.target === 'b')).toBe(true)
+    expect(next.edges.some((e) => e.id === 'e-fail')).toBe(false)
+    expect(next.edges.some((e) => e.id === 'e-default')).toBe(true) // default 出口不受影响
+    expect(next.nodes.find((x) => x.id === nodeId)!.position).toEqual({ x: 220, y: 140 })
+  })
+
+  it('insertNodeBefore: 插入并改接所有入边', () => {
+    let g = connect(g0(), { source: 'a', sourceHandle: 'fail', target: 'b', id: 'e-fail' })
+    g = connect(g, { source: 'a', sourceHandle: 'default', target: 'b', id: 'e-default' })
+    const { graph: next, nodeId } = insertNodeBefore(g, 'b', { gapY: 40 })
+    expect(next.nodes.some((n) => n.id === nodeId)).toBe(true)
+    expect(next.nodes.find((x) => x.id === nodeId)!.position).toEqual({ x: -220, y: 40 })
+    expect(next.edges.some((e) => e.source === 'a' && e.target === nodeId && e.sourceHandle === 'fail')).toBe(true)
+    expect(next.edges.some((e) => e.source === 'a' && e.target === nodeId && e.sourceHandle === 'default')).toBe(true)
+    expect(next.edges.some((e) => e.source === nodeId && e.target === 'b' && (e.sourceHandle ?? 'default') === 'default')).toBe(true)
+    expect(next.edges.some((e) => e.id === 'e-fail' || e.id === 'e-default')).toBe(false)
   })
 
   it('duplicateNodes: 多节点 + 内部边', () => {

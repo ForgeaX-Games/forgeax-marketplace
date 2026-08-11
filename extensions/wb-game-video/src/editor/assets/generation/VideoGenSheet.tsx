@@ -12,6 +12,7 @@ import { useT } from '../../../i18n'
 import { injectStyleOnce } from '../../../styles/injectStyle'
 import generationEmptyIcon from '../../../assets/video-generation-empty.svg?url'
 import generationFrameIcon from '../../../assets/video-generation-frame.svg?url'
+import generationStyleSwapIcon from '../../../assets/video-generation-style-swap.svg?url'
 import generationSwapIcon from '../../../assets/video-generation-swap.svg?url'
 import generationUndoIcon from '../../../assets/video-generation-undo.svg?url'
 import generationSendIcon from '../../../assets/video-generation-send.svg?url'
@@ -66,7 +67,9 @@ type PickerTarget = 'first' | 'last' | 'reference'
 type ValidationErrors = Partial<Record<'prompt' | 'frames' | 'first' | 'references', string>>
 
 const RUNNING_PHASES = new Set<ClipGenState['phase']>(['submitting', 'generating'])
+const DURATION_MIN_SECONDS = 1
 const DURATION_MAX_SECONDS = 15
+const DURATION_MID_SECONDS = 8
 const EMPTY_MODELS: readonly string[] = []
 const DEFAULT_SIZE: KinoVideoSize = '2560x1440'
 const DEFAULT_RESOLUTION: KinoVideoResolution = '720p'
@@ -309,7 +312,6 @@ export function VideoGenSheet({
       { value: 'firstref', label: t('videoAssets.generate.mode.firstref') },
       { value: 'strict', label: t('videoAssets.generate.mode.strict') },
     ]
-    const durationOptions = [5, 10, 15] as const
     const setPageMode = (nextMode: VideoGenerationMode): void => {
       setMode(nextMode)
       setErrors({})
@@ -364,38 +366,59 @@ export function VideoGenSheet({
               </GenerationSetting>
 
               <GenerationSetting title={t('videoAssets.generate.durationShort')}>
-                <div className="vgen-setting-pills" role="group" aria-label={t('videoAssets.generate.duration')}>
-                  {durationOptions.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className={duration === option ? 'is-on' : ''}
-                      aria-pressed={duration === option}
-                      onClick={() => setDuration(option)}
-                    >
-                      {option}s
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    className={!durationOptions.includes(duration as 5 | 10 | 15) ? 'is-on' : ''}
-                    aria-pressed={!durationOptions.includes(duration as 5 | 10 | 15)}
-                    onClick={() => setDuration(8)}
-                  >
-                    {t('videoAssets.generate.custom')}
-                  </button>
-                </div>
-                {!durationOptions.includes(duration as 5 | 10 | 15) ? (
+                <div className="vgen-duration-control">
+                  <div className="vgen-duration-scale" aria-hidden>
+                    <span>{DURATION_MIN_SECONDS}s</span>
+                    <span>{DURATION_MID_SECONDS}s</span>
+                    <span>{DURATION_MAX_SECONDS}s</span>
+                  </div>
                   <input
-                    className="vgen-custom-duration"
-                    type="number"
-                    min={1}
+                    id={`${durationId}-slider`}
+                    className="vgen-duration-slider"
+                    type="range"
+                    min={DURATION_MIN_SECONDS}
                     max={DURATION_MAX_SECONDS}
                     value={duration}
-                    aria-label={t('videoAssets.generate.duration')}
+                    aria-label={t('videoAssets.generate.durationSlider')}
+                    style={{
+                      '--vgen-duration-progress': `${((duration - DURATION_MIN_SECONDS) / (DURATION_MAX_SECONDS - DURATION_MIN_SECONDS)) * 100}%`,
+                    } as CSSProperties}
                     onChange={(event) => setDuration(clampDuration(event.target.valueAsNumber, DURATION_MAX_SECONDS))}
                   />
-                ) : null}
+                </div>
+                <div className="vgen-duration-editor">
+                  <label className="vgen-duration-value" htmlFor={`${durationId}-value`}>
+                    <input
+                      id={`${durationId}-value`}
+                      className="vgen-custom-duration"
+                      type="number"
+                      min={DURATION_MIN_SECONDS}
+                      max={DURATION_MAX_SECONDS}
+                      value={duration}
+                      aria-label={t('videoAssets.generate.duration')}
+                      onChange={(event) => setDuration(clampDuration(event.target.valueAsNumber, DURATION_MAX_SECONDS))}
+                    />
+                    <span aria-hidden>s</span>
+                  </label>
+                  <div className="vgen-duration-stepper">
+                    <button
+                      type="button"
+                      aria-label={t('videoAssets.generate.increaseDuration')}
+                      disabled={duration >= DURATION_MAX_SECONDS}
+                      onClick={() => setDuration((current) => Math.min(DURATION_MAX_SECONDS, current + 1))}
+                    >
+                      <span aria-hidden />
+                    </button>
+                  <button
+                    type="button"
+                    aria-label={t('videoAssets.generate.decreaseDuration')}
+                    disabled={duration <= DURATION_MIN_SECONDS}
+                    onClick={() => setDuration((current) => Math.max(DURATION_MIN_SECONDS, current - 1))}
+                  >
+                    <span aria-hidden />
+                  </button>
+                  </div>
+                </div>
               </GenerationSetting>
 
               <GenerationSetting title={t('videoAssets.generate.ratioShort')}>
@@ -535,7 +558,12 @@ export function VideoGenSheet({
                         : t('videoAssets.generate.style')}
                       onClick={openStylePicker}
                     >
-                      {selectedVisualStyle?.label ?? t('videoAssets.generate.style')}
+                      <span className="vgen-style-label">
+                        {selectedVisualStyle?.label ?? t('videoAssets.generate.style')}
+                      </span>
+                      <span className="vgen-style-swap" aria-hidden>
+                        <img src={generationStyleSwapIcon} alt="" />
+                      </span>
                     </button>
                     <label className="vgen-audio-toggle">
                       <span className="vgen-audio-label">{t('videoAssets.generate.audio')}</span>
@@ -553,7 +581,10 @@ export function VideoGenSheet({
                         <img src={generationUndoIcon} alt="" />
                       </button>
                     )}
-                    <button type="button" className="vgen-prompt-helper" disabled title={t('videoAssets.generate.promptHelperComing')}>{t('videoAssets.generate.promptHelper')} <span aria-hidden>⌄</span></button>
+                    <button type="button" className="vgen-prompt-helper" disabled title={t('videoAssets.generate.promptHelperComing')}>
+                      {t('videoAssets.generate.promptHelper')}
+                      <span className="vgen-prompt-helper-chevron" aria-hidden />
+                    </button>
                     <button
                       type="button"
                       className={`vgen-send${running ? ' running' : ''}`}

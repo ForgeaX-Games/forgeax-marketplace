@@ -74,18 +74,38 @@ export const VGEN_CSS = `
 .vgen-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .vgen-design-workspace { box-sizing: border-box; display: grid; width: 100%; height: 100%; min-height: 0; grid-template-columns: 225px minmax(0,1fr); grid-template-rows: minmax(300px,1.65fr) minmax(255px,1fr); gap: 5px; padding: 5px; background: #1a1a1a; }
 .vgen-settings { box-sizing: border-box; display: flex; min-height: 0; flex-direction: column; gap: 20px; overflow: auto; padding: 16px; background: #2c2c2c; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
-.vgen-setting-group { display: flex; flex: none; flex-direction: column; gap: 8px; }
-.vgen-setting-group h3 { display: flex; align-items: center; gap: 8px; margin: 0; color: #fff; font-size: 14px; font-weight: 500; line-height: 21px; }
+.vgen-setting-group { display: flex; flex: none; flex-direction: column; gap: 12px; }
+.vgen-setting-group h3 { display: flex; align-items: center; gap: 8px; margin: 0; color: #fff; font-size: 14px; font-weight: 400; line-height: 21px; }
 .vgen-setting-group h3 > span { display: block; width: 3px; height: 11px; border-radius: 3px; background: #e8864a; }
 .vgen-setting-select, .vgen-custom-duration { box-sizing: border-box; width: 100%; height: 40px; padding: 0 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; outline: 0; background: #1a1a1a; color: #fff; font: inherit; font-size: 14px; }
 .vgen-setting-select:disabled { opacity: 1; cursor: not-allowed; color: rgba(255,255,255,.82); }
-.vgen-setting-pills { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; }
-.vgen-setting-pills button { box-sizing: border-box; min-width: 0; height: 31px; padding: 0 5px; border: 0; border-radius: 8px; background: #1a1a1a; color: rgba(255,255,255,.6); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
-.vgen-setting-pills button.is-on { background: #e8864a; color: #000; }
-.vgen-setting-pills button:disabled { cursor: not-allowed; opacity: .55; }
+.vgen-setting-pills { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+.vgen-setting-pills button { box-sizing: border-box; min-width: 0; min-height: 28px; padding: 5px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; background: #1a1a1a; color: #fff; cursor: pointer; font: inherit; font-size: 12px; line-height: 18px; white-space: nowrap; }
+.vgen-setting-pills button.is-on { border-color: #e8864a; background: #e8864a; color: #000; }
+.vgen-setting-pills button:disabled { cursor: not-allowed; opacity: 1; }
 .vgen-setting-pills button.is-on:disabled { opacity: 1; }
-.vgen-camera-pills { grid-template-columns: repeat(3,minmax(0,1fr)); }
-.vgen-custom-duration { height: 32px; }
+.vgen-duration-control { display: flex; width: 100%; flex-direction: column; gap: 8px; }
+.vgen-duration-scale { display: flex; align-items: center; justify-content: space-between; color: rgba(255,255,255,.4); font-size: 12px; line-height: 18px; }
+.vgen-duration-scale span:nth-child(2) { color: #fff; font-weight: 600; }
+.vgen-duration-slider { --vgen-duration-progress: 0%; box-sizing: border-box; width: 100%; height: 12px; margin: 0; padding: 0; appearance: none; border: 0; outline: 0; background: transparent; cursor: pointer; }
+.vgen-duration-slider::-webkit-slider-runnable-track { height: 4px; border-radius: 999px; background: linear-gradient(to right,#ff7001 0,#ff9c2a var(--vgen-duration-progress),rgba(255,255,255,.1) var(--vgen-duration-progress),rgba(255,255,255,.1) 100%); }
+.vgen-duration-slider::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4px; appearance: none; border: 2px solid #e8864a; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.1),0 4px 6px rgba(0,0,0,.1); }
+.vgen-duration-slider::-moz-range-track { height: 4px; border-radius: 999px; background: rgba(255,255,255,.1); }
+.vgen-duration-slider::-moz-range-progress { height: 4px; border-radius: 999px; background: linear-gradient(90deg,#ff7001,#ff9c2a); }
+.vgen-duration-slider::-moz-range-thumb { width: 8px; height: 8px; border: 2px solid #e8864a; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,.1),0 4px 6px rgba(0,0,0,.1); }
+.vgen-duration-slider:focus-visible { outline: 2px solid rgba(255,156,42,.48); outline-offset: 3px; border-radius: 4px; }
+.vgen-duration-editor { display: flex; align-items: center; gap: 3px; }
+.vgen-duration-value { box-sizing: border-box; display: flex; height: 28px; align-items: center; gap: 3px; padding: 0 8px 0 4px; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; background: #1a1a1a; color: rgba(255,255,255,.6); font-size: 12px; line-height: 18px; }
+.vgen-duration-value:focus-within { border-color: rgba(255,156,42,.48); }
+.vgen-duration-value .vgen-custom-duration { width: 31px; height: 26px; padding: 0 4px; appearance: textfield; border: 0; border-radius: 4px; background: transparent; color: rgba(255,255,255,.6); font-size: 12px; line-height: 18px; text-align: center; }
+.vgen-duration-value .vgen-custom-duration::-webkit-inner-spin-button, .vgen-duration-value .vgen-custom-duration::-webkit-outer-spin-button { margin: 0; appearance: none; }
+.vgen-duration-value .vgen-custom-duration:focus { border: 0; outline: 0; box-shadow: none; }
+.vgen-duration-stepper { box-sizing: border-box; display: flex; width: 27px; height: 28px; flex-direction: column; padding: 2px 3px; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; background: #1a1a1a; }
+.vgen-duration-stepper button { display: grid; min-width: 0; min-height: 0; flex: 1; place-items: center; padding: 0; border: 0; border-radius: 3px; background: transparent; color: rgba(255,255,255,.6); cursor: pointer; }
+.vgen-duration-stepper button:hover:not(:disabled), .vgen-duration-stepper button:focus-visible { outline: 0; background: rgba(255,255,255,.08); }
+.vgen-duration-stepper button:disabled { cursor: not-allowed; opacity: .35; }
+.vgen-duration-stepper button span { display: block; width: 6px; height: 6px; transform: translateY(2px) rotate(45deg); border-top: 1px solid currentColor; border-left: 1px solid currentColor; }
+.vgen-duration-stepper button + button span { transform: translateY(-2px) rotate(225deg); }
 .vgen-preview-stage { position: relative; display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; border-radius: 10px; background: #1f1f1f; }
 .vgen-preview-empty { display: flex; width: min(440px,calc(100% - 40px)); flex-direction: column; align-items: center; color: rgba(255,255,255,.4); text-align: center; }
 .vgen-preview-empty > img { display: block; width: 164px; height: 128px; }
@@ -129,36 +149,45 @@ export const VGEN_CSS = `
 .vgen-page-refs { display: flex; align-items: center; gap: 8px; }
 .vgen-page-ref { position: relative; width: 79px; height: 95px; flex: 0 0 79px; border: 0; border-radius: 8px; background: #1a1a1a center/cover no-repeat; cursor: pointer; }
 .vgen-page-ref span { position: absolute; top: 4px; right: 4px; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 50%; background: rgba(0,0,0,.62); color: #fff; }
-.vgen-prompt-box { display: flex; min-height: 120px; flex: 1; flex-direction: column; overflow: hidden; padding: 15px 19px; border-radius: 12px; background: rgba(0,0,0,.2); }
-.vgen-prompt-box textarea { box-sizing: border-box; width: 100%; min-height: 48px; flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: #fff; font: inherit; font-size: 14px; line-height: 1.5; }
+.vgen-prompt-box { box-sizing: border-box; display: flex; height: 164px; min-height: 164px; flex: 0 0 164px; flex-direction: column; overflow: hidden; padding: 15px 19px; border-radius: 12px; background: rgba(0,0,0,.2); }
+.vgen-prompt-box textarea { box-sizing: border-box; width: 100%; min-height: 48px; flex: 1; resize: none; padding: 0; border: 0; outline: 0; background: transparent; color: #fff; box-shadow: none; font: inherit; font-size: 14px; line-height: 1.5; }
+.vgen-prompt-box:focus-within { box-shadow: 0 0 0 2px rgba(255,156,42,.42); }
+.vgen-prompt-box textarea:focus { border: 0; box-shadow: none; }
 .vgen-prompt-box textarea::placeholder { color: rgba(255,255,255,.4); }
-.vgen-prompt-tools { display: flex; min-height: 32px; align-items: center; gap: 12px; }
-.vgen-prompt-options { display: flex; min-width: 0; align-items: center; gap: 8px; }
-.vgen-prompt-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.vgen-style-button { box-sizing: border-box; max-width: 180px; height: 24px; overflow: hidden; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
-.vgen-style-button:hover, .vgen-style-button:focus-visible, .vgen-style-button.has-style { background: rgba(255,255,255,.08); color: #fff; outline: none; }
-.vgen-style-button:focus-visible { box-shadow: 0 0 0 2px rgba(255,156,42,.42); }
-.vgen-audio-toggle { display: inline-flex; align-items: center; gap: 7px; color: rgba(255,255,255,.82); font-size: 12px; cursor: pointer; }
+.vgen-prompt-tools { box-sizing: border-box; display: flex; width: 100%; min-height: 32px; align-items: center; justify-content: space-between; }
+.vgen-prompt-options { display: flex; min-width: 0; align-items: flex-start; gap: 8px; }
+.vgen-prompt-actions { display: flex; width: 289px; flex: 0 0 289px; align-items: center; justify-content: flex-end; gap: 15px; }
+.vgen-prompt-options .vgen-style-button { box-sizing: border-box; display: inline-flex; max-width: 180px; height: 24px; align-items: center; gap: 8px; overflow: hidden; padding: 0 8px; border: 0; border-bottom: 0; border-radius: 4px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; font-weight: 400; line-height: 18px; white-space: nowrap; }
+.vgen-prompt-options .vgen-style-button:hover, .vgen-prompt-options .vgen-style-button:focus-visible { background: rgba(255,255,255,.08); color: #fff; outline: none; }
+.vgen-prompt-options .vgen-style-button:focus-visible { box-shadow: 0 0 0 2px rgba(255,156,42,.42); }
+.vgen-style-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vgen-style-swap { display: grid; width: 12px; height: 12px; flex: 0 0 12px; place-items: center; }
+.vgen-style-swap img { display: block; width: 10px; height: 8.5px; }
+.vgen-audio-toggle { box-sizing: border-box; display: inline-flex; width: 86px; height: 24px; flex: 0 0 86px; align-items: center; gap: 8px; padding: 0 8px; color: rgba(255,255,255,.8); font-size: 12px; line-height: 18px; cursor: pointer; }
 .vgen-audio-toggle input { position: absolute; opacity: 0; pointer-events: none; }
 .vgen-audio-switch { position: relative; display: block; width: 38px; height: 18px; box-sizing: border-box; padding: 2px; border: 1px solid rgba(255,255,255,.05); border-radius: 999px; background: rgba(255,255,255,.1); transition: background .15s ease; }
 .vgen-audio-switch::after { content: ''; position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: rgba(255,255,255,.22); transition: transform .15s ease, background .15s ease; }
 .vgen-audio-toggle input:checked + .vgen-audio-switch { background: linear-gradient(90deg,#ff7001,#ff9c2a); }
 .vgen-audio-toggle input:checked + .vgen-audio-switch::after { transform: translateX(20px); background: #fff; }
 .vgen-audio-toggle input:focus-visible + .vgen-audio-switch { outline: 2px solid rgba(255,156,42,.48); outline-offset: 2px; }
-.vgen-prompt-undo, .vgen-prompt-helper { height: 28px; border: 0; border-radius: 6px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; }
-.vgen-prompt-undo { display: grid; width: 28px; place-items: center; padding: 0; }
-.vgen-prompt-undo img { width: 12px; height: 12px; }
+.vgen-prompt-actions .vgen-prompt-undo, .vgen-prompt-actions .vgen-prompt-helper { box-sizing: border-box; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: rgba(255,255,255,.8); cursor: pointer; font: inherit; font-size: 12px; font-weight: 400; line-height: 18px; }
+.vgen-prompt-actions .vgen-prompt-undo { display: grid; width: 16px; flex: 0 0 16px; place-items: center; }
+.vgen-prompt-actions .vgen-prompt-undo img { width: 16px; height: 16px; }
 .vgen-prompt-undo:hover:not(:disabled), .vgen-prompt-helper:hover:not(:disabled) { background: rgba(255,255,255,.1); }
 .vgen-prompt-undo:disabled, .vgen-prompt-helper:disabled { opacity: .45; cursor: not-allowed; }
-.vgen-prompt-helper { padding: 0 8px; }
+.vgen-prompt-actions .vgen-prompt-helper { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; white-space: nowrap; }
+.vgen-prompt-helper-chevron { box-sizing: border-box; width: 8px; height: 8px; margin-top: -3px; transform: rotate(45deg); border-right: 1.4px solid rgba(255,255,255,.8); border-bottom: 1.4px solid rgba(255,255,255,.8); }
 .vgen-prompt-actions .vgen-send { position: relative; display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: #ff9c2a; box-shadow: 0 2px 8px rgba(255,112,1,.18); cursor: pointer; transition: transform .12s ease, background .12s ease, box-shadow .12s ease; }
-.vgen-prompt-actions .vgen-send img { width: 21px; height: 18px; }
+.vgen-prompt-actions .vgen-send img { width: 20.1912px; height: 17.9477px; transform: translate(-1.37px, -1.37px) rotate(45deg) scaleX(-1); }
 .vgen-prompt-actions .vgen-send:hover:not(:disabled) { background: #ffad4d; box-shadow: 0 4px 12px rgba(255,112,1,.28); }
 .vgen-prompt-actions .vgen-send:active:not(:disabled) { transform: scale(.94); background: #ff8a14; box-shadow: 0 1px 4px rgba(255,112,1,.2); }
 .vgen-prompt-actions .vgen-send:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .vgen-prompt-actions .vgen-send:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 .vgen-prompt-actions .vgen-send.running::before { content: ''; position: absolute; width: 16px; height: 16px; border: 2px solid rgba(0,0,0,.25); border-top-color: #000; border-radius: 50%; animation: vgen-spin .8s linear infinite; }
 .vgen-prompt-actions .vgen-send.running img { opacity: 0; }
+@media (max-width: 620px) {
+  .vgen-prompt-actions { width: auto; flex-basis: auto; }
+}
 .vgen-style-layer { position: fixed; inset: 0; z-index: 330; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.68); }
 .vgen-style-dialog { box-sizing: border-box; width: min(971px,calc(100vw - 48px)); max-height: min(760px,calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; padding: 24px 40px 32px; border: 1px solid rgba(255,255,255,.2); border-radius: 14px; background: #141414; color: #fff; box-shadow: 0 24px 72px rgba(0,0,0,.5); }
 .vgen-style-head { display: flex; align-items: center; }
@@ -271,9 +300,7 @@ export const VGEN_CSS = `
 .vgen-import input:disabled { cursor: not-allowed; }
 .vgen-import-error { margin-left: auto; font-size: .68rem; }
 @media (max-width:820px) {
-  .vgen-design-workspace { grid-template-columns: 190px minmax(360px,1fr); grid-template-rows: minmax(320px,1fr) minmax(280px,auto); overflow: auto; }
-  .vgen-settings { padding: 14px 12px; }
-  .vgen-setting-pills { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .vgen-design-workspace { grid-template-columns: 225px minmax(360px,1fr); grid-template-rows: minmax(320px,1fr) minmax(280px,auto); overflow: auto; }
   .vgen-composer { min-width: 555px; }
   .vgen-body { grid-template-columns: 1fr; }
   .vgen-panel.is-page .vgen-body { padding: 16px 14px; }

@@ -8,6 +8,7 @@
  *  - 运行时可视化：传 activeNodeId / traversedEdgeIds → 高亮当前执行节点 + 点亮已走边；点节点回调 onJump。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -67,12 +68,13 @@ function ensureCanvasStyle(): void {
     .react-flow__edges svg{z-index:0!important}
     .react-flow__edgelabel-renderer{position:absolute!important;z-index:3!important}
     .react-flow__nodes{position:absolute!important;width:100%;height:100%;z-index:5!important}
-    /* 展开 ⋮ 菜单时再抬一层，避免被相邻节点盖住 */
-    .react-flow__node:has(.gv-bp-node-more:hover),.react-flow__node:has(.gv-bp-node-more:focus-within){z-index:10000!important}
+    /* 展开 ⋮ 菜单 / 出口箭头 + 按钮时再抬一层，避免被相邻节点盖住 */
+    .react-flow__node:has(.gv-bp-node-more:hover),.react-flow__node:has(.gv-bp-node-more:focus-within),
+    .react-flow__node:has(.gv-handle-more:hover),.react-flow__node:has(.gv-handle-more:focus-within){z-index:10000!important}
     .gv-bp-node-actions,.gv-bp-menu{z-index:10001}
     .react-flow,.react-flow__renderer{overflow:hidden!important}
     /* 画布底色：#333。 */
-    .react-flow__pane{background:#333}
+    .react-flow__pane{background:#3d3d3d}
     /* Figma 13135_19511：边连线 stroke-width 1（防 xyflow 默认 .react-flow__edge-path 的 1px 覆盖）。
        试玩已走路径（animated）：品牌橙 #FF9C2A + 虚线流动动画（对齐改版前运行路径效果）。 */
     .react-flow__edge-path{stroke-width:1px}
@@ -110,7 +112,7 @@ function ensureCanvasStyle(): void {
     .gv-bp-node-actions{position:absolute;top:0;left:100%;z-index:50;padding-left:12px;opacity:0;pointer-events:none;transition:opacity .12s}
     .gv-bp-node-more:hover .gv-bp-node-actions,.gv-bp-node-more:focus-within .gv-bp-node-actions{opacity:1;pointer-events:auto}
     /* 底色先铺画布同色再叠白 10%，保证不透明，避免底下连线「透」出来像盖住菜单 */
-    .gv-bp-menu{display:flex;flex-direction:column;align-items:center;box-sizing:border-box;width:19px;height:65px;gap:5px;padding:5px 2px;border-radius:4px;background:color-mix(in srgb, #fff 10%, #333);border:none;box-shadow:none;overflow:visible}
+    .gv-bp-menu{display:flex;flex-direction:column;align-items:center;box-sizing:border-box;width:19px;height:85px;gap:5px;padding:5px 2px;border-radius:4px;background:color-mix(in srgb, #fff 10%, #333);border:none;box-shadow:none;overflow:visible}
     .gv-bp-menu button{position:relative;display:flex;align-items:center;justify-content:center;width:15px;height:15px;margin:0;background:transparent;border:none;border-radius:0;color:rgba(255,255,255,0.80);padding:0;cursor:pointer;line-height:0;overflow:visible}
     .gv-bp-menu button:hover{background:transparent;color:#fff}
     .gv-bp-menu button.danger{color:rgba(255,180,180,0.90)}
@@ -130,6 +132,16 @@ function ensureCanvasStyle(): void {
     .gv-readonly-flow .react-flow__pane,.gv-readonly-flow .react-flow__node{cursor:grab}
     .gv-readonly-flow .react-flow__edge{pointer-events:none;cursor:grab}
     .gv-readonly-flow .react-flow__pane.dragging{cursor:grabbing}
+    /* Figma 14597_22208：hover 出口/入口箭头才露「添加节点」+，交互与 gv-bp-node-more 同构（纯 CSS hover/focus-within）。
+       箭头本体只有 10×12，过小不便 hover：用 padding 把命中区扩到 ~34×24，再用等量负 margin 抵消，保持行内布局不动；
+       这圈 padding 同时充当箭头到外侧 + 之间的 hover 桥。出口 + 在右，入口 + 在左。 */
+    .gv-handle-more{position:relative;display:inline-flex;align-items:center;justify-content:center;padding:6px 12px;margin:-6px -12px;z-index:40}
+    /* Figma 14597_22208 原样：20.82 圆 + 1.04 内偏移描边、底透明；left/top 把它摆到箭头右侧并垂直居中。 */
+    .gv-handle-add-btn{position:absolute;left:100%;top:50%;transform:translateY(-50%);z-index:50;display:flex;align-items:center;justify-content:center;width:20.82px;height:20.82px;border-radius:50%;outline:1.04px solid rgba(255,255,255,0.60);outline-offset:-1.04px;background:transparent;cursor:pointer;line-height:0;opacity:0;pointer-events:none;transition:opacity .12s,transform .12s}
+    .gv-handle-add-btn.is-before{left:auto;right:100%}
+    .gv-handle-more:hover .gv-handle-add-btn,.gv-handle-more:focus-within .gv-handle-add-btn{opacity:1;pointer-events:auto}
+    .gv-handle-add-btn:hover{outline-color:#fff;transform:translateY(-50%) scale(1.1)}
+    .gv-handle-add-btn:hover svg path{fill-opacity:1}
     /* 边中点悬浮删除：扩大命中区后 hover 才露按钮；试玩 readOnly 不挂 onDelete */
     .gv-edge-delete{position:absolute;transform:translate(-50%,-50%);pointer-events:all;z-index:8}
     .gv-edge-delete button{position:relative;display:flex;align-items:center;justify-content:center;width:22px;height:22px;margin:0;padding:0;border:1px solid #2a3a55;border-radius:999px;background:rgba(20,24,32,.96);color:#9DC0F5;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.45);line-height:0}
@@ -137,6 +149,15 @@ function ensureCanvasStyle(): void {
     .gv-edge-delete button svg{width:12px;height:12px}
     .gv-edge-delete button[data-tip]::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);white-space:nowrap;padding:5px 10px;font-size:11px;line-height:1.3;border-radius:6px;background:rgba(18,22,30,.96);border:1px solid #2a3a55;color:#FFFFFF;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .1s;z-index:40}
     .gv-edge-delete button[data-tip]:hover::after{opacity:1}
+    /* 删除确认弹窗：居中浮层、毛玻璃底、与侧栏 ns-pop-confirm 视觉统一 */
+    .gv-pop-confirm-backdrop{position:fixed;inset:0;z-index:999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+    .gv-pop-confirm{box-sizing:border-box;display:flex;flex-direction:column;gap:10px;min-width:200px;max-width:280px;padding:14px 16px;background:#3a3a3a;border:1px solid rgba(255,255,255,0.16);border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.45);color:rgba(255,255,255,0.80)}
+    .gv-pop-confirm-msg{font-size:13px;line-height:1.45;word-break:break-word}
+    .gv-pop-confirm-actions{display:flex;justify-content:flex-end;gap:8px}
+    .gv-pop-confirm-actions button{height:28px;padding:0 12px;border:1px solid rgba(255,255,255,0.16);border-radius:4px;background:transparent;color:rgba(255,255,255,0.80);cursor:pointer;font-family:inherit;font-size:13px;line-height:1;transition:background .12s,border-color .12s,color .12s}
+    .gv-pop-confirm-actions button:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.28);color:#fff}
+    .gv-pop-confirm-actions button.is-danger{background:rgba(220,80,80,0.25);border-color:rgba(255,142,142,0.35);color:#ffb4b4}
+    .gv-pop-confirm-actions button.is-danger:hover{background:rgba(220,80,80,0.4);border-color:rgba(255,142,142,0.55);color:#ffd4d4}
   `
 }
 import type {
@@ -158,7 +179,8 @@ import { getSubFlowPack, isSubflowContainerData } from '../../runtime/schema/gra
 import type { FXNode } from '../../runtime/schema/react-flow-schema'
 import { toFXView } from './fx-view'
 import { GraphMiniMap } from './GraphMiniMap'
-import { connect, disconnect, duplicateNodes, insertNodeAfter, removeNode, setNodePosition } from '../edit/graph-edit'
+import { connect, disconnect, duplicateNodes, insertNodeAfter, insertNodeBefore, removeNode, setNodePosition } from '../edit/graph-edit'
+import quoteIcon from './icons/quote.svg'
 
 const MOD_HINT = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)
   ? '⌘'
@@ -181,7 +203,12 @@ interface CanvasNodeViewData {
   /** 当前图的入口业务节点。 */
   isEntry?: boolean
   onDrill?: (nodeId: string) => void
-  onInsertAfter?: (nodeId: string) => void
+  /** 出口箭头 hover 出的「+」：在该出口（sourceHandle）后插入新节点；rowIndex 用于纵向错开。 */
+  onInsertAfter?: (nodeId: string, sourceHandle: string, rowIndex: number) => void
+  /** 入口箭头 hover 出的「+」：在该节点前方插入新节点，并改接所有入边。 */
+  onInsertBefore?: (nodeId: string) => void
+  onPlay?: (nodeId: string) => void
+  onReference?: (nodeId: string) => void
   onDuplicate?: (nodeId: string) => void
   onDelete?: (nodeId: string) => void
   [key: string]: unknown
@@ -347,20 +374,17 @@ const InputIcon = (): JSX.Element => (
 )
 
 const Ico = {
-  insert: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  ),
   copy: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="9" y="9" width="11" height="11" rx="2" />
       <path d="M5 15V7a2 2 0 0 1 2-2h8" />
     </svg>
   ),
+  /** 删除节点 —— Figma 15229_79461 */
   trash: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M4 7h16M9 7V5h6v2M8 7l1 12h6l1-12" />
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth={1.16667} strokeLinecap="square" aria-hidden>
+      <path d="M12.25 2.91724H1.75M2.91667 2.91724H11.0833L10.7917 12.8339H3.20833L2.91667 2.91724ZM4.95833 1.16724H9.04167V2.91724H4.95833V1.16724Z" />
+      <path d="M7 5.25061V10.5006" />
     </svg>
   ),
   minus: (
@@ -375,20 +399,178 @@ const Ico = {
       <circle cx="12" cy="19" r="1.8" />
     </svg>
   ),
+  /** Figma 14597_22208 handle 添加节点：实心 + 号（设计稿导出原样） */
+  add: (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden>
+      <path d="M6.87219 1.56177H5.57069L5.59713 5.67062H1.5625V6.97212H5.59713L5.59713 10.9325H6.89862L6.89862 6.97212L10.9333 6.97212V5.67062L6.89862 5.67062L6.87219 1.56177Z" fill="white" fillOpacity="0.6" />
+    </svg>
+  ),
+  /** 引用（节点信息引用到 AI Chat）—— Figma 14687_174900 */
+  quote: (
+    <img src={quoteIcon} alt="引用" style={{ width: 14, height: 14, display: 'block' }} />
+  ),
+  /** 从此试玩（以该节点为起点预览） */
+  play: (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M8 5.14v14l11-7-11-7z" />
+    </svg>
+  ),
+}
+
+/**
+ * 出口箭头 ▶ + 连线用的 source Handle + hover 才露的「添加节点」+。
+ * 顶部行的第一个出口与下方每行出口共用这一份实现，保证箭头列与 hover 交互不会分叉。
+ * Handle 绝对定位盖在箭头上（不占 flex 宽度），确保箭头右边缘贴着节点边、各行对齐同一列。
+ */
+function FlowOutlet({
+  nodeId,
+  handle,
+  rowIndex,
+  color,
+  canEdit,
+  onInsertAfter,
+}: {
+  nodeId: string
+  handle: FXNode['outputs'][number]
+  rowIndex: number
+  color: string
+  canEdit: boolean
+  onInsertAfter?: (nodeId: string, sourceHandle: string, rowIndex: number) => void
+}): JSX.Element {
+  const flowId = handle.data?.flowId ?? handle.id.replace(/^source:/, '')
+  return (
+    <span className="gv-handle-more" style={{ color }}>
+      <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M0 0L10 6L0 12V0Z" fill="currentColor" /></svg>
+      </span>
+      <Handle
+        id={handle.id}
+        type="source"
+        position={Position.Right}
+        className={`gv-flow-handle${canEdit ? ' is-interactive' : ' is-static'}`}
+        style={{
+          position: 'absolute',
+          right: 12,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          width: 10,
+          height: 12,
+          minWidth: 10,
+          minHeight: 12,
+          background: 'transparent',
+          border: 'none',
+          opacity: 0,
+          pointerEvents: canEdit ? undefined : 'none',
+        }}
+      />
+      {onInsertAfter && (
+        <div
+          className="gv-handle-add-btn nodrag nopan"
+          role="button"
+          tabIndex={0}
+          aria-label={`在「${handle.data?.displayLabel ?? flowId}」出口后添加节点`}
+          title="添加节点"
+          onClick={(e) => {
+            e.stopPropagation()
+            onInsertAfter(nodeId, flowId, rowIndex)
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
+            e.stopPropagation()
+            onInsertAfter(nodeId, flowId, rowIndex)
+          }}
+        >
+          {Ico.add}
+        </div>
+      )}
+    </span>
+  )
+}
+
+/**
+ * 入口箭头 ▶ + target Handle + hover 才露在左侧的「添加节点」+。
+ * 点击后在该节点前方插入新节点，并把所有入边改接到新节点。
+ */
+function FlowInlet({
+  nodeId,
+  handles,
+  onInsertBefore,
+}: {
+  nodeId: string
+  handles: FXNode['inputs']
+  onInsertBefore?: (nodeId: string) => void
+}): JSX.Element {
+  return (
+    <span className="gv-handle-more" style={{ color: 'rgba(255,255,255,0.60)' }}>
+      {onInsertBefore && (
+        <div
+          className="gv-handle-add-btn is-before nodrag nopan"
+          role="button"
+          tabIndex={0}
+          aria-label="在输入前添加节点"
+          title="添加节点"
+          onClick={(e) => {
+            e.stopPropagation()
+            onInsertBefore(nodeId)
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
+            e.stopPropagation()
+            onInsertBefore(nodeId)
+          }}
+        >
+          {Ico.add}
+        </div>
+      )}
+      <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <InputIcon />
+      </span>
+      {handles.map((h) => (
+        // 输入端 1×1 透明 Handle 作为边的连接点，定位到「输入」三角左侧节点边缘。
+        <Handle
+          key={h.id}
+          id={h.id}
+          type="target"
+          position={Position.Left}
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            width: 1,
+            height: 1,
+            minWidth: 1,
+            minHeight: 1,
+            background: 'transparent',
+            border: 'none',
+            opacity: 0,
+          }}
+        />
+      ))}
+    </span>
+  )
 }
 
 function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
-  const { fx, details, active, isGroup, isPack, isEntry, onDrill, onInsertAfter, onDuplicate, onDelete } = data as CanvasNodeViewData
-  const accent = BADGE_COLOR[fx.data.badge] ?? '#4b5563'
-  const canEdit = !!(onInsertAfter || onDuplicate || onDelete)
+  const { fx, details, active, isGroup, isPack, isEntry, onDrill, onInsertAfter, onInsertBefore, onPlay, onReference, onDuplicate, onDelete } = data as CanvasNodeViewData
+  const canEdit = !!(onInsertAfter || onInsertBefore || onPlay || onReference || onDuplicate || onDelete)
+  const [hovered, setHovered] = useState(false)
   // 常态阴影对齐设计稿。选中/试玩描边用 inset box-shadow（不用 outline），
-  // 避免描边画在溢出的右侧操作条上面。active 优先于 selected。
+  // 避免描边画在溢出的右侧操作条上面。运行中/选中边框统一为 #7DACED。
   const baseShadow = '0 0 15.618px 10.412px rgba(0, 0, 0, 0.08)'
-  const playShadow = '0 0 15px 10px rgba(255,156,42,0.55)'
-  const boxShadow = active
-    ? `${playShadow}, inset 0 0 0 2px #FF9C2A`
-    : selected
-      ? `${baseShadow}, inset 0 0 0 2px #7DACED`
+  // Figma 14947_83822：预览中节点外发光
+  const playShadow = '0 0 15.62px 10.41px rgba(70, 124, 201, 0.65)'
+  // Figma 14947_83814：非选中 hover 边框 = #7DACED 40% 透明度
+  const hoverBorder = 'inset 0 0 0 2px rgba(125, 172, 237, 0.40)'
+  const normalBorder = 'inset 0 0 0 2px #7DACED'
+  const edgeShadow = active ? playShadow : baseShadow
+  const edgeBorder = (active || selected) ? normalBorder : undefined
+  const boxShadow = edgeBorder
+    ? `${edgeShadow}, ${edgeBorder}`
+    : hovered
+      ? `${baseShadow}, ${hoverBorder}`
       : baseShadow
 
   // Figma 14947_83595：子蓝图/子流程节点标题栏颜色。
@@ -403,6 +585,8 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
   const nodeCard = (
     <div
       className={`gv-bp-node${selected ? ' is-selected' : ''}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position: 'relative',
         minWidth: 173,
@@ -455,7 +639,7 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
             >
               进入
             </button>
-            {/* 「...」操作菜单（后插/复制/删除），与普通节点保持一致 */}
+            {/* 「...」操作菜单（引用/从此试玩/复制/删除） */}
             {canEdit && (
               <div className="gv-bp-node-more" style={{ marginLeft: 'auto' }}>
                 <button
@@ -473,14 +657,27 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
                       type="button"
                       className="nodrag nopan"
                       role="menuitem"
-                      aria-label="后插"
-                      title="添加节点"
+                      aria-label="引用"
+                      title="引用到聊天"
                       onClick={(e) => {
                         e.stopPropagation()
-                        onInsertAfter?.(id)
+                        onReference?.(id)
                       }}
                     >
-                      {Ico.insert}
+                      {Ico.quote}
+                    </button>
+                    <button
+                      type="button"
+                      className="nodrag nopan"
+                      role="menuitem"
+                      aria-label="从此试玩"
+                      title="从此试玩"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onPlay?.(id)
+                      }}
+                    >
+                      {Ico.play}
                     </button>
                     <button
                       type="button"
@@ -497,7 +694,7 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
                     </button>
                     <button
                       type="button"
-                      className="nodrag nopan danger"
+                      className="nodrag nopan"
                       role="menuitem"
                       aria-label="删除"
                       title="删除此节点"
@@ -515,17 +712,16 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           </>
         ) : (
           <>
-            <span
-              aria-label={isEntry ? '入口节点' : undefined}
-              title={isEntry ? '入口节点' : undefined}
-              style={{ width: 8, height: 8, borderRadius: '50%', background: isEntry ? '#55b98a' : accent, flexShrink: 0 }}
-            />
-            <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>{fx.data.label}</span>
-            {fx.data.badge && (
-              <span style={{ marginLeft: 'auto', fontSize: 9, padding: '1px 6px', borderRadius: 8, background: accent, color: '#0b0d10', fontWeight: 700 }}>{fx.data.badge}</span>
+            {isEntry && (
+              <span
+                aria-label="入口节点"
+                title="入口节点"
+                style={{ width: 8, height: 8, borderRadius: '50%', background: '#55b98a', flexShrink: 0 }}
+              />
             )}
+            <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>{fx.data.label}</span>
             {canEdit && (
-              <div className="gv-bp-node-more" style={{ marginLeft: fx.data.badge ? 0 : 'auto' }}>
+              <div className="gv-bp-node-more" style={{ marginLeft: 'auto' }}>
                 <button
                   type="button"
                   className="gv-bp-more-btn nodrag nopan"
@@ -541,14 +737,27 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
                       type="button"
                       className="nodrag nopan"
                       role="menuitem"
-                      aria-label="后插"
-                      title="添加节点"
+                      aria-label="引用"
+                      title="引用到聊天"
                       onClick={(e) => {
                         e.stopPropagation()
-                        onInsertAfter?.(id)
+                        onReference?.(id)
                       }}
                     >
-                      {Ico.insert}
+                      {Ico.quote}
+                    </button>
+                    <button
+                      type="button"
+                      className="nodrag nopan"
+                      role="menuitem"
+                      aria-label="从此试玩"
+                      title="从此试玩"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onPlay?.(id)
+                      }}
+                    >
+                      {Ico.play}
                     </button>
                     <button
                       type="button"
@@ -565,7 +774,7 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
                     </button>
                     <button
                       type="button"
-                      className="nodrag nopan danger"
+                      className="nodrag nopan"
                       role="menuitem"
                       aria-label="删除"
                       title="删除此节点"
@@ -587,7 +796,7 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           左侧固定「→输入」标签（44×17，12px 白 60%，12×12 输入图标），
           右侧每个 output 一行（12px 文字 + 12×12 输出图标 handle）。
           当没有演出摘要时加上底部圆角，防止卡片 #232323 背景在角落漏出。 */}
-      <div data-testid="node-edge-info" style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 5, background: 'rgba(255,255,255,0.05)', borderBottomLeftRadius: (details.performance || details.interfaces.length > 0 || details.settlements.length > 0) ? 0 : 12, borderBottomRightRadius: (details.performance || details.interfaces.length > 0 || details.settlements.length > 0) ? 0 : 12 }}>
+      <div data-testid="node-edge-info" style={{ padding: '12px 1px 12px 4px', display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(255,255,255,0.05)', borderBottomLeftRadius: (details.performance || details.interfaces.length > 0 || details.settlements.length > 0) ? 0 : 12, borderBottomRightRadius: (details.performance || details.interfaces.length > 0 || details.settlements.length > 0) ? 0 : 12 }}>
         {(() => {
           // 顶部行：左「输入」+ 图标，右「第一个出口名称」+ 三角（替代固定「输出」）。
           // 第一个出口（默认推进）显示在顶部行右侧，下方行从第二个出口开始渲染。
@@ -597,47 +806,21 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           const firstColor = firstFid ? handleColor(firstFid) : 'rgba(255,255,255,0.60)'
           return (
             <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'rgba(255,255,255,0.60)', height: 17 }}>
-              {fx.inputs.map((h) => (
-                //输入端 1×1 透明 Handle 作为边的连接点，定位到「输入」行左侧节点边缘。
-                <Handle
-                  key={h.id}
-                  id={h.id}
-                  type="target"
-                  position={Position.Left}
-                  style={{ position: 'absolute', left: -8, top: '50%', transform: 'translateY(-50%)', width: 1, height: 1, minWidth: 1, minHeight: 1, background: 'transparent', border: 'none', opacity: 0 }}
-                />
-              ))}
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <InputIcon />
+                <FlowInlet nodeId={id} handles={fx.inputs} onInsertBefore={onInsertBefore} />
                 <span>输入</span>
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: firstColor }}>
                 <span title={firstFid}>{firstDisplay}</span>
-                {/* 与出口行三角同款10×12，确保右边缘对齐同一列 */}
-                <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: firstColor }}>
-                  <svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M0 0L10 6L0 12V0Z" fill="currentColor" /></svg>
-                </span>
-                {/* 第一个出口的 source Handle 也在此行（替代原「输出」位置），绝对定位到三角中心。 */}
+                {/* 第一个出口的箭头 + Handle 也在此行（替代原「输出」位置）。 */}
                 {first && (
-                  <Handle
-                    id={first.id}
-                    type="source"
-                    position={Position.Right}
-                    className={`gv-flow-handle${canEdit ? ' is-interactive' : ' is-static'}`}
-                    style={{
-                      position: 'absolute',
-                      right: 0,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      width: 10,
-                      height: 12,
-                      minWidth: 10,
-                      minHeight: 12,
-                      background: 'transparent',
-                      border: 'none',
-                      opacity: 0,
-                      pointerEvents: canEdit ? undefined : 'none',
-                    }}
+                  <FlowOutlet
+                    nodeId={id}
+                    handle={first}
+                    rowIndex={0}
+                    color={firstColor}
+                    canEdit={canEdit}
+                    onInsertAfter={onInsertAfter}
                   />
                 )}
               </span>
@@ -645,38 +828,23 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           )
         })()}
         {/* 其余 output（从第二个开始）每个一行：右对齐文字 + 右侧 handle。 */}
-        {fx.outputs.slice(1).map((h) => {
+        {fx.outputs.slice(1).map((h, i) => {
           const fid = h.data?.flowId ?? h.id
           const display = h.data?.displayLabel ?? h.label ?? fid
           const c = handleColor(fid)
+          const hi = i + 1 // handle 索引：0 = 第一个出口，1+ = 后续
           return (
-            <div key={h.id} style={{ position: 'relative', fontSize: 12, color: c, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+            <div key={h.id} style={{ fontSize: 12, color: c, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
               <span title={fid}>{display}</span>
-              {/* 行末右指三角箭头（独立 SVG 装饰），与文字间距 8px（对齐 Figma 输入组间距）。
+              {/* 行末右指三角箭头与文字间距 8px（对齐 Figma 输入组间距）；
                   三角是行末最后一个占位元素，右边缘与顶部第一出口三角对齐同一垂直列（贴节点边缘）。 */}
-              <span aria-hidden style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: c, pointerEvents: 'none' }}>
-                <svg width="10" height="12" viewBox="0 0 10 12" fill="none"><path d="M0 0L10 6L0 12V0Z" fill="currentColor" /></svg>
-              </span>
-              {/* Handle 绝对定位到三角中心，不占用 flex 宽度，避免把三角向左挤（保证右对齐贴边）。 */}
-              <Handle
-                id={h.id}
-                type="source"
-                position={Position.Right}
-                className={`gv-flow-handle${canEdit ? ' is-interactive' : ' is-static'}`}
-                style={{
-                  position: 'absolute',
-                  right: 0,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  width: 10,
-                  height: 12,
-                  minWidth: 10,
-                  minHeight: 12,
-                  background: 'transparent',
-                  border: 'none',
-                  opacity: 0,
-                  pointerEvents: canEdit ? undefined : 'none',
-                }}
+              <FlowOutlet
+                nodeId={id}
+                handle={h}
+                rowIndex={hi}
+                color={c}
+                canEdit={canEdit}
+                onInsertAfter={onInsertAfter}
               />
             </div>
           )
@@ -686,19 +854,19 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           背景必须透明：选中描边是父级 inset box-shadow，不透明底会盖住底部描边。
           底色由 .gv-bp-node 的 #232323 透出；底部圆角对齐卡片裁切。 */}
       {(details.performance || details.interfaces.length > 0 || details.settlements.length > 0) && (
-        <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '40px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '4px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'transparent', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
+        <div data-testid="node-content-info" style={{ display: 'grid', gridTemplateColumns: '40px minmax(0, 1fr)', columnGap: 8, rowGap: 4, padding: '0 8px 4px 8px', borderTop: '1px solid rgba(255,255,255,0.06)', background: 'transparent', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
           {details.performance && (
             <>
-              <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>演出</span>
-              <span title={details.performance} style={{ minWidth: 0, color: 'rgba(255,255,255,0.80)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
+              <span style={{ padding: '4px 0', color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>演出</span>
+              <span title={details.performance} style={{ padding: '4px 0', minWidth: 0, color: 'rgba(255,255,255,0.80)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
                 {details.performance}
               </span>
             </>
           )}
           {details.interfaces.length > 0 && (
             <>
-              <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>界面</span>
-              <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+              <span style={{ padding: '4px 0', color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>界面</span>
+              <span style={{ padding: '4px 0', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                 {details.interfaces.map((label, index) => (
                   <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.80)', fontSize: 12 }}>
                     {label}
@@ -709,8 +877,8 @@ function PerfNode({ id, data, selected }: NodeProps): JSX.Element {
           )}
           {details.settlements.length > 0 && (
             <>
-              <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>结算</span>
-              <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+              <span style={{ padding: '4px 0', color: 'rgba(255,255,255,0.40)', fontSize: 12 }}>结算</span>
+              <span style={{ padding: '4px 0', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                 {details.settlements.map((label, index) => (
                   <span key={`${label}:${index}`} title={label} style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.80)', fontSize: 12 }}>
                     {label}
@@ -787,15 +955,15 @@ function FlowEdge({
     // 出口右侧引出点 / 输入口左侧引入点
     const sx = sourceX + stub
     const tx = targetX - stub
- path = [
+    path = [
       `M ${sourceX},${sourceY}`,
       `L ${sx},${sourceY}`,
       `C ${sx + 80},${dip} ${tx - 80},${dip} ${tx},${targetY}`,
- `L ${targetX},${targetY}`,
+      `L ${targetX},${targetY}`,
     ].join(' ')
     // 三次贝塞尔 t=0.5 近似中点（用引出/引入后的控制点），把删除钮落在绕行弧上。
     labelX = 0.125 * sx + 0.375 * (sx + 80) + 0.375 * (tx - 80) + 0.125 * tx
- labelY = 0.125 * sourceY + 0.75 * dip + 0.125 * targetY
+    labelY = 0.125 * sourceY + 0.75 * dip + 0.125 * targetY
   } else {
     ;[path, labelX, labelY] = getSmoothStepPath({
       sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 12,
@@ -805,17 +973,17 @@ function FlowEdge({
   const traversed = Boolean((data as FlowEdgeData | undefined)?.traversed) || Boolean(animated)
   const edgeStyle = traversed
     ? {
-        ...style,
-        stroke: TRAVERSED_EDGE_STROKE,
-        strokeWidth: 2,
-        strokeDasharray: '5',
-        animation: 'gv-edge-dashdraw 0.5s linear infinite',
-      }
+      ...style,
+      stroke: TRAVERSED_EDGE_STROKE,
+      strokeWidth: 2,
+      strokeDasharray: '5',
+      animation: 'gv-edge-dashdraw 0.5s linear infinite',
+    }
     : {
-        ...style,
-        // Figma 13135_19419：回环边兜底色与主流一致 #467CC9。
-        stroke: (style?.stroke as string | undefined) ?? '#467CC9',
-      }
+      ...style,
+      // Figma 13135_19419：回环边兜底色与主流一致 #467CC9。
+      stroke: (style?.stroke as string | undefined) ?? '#467CC9',
+    }
   return (
     <>
       <g onMouseEnter={showDelete} onMouseLeave={hideDelete}>
@@ -908,6 +1076,10 @@ export interface GraphCanvasProps {
   onJump?: (nodeId: string) => void
   /** 双击内嵌子流程容器节点（有 subProcess）时下钻。 */
   onDrill?: (containerId: string) => void
+  /** 节点菜单「从此试玩」：以该节点为起始预览播放。 */
+  onPlay?: (nodeId: string) => void
+  /** 节点菜单「引用」：将节点信息引用到 AI Chat。 */
+  onReference?: (nodeId: string) => void
   /** 点击画布空白处（取消选中 → 隐藏节点配置面板）。 */
   onPaneClick?: () => void
   /** 画布右下角：添加节点（属于蓝图编辑手势，不进顶栏）。position = 当前视口中心（flow 坐标）。 */
@@ -951,6 +1123,8 @@ function GraphCanvasInner({
   revealPanelRatio,
   onJump,
   onDrill,
+  onPlay,
+  onReference,
   onPaneClick,
   onAddNode,
   onFitLayout,
@@ -1024,9 +1198,28 @@ function GraphCanvasInner({
     [graph, onChange, flashTip],
   )
 
+  /**
+   * 出口箭头旁的「+」：在该出口后插入新节点（原有下游边改从新节点默认出口继续）。
+   * 多出口分叉时按出口行号纵向错开，避免几个新节点叠在同一处。
+   */
   const onInsertAfter = useCallback(
+    (nodeId: string, sourceHandle: string, rowIndex: number) => {
+      const { graph: next, nodeId: created } = insertNodeAfter(graph, nodeId, {
+        sourceHandle,
+        gapY: rowIndex * 120,
+      })
+      if (next === graph) return
+      onChange(next)
+      setSelectedIds([created])
+      onJump?.(created)
+    },
+    [graph, onChange, onJump],
+  )
+
+  /** 入口箭头旁的「+」：在该节点前方插入新节点，并改接所有入边。 */
+  const onInsertBefore = useCallback(
     (nodeId: string) => {
-      const { graph: next, nodeId: created } = insertNodeAfter(graph, nodeId)
+      const { graph: next, nodeId: created } = insertNodeBefore(graph, nodeId)
       if (next === graph) return
       onChange(next)
       setSelectedIds([created])
@@ -1040,15 +1233,14 @@ function GraphCanvasInner({
     [applyDuplicate],
   )
 
+  const [pendingDelete, setPendingDelete] = useState<{ type: 'single'; nodeId: string; name: string } | { type: 'bulk'; ids: string[]; count: number } | null>(null)
+
   const onDeleteNode = useCallback(
     (nodeId: string) => {
       const name = graph.nodes.find((n) => n.id === nodeId)?.data.name ?? nodeId
-      if (typeof confirm === 'function' && !confirm(`删除节点「${name}」及其相关连线？`)) return
-      onChange(removeNode(graph, nodeId))
-      setSelectedIds((ids) => ids.filter((id) => id !== nodeId))
-      onPaneClick?.()
+      setPendingDelete({ type: 'single', nodeId, name })
     },
-    [graph, onChange, onPaneClick],
+    [graph],
   )
 
   /** hover 删边 / Delete 键删边同源：disconnect 清 edges + 指向该边的 advance。 */
@@ -1061,13 +1253,28 @@ function GraphCanvasInner({
 
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return
-    if (typeof confirm === 'function' && !confirm(`删除选中的 ${selectedIds.length} 个节点及其相关连线？`)) return
+    setPendingDelete({ type: 'bulk', ids: [...selectedIds], count: selectedIds.length })
+  }, [selectedIds])
+
+  const execPendingDelete = useCallback(() => {
+    if (!pendingDelete) return
     let g = graph
-    for (const id of selectedIds) g = removeNode(g, id)
+    if (pendingDelete.type === 'single') {
+      g = removeNode(g, pendingDelete.nodeId)
+      setSelectedIds((ids) => ids.filter((id) => id !== pendingDelete.nodeId))
+    } else {
+      for (const id of pendingDelete.ids) g = removeNode(g, id)
+    }
     onChange(g)
-    setSelectedIds([])
+    setPendingDelete(null)
     onPaneClick?.()
-  }, [graph, onChange, onPaneClick, selectedIds])
+  }, [pendingDelete, graph, onChange, onPaneClick])
+
+  const cancelPendingDelete = useCallback(() => {
+    setPendingDelete(null)
+    // 如果是批量删除的取消，需要恢复空选中（因为 selectedIds 可能会在取消后继续被 ES 重置）
+    if (pendingDelete?.type === 'bulk') setSelectedIds([])
+  }, [pendingDelete])
 
   const copySelectedToClipboard = useCallback(() => {
     const ids = new Set(selectedIds)
@@ -1120,11 +1327,14 @@ function GraphCanvasInner({
             isPack: packIds.has(n.id),
             onDrill,
             onInsertAfter: readOnly ? undefined : onInsertAfter,
+            onInsertBefore: readOnly ? undefined : onInsertBefore,
+            onPlay: readOnly ? undefined : onPlay,
+            onReference: readOnly ? undefined : onReference,
             onDuplicate: readOnly ? undefined : onDuplicateNode,
             onDelete: readOnly ? undefined : onDeleteNode,
           } as CanvasNodeViewData,
         })),
-    [fx, graph, overlays, videoOptions, entities, variables, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onDuplicateNode, onDeleteNode],
+    [fx, graph, overlays, videoOptions, entities, variables, activeNodeId, entryNodeId, visibleNodeIds, containerIds, packIds, selectedIds, readOnly, onDrill, onInsertAfter, onInsertBefore, onPlay, onReference, onDuplicateNode, onDeleteNode],
   )
   const rfEdges = useMemo(
     () =>
@@ -1403,9 +1613,9 @@ function GraphCanvasInner({
         deleteKeyCode={readOnly || !keyboardDeleteEnabled ? null : ['Delete', 'Backspace']}
         proOptions={{ hideAttribution: true }}
       >
-   <Background />
+        <Background />
         {/* Figma 14597_19658：Control Panel 只保留 3 个操作（放大/缩小/复位），隐藏 interactive 锁按钮。 */}
-  <Controls position="bottom-left" showInteractive={false} />
+        <Controls position="bottom-left" showInteractive={false} />
         <GraphMiniMap nodeColor={minimapNodeColor} />
       </ReactFlow>
       {!readOnly && selectedIds.length > 1 && (
@@ -1453,14 +1663,32 @@ function GraphCanvasInner({
           <span className="gv-chrome-label">定位当前节点</span>
         </button>
         {onFitLayout && (
-          <button type="button" onClick={onFitLayout} title="dagre 自动重排节点位置并框选" aria-label="自适应">
+          <button type="button" onClick={onFitLayout} title="dagre 自动重排节点位置并框选" aria-label="重排节点位置">
             <span className="gv-chrome-ico" aria-hidden>
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.2085 6.41732V3.20898H6.41683M10.7918 7.58398V10.7923H7.5835M5.25016 5.25065L3.70033 3.70082M10.3 10.3005L8.75016 8.75065M7.87516 6.12565L6.12516 7.87437" stroke="currentColor" strokeWidth="1.16667" strokeLinecap="square" /></svg>
             </span>
-            <span className="gv-chrome-label">自适应</span>
+            <span className="gv-chrome-label">重排节点位置</span>
           </button>
         )}
       </div>
+      {pendingDelete && typeof document !== 'undefined'
+        ? createPortal(
+          <div className="gv-pop-confirm-backdrop" onClick={cancelPendingDelete}>
+            <div className="gv-pop-confirm" role="dialog" aria-label="确认删除" onClick={(e) => e.stopPropagation()}>
+              <div className="gv-pop-confirm-msg">
+                {pendingDelete.type === 'single'
+                  ? `确定删除「${pendingDelete.name}」及其相关连线？`
+                  : `确定删除选中的 ${pendingDelete.count} 个节点及其相关连线？`}
+              </div>
+              <div className="gv-pop-confirm-actions">
+                <button type="button" onClick={cancelPendingDelete}>取消</button>
+                <button type="button" className="is-danger" onClick={execPendingDelete}>确认删除</button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   )
 }

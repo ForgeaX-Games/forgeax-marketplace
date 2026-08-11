@@ -1,5 +1,5 @@
-import { render } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import type { GameGraph } from '../../../runtime/schema/graph-schema'
 import { canvasNodeDetails, canvasSettlementLabel, GraphCanvas } from '../GraphCanvas'
 
@@ -14,12 +14,12 @@ const graph: GameGraph = {
 describe('GraphCanvas output handles', () => {
   it('marks source handles interactive only on the editable canvas', () => {
     const { container, rerender } = render(
-      <GraphCanvas graph={graph} onChange={() => {}} />,
+      <GraphCanvas graph={graph} onChange={() => { }} />,
     )
 
     expect(container.querySelector('.gv-flow-handle.is-interactive')).toBeTruthy()
 
-    rerender(<GraphCanvas graph={graph} onChange={() => {}} readOnly />)
+    rerender(<GraphCanvas graph={graph} onChange={() => { }} readOnly />)
 
     const staticHandle = container.querySelector<HTMLElement>('.gv-flow-handle.is-static')
     expect(staticHandle).toBeTruthy()
@@ -30,9 +30,53 @@ describe('GraphCanvas output handles', () => {
     expect(container.querySelector('.react-flow__edge.selectable')).toBeNull()
   })
 
+  it('adds a node behind the output whose arrow was hovered', () => {
+    // a 的 fail 出口已连到 b：点该出口的「+」应把新节点插在 a→b 之间，default 出口不受影响。
+    const forked: GameGraph = {
+      nodes: graph.nodes,
+      edges: [{ id: 'a-fail-b', source: 'a', target: 'b', sourceHandle: 'fail', targetHandle: 'in' }],
+    }
+    const onChange = vi.fn()
+    const { container, rerender } = render(<GraphCanvas graph={forked} onChange={onChange} />)
+
+    // a/b 各 1 个入口 + a 出口 default/fail + b 出口 default = 5。
+    expect(container.querySelectorAll('.gv-handle-add-btn')).toHaveLength(5)
+
+    const failHandle = container.querySelector('[data-handleid="source:fail"]')
+    fireEvent.click(failHandle!.closest('.gv-handle-more')!.querySelector('.gv-handle-add-btn')!)
+
+    const next = onChange.mock.calls[0]![0] as GameGraph
+    const created = next.nodes.find((n) => !['a', 'b'].includes(n.id))!
+    expect(created.data.name).toBe('新演出节点')
+    expect(next.edges.some((e) => e.source === 'a' && e.target === created.id && e.sourceHandle === 'fail')).toBe(true)
+    expect(next.edges.some((e) => e.source === created.id && e.target === 'b')).toBe(true)
+    expect(next.edges.some((e) => e.id === 'a-fail-b')).toBe(false)
+
+    rerender(<GraphCanvas graph={forked} onChange={onChange} readOnly />)
+    expect(container.querySelector('.gv-handle-add-btn')).toBeNull()
+  })
+
+  it('adds a node in front of the input whose arrow was hovered', () => {
+    // a→b：点 b 入口的「+」应把新节点插在 a→b 之间，保留原 sourceHandle。
+    const onChange = vi.fn()
+    const { container } = render(<GraphCanvas graph={graph} onChange={onChange} />)
+
+    // 两个节点各有一个入口 +；按渲染顺序第二个是 b。
+    const inletAdds = container.querySelectorAll('.gv-handle-add-btn.is-before')
+    expect(inletAdds).toHaveLength(2)
+    fireEvent.click(inletAdds[1]!)
+
+    const next = onChange.mock.calls[0]![0] as GameGraph
+    const created = next.nodes.find((n) => !['a', 'b'].includes(n.id))!
+    expect(created.data.name).toBe('新演出节点')
+    expect(next.edges.some((e) => e.source === 'a' && e.target === created.id && (e.sourceHandle ?? 'default') === 'default')).toBe(true)
+    expect(next.edges.some((e) => e.source === created.id && e.target === 'b')).toBe(true)
+    expect(next.edges.some((e) => e.id === 'a-b')).toBe(false)
+  })
+
   it('marks the current graph entry node', () => {
     const { getByLabelText, queryAllByLabelText } = render(
-      <GraphCanvas graph={graph} entryNodeId="a" onChange={() => {}} />,
+      <GraphCanvas graph={graph} entryNodeId="a" onChange={() => { }} />,
     )
 
     expect(getByLabelText('入口节点')).toHaveAttribute('title', '入口节点')
@@ -64,7 +108,7 @@ describe('GraphCanvas output handles', () => {
     const { getByText, getByTestId } = render(
       <GraphCanvas
         graph={detailedGraph}
-        onChange={() => {}}
+        onChange={() => { }}
         videoOptions={[{ id: 'video-1', label: '叙事·第1章·上岸' }]}
         overlays={{
           'main-ui': { id: 'main-ui', title: '主界面', children: [] },

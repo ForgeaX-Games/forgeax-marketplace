@@ -293,9 +293,10 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.28);
 }
 
-/* Reset is intentionally restricted to the extension tree. */
-.ks-app-host,
-.ks-app-host * {
+/* Reset is intentionally restricted to the extension tree. Keep it at zero
+ * specificity so component styles injected after mount do not depend on CSS
+ * insertion order to restore their own spacing. */
+:where(.ks-app-host, .ks-app-host *) {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
@@ -338,7 +339,7 @@ body.ks-app-standalone {
  * (不再 amber-glow + translateY hover; 改为 transparent + interaction-hover bg)
  * ─────────────────────────────────────────────────────────────────────── */
 
-.ks-app-host button {
+:where(.ks-app-host button) {
   cursor: pointer;
   font-family: inherit;
   font-size: inherit;
@@ -354,23 +355,21 @@ body.ks-app-standalone {
     border-color var(--motion-duration-instant) var(--motion-ease-standard);
 }
 
-.ks-app-host button:hover:not(:disabled) {
+:where(.ks-app-host button:hover:not(:disabled)) {
   background: var(--color-interaction-hover);
   color: var(--color-text-primary);
 }
 
-.ks-app-host button:active:not(:disabled) {
+:where(.ks-app-host button:active:not(:disabled)) {
   background: var(--color-interaction-selected-neutral);
 }
 
-.ks-app-host button:disabled {
+:where(.ks-app-host button:disabled) {
   opacity: 0.42;
   cursor: not-allowed;
 }
 
-.ks-app-host input,
-.ks-app-host textarea,
-.ks-app-host select {
+:where(.ks-app-host input, .ks-app-host textarea, .ks-app-host select) {
   font-family: inherit;
   font-size: inherit;
   color: var(--color-text-primary);
@@ -382,14 +381,12 @@ body.ks-app-standalone {
   transition: border-color var(--motion-duration-instant) var(--motion-ease-standard);
 }
 
-.ks-app-host input:focus,
-.ks-app-host textarea:focus,
-.ks-app-host select:focus {
+:where(.ks-app-host input:focus, .ks-app-host textarea:focus, .ks-app-host select:focus) {
   border-color: var(--color-brand-primary);
   box-shadow: 0 0 0 2px var(--color-overlay-focus);
 }
 
-.ks-app-host textarea { resize: vertical; }
+:where(.ks-app-host textarea) { resize: vertical; }
 
 .ks-app-host ::placeholder {
   color: var(--color-text-disabled);

@@ -27,6 +27,10 @@ function apiEntry(id: string, label = id): VideoLibraryEntry {
   }
 }
 
+function openCardMenu(label: string): void {
+  fireEvent.click(screen.getByRole('button', { name: `打开 ${label} 操作菜单` }))
+}
+
 function uploadedResource(id: string): KinoResourceDTO {
   return {
     resource_id: id,
@@ -245,8 +249,9 @@ describe('VideoAssetLibrary', () => {
     act(() => setLocale('en'))
 
     expect(screen.getByLabelText('Upload video')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Rename Clip one' })).toHaveTextContent('Rename')
-    expect(screen.getByRole('button', { name: 'Delete Clip one' })).toHaveTextContent('Delete')
+    fireEvent.click(screen.getByRole('button', { name: 'Open actions for Clip one' }))
+    expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy()
   })
 
   it('groups generation, local upload, and external import before library status', () => {
@@ -500,15 +505,16 @@ describe('VideoAssetLibrary', () => {
         onSelect={onSelect}
       />,
     )
-    const renameButton = screen.getByRole('button', { name: '重命名 Clip one' })
-    const deleteButton = screen.getByRole('button', { name: '删除 Clip one' })
+    openCardMenu('Clip one')
+    const renameButton = screen.getByRole('menuitem', { name: '重命名' })
+    const deleteButton = screen.getByRole('menuitem', { name: '删除' })
     const assetButton = screen.getByRole('button', { name: 'Clip one' })
     const row = deleteButton.closest('.val-row')
 
     expect(row).toHaveClass('is-on')
     expect(assetButton.parentElement).toBe(row)
-    expect(deleteButton.parentElement).toBe(row)
-    expect([...row!.children]).toEqual([assetButton, renameButton, deleteButton])
+    expect(deleteButton.closest('.val-card-actions')?.parentElement).toBe(row)
+    expect(renameButton.closest('.val-card-menu')).toBe(deleteButton.closest('.val-card-menu'))
     expect(assetButton.querySelector('.gc-row-mark')).toBeNull()
 
     fireEvent.click(deleteButton)
@@ -531,7 +537,8 @@ describe('VideoAssetLibrary', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '重命名 Old name' }))
+    openCardMenu('Old name')
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
     const input = screen.getByLabelText('名称')
     expect(input).toHaveValue('Old name')
     fireEvent.change(input, { target: { value: '  New name  ' } })
@@ -540,6 +547,31 @@ describe('VideoAssetLibrary', () => {
     await waitFor(() => expect(controller.renameResource).toHaveBeenCalledWith('res-1', 'New name'))
     expect(onSelect).not.toHaveBeenCalled()
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('closes the card menu from outside or Escape and restores keyboard focus', () => {
+    const controller = makeController({ items: [apiEntry('res-1', 'Clip one')] })
+    render(
+      <VideoAssetLibrary
+        gameId="demo"
+        scenario={EMPTY_SCENARIO}
+        bundledEntries={[]}
+        controller={controller}
+        selectedId=""
+        onSelect={() => {}}
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: '打开 Clip one 操作菜单' })
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menu')).toBeTruthy()
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    fireEvent.click(trigger)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(trigger).toHaveFocus()
   })
 
   it('keeps the rename dialog open and validates errors', async () => {
@@ -560,7 +592,8 @@ describe('VideoAssetLibrary', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '重命名 Old name' }))
+    openCardMenu('Old name')
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
     const input = screen.getByLabelText('名称')
     fireEvent.change(input, { target: { value: ' ' } })
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
@@ -582,13 +615,14 @@ describe('VideoAssetLibrary', () => {
     expect(css).toMatch(/\.val-row\s*\{[^}]*position:\s*relative/)
     expect(css).toMatch(/\.val-row\s*>\s*\.gc-row\s*\{[^}]*min-width:\s*0/)
     expect(css).toMatch(/\.val-row\s+\.gc-row-label\s*\{[^}]*text-overflow:\s*ellipsis/)
-    expect(css).toMatch(/\.val-row-action\s*\{[^}]*position:\s*absolute/)
-    expect(css).toMatch(/\.val-row-action\s*\{[^}]*min-height:\s*26px/)
+    expect(css).toMatch(/\.val-card-actions\s*\{[^}]*position:\s*absolute/)
+    expect(css).toMatch(/\.val-card-more\s*\{[^}]*width:\s*18px/)
+    expect(css).toMatch(/\.val-card-menu\s*\{[^}]*width:\s*130px/)
     expect(css).toMatch(/\.val-row:hover\s*>\s*\.gc-row[^}]*padding-right:\s*0/)
-    expect(css).toMatch(/\.val-row:hover\s+\.val-row-action[^}]*opacity:\s*1/)
-    expect(css).toMatch(/\.val-row:has\(>\s*\.val-row-action:focus-visible\)\s+\.val-row-action[^}]*opacity:\s*1/)
-    expect(css).not.toMatch(/\.val-row:focus-within/)
-    expect(css).not.toMatch(/\.val-row\.is-on\s+\.val-row-action/)
+    expect(css).toMatch(/\.val-row:hover\s+\.val-card-actions[^}]*opacity:\s*1/)
+    expect(css).toMatch(/\.val-row\.has-open-menu\s+\.val-card-actions[^}]*opacity:\s*1/)
+    expect(css).toMatch(/\.val-row:hover\s+\.val-card-thumb::after[^}]*opacity:\s*1/)
+    expect(css).not.toMatch(/\.val-row\.is-on\s+\.val-card-actions/)
   })
 
   it('delete with references shows graph and node names in confirm dialog', async () => {
@@ -617,7 +651,8 @@ describe('VideoAssetLibrary', () => {
         onSelect={() => {}}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '删除 Used clip' }))
+    openCardMenu('Used clip')
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('Boss intro')
     expect(screen.getByRole('dialog')).toHaveTextContent('主图')
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
@@ -638,7 +673,8 @@ describe('VideoAssetLibrary', () => {
         onDeleted={onDeleted}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '删除 Unused clip' }))
+    openCardMenu('Unused clip')
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除' }))
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
     await waitFor(() => expect(controller.deleteResource).toHaveBeenCalledOnce())
@@ -664,7 +700,8 @@ describe('VideoAssetLibrary', () => {
         onSelect={() => {}}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '删除 Old name' }))
+    openCardMenu('Old name')
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除' }))
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }))
 
     await waitFor(() => expect(controller.deleteResource).toHaveBeenCalledOnce())
@@ -684,9 +721,10 @@ describe('VideoAssetLibrary', () => {
         onSelect={() => {}}
       />,
     )
-    const trigger = screen.getByRole('button', { name: '删除 Old name' })
+    const trigger = screen.getByRole('button', { name: '打开 Old name 操作菜单' })
     trigger.focus()
     fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除' }))
 
     const cancel = screen.getByRole('button', { name: '取消' })
     const confirm = screen.getByRole('button', { name: '确认删除' })
@@ -719,8 +757,7 @@ describe('VideoAssetLibrary', () => {
     )
     expect(screen.getByLabelText('上传视频')).toBeDisabled()
     expect(screen.getByLabelText('上传视频').closest('label')).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByRole('button', { name: '重命名 Clip' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '删除 Clip' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '打开 Clip 操作菜单' })).toBeDisabled()
 
     rerender(
       <VideoAssetLibrary
@@ -738,8 +775,7 @@ describe('VideoAssetLibrary', () => {
     )
     expect(screen.getByLabelText('上传视频')).toBeDisabled()
     expect(screen.getByLabelText('上传视频').closest('label')).toHaveAttribute('aria-disabled', 'true')
-    expect(screen.getByRole('button', { name: '重命名 Clip' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '删除 Clip' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '打开 Clip 操作菜单' })).toBeDisabled()
   })
 
   it('does not expose delete for bundled entries', () => {
@@ -753,8 +789,7 @@ describe('VideoAssetLibrary', () => {
         onSelect={() => {}}
       />,
     )
-    expect(screen.queryByRole('button', { name: /重命名 idle01/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: /删除 idle01/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /打开.*idle01.*操作菜单/ })).toBeNull()
   })
 
   it('does not expose mutations for generated registry entries', () => {
@@ -776,8 +811,7 @@ describe('VideoAssetLibrary', () => {
       />,
     )
     expect(screen.getByRole('button', { name: '生成 · Generated clip' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '重命名 Generated clip' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '删除 Generated clip' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /打开.*Generated clip.*操作菜单/ })).toBeNull()
   })
 
   it('forwards the list body ref to the scroll container', () => {

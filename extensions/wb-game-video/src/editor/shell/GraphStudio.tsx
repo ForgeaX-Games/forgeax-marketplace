@@ -47,6 +47,8 @@ import {
   graphPathLabels, resolveGraphAtPath, resolveGraphEntryAtPath, updateGraphAtPath, validGraphPath,
 } from '../../graph/edit/graph-scope'
 import { computeGraphLayout } from '../../graph/edit/graph-layout'
+import { forgeaxHost } from '../../platform/HostSdkBridge'
+import { buildNodeContextReference } from './node-agent-context'
 import { runtimeRuleSignature } from './runtime-rule-signature'
 import {
   ensureEntity,
@@ -825,6 +827,26 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
   const drillFitKey = useMemo(() => `root:${drillStack.join('/')}:${layoutEpoch}`, [drillStack, layoutEpoch])
   const drillLabels = useMemo(() => graphPathLabels(graph, drillStack), [graph, drillStack])
 
+  /** 节点菜单「引用到聊天」：把当前节点引用插入 Studio 侧边 Chat 输入区。 */
+  const handleReference = useCallback(
+    (nodeId: string) => {
+      const node = canvasGraph.nodes.find((n) => n.id === nodeId)
+      if (!node || !forgeaxHost.available) return
+      forgeaxHost.composer.insertReference(
+        buildNodeContextReference({
+          gameId: game,
+          blueprintId: activeBlueprintId,
+          blueprintTitle: blueprints[activeBlueprintId]?.title,
+          graphPath: drillLabels,
+          graph: canvasGraph,
+          node,
+          scenario: previewScenario,
+        }),
+      )
+    },
+    [canvasGraph, game, activeBlueprintId, blueprints, drillLabels, previewScenario],
+  )
+
   // 下钻导航和「重开」锚点属于正在编辑的蓝图；试玩状态行才解析执行图节点。
   const playNameOf = (id: string) => playGraph.nodes.find((n) => n.id === id)?.data.name ?? id
   /** 双击容器：跨蓝图引用（`subFlowPack`）→ 平级切库选中项（selectBlueprint），不是嵌套下钻；
@@ -986,6 +1008,7 @@ export function GraphStudio({ scenario }: { scenario: GameScenario }): JSX.Eleme
           onPaneClick={() => setSelected(null)}
           onAddNode={showingForeignPlayGraph ? undefined : addPerfNode}
           onFitLayout={showingForeignPlayGraph ? undefined : applyCanvasLayout}
+          onReference={showingForeignPlayGraph ? undefined : handleReference}
         />
 
         {/* 试玩浮层：画布右上角（原独立试玩面板搬来） */}

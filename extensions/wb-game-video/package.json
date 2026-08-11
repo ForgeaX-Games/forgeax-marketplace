@@ -1,6 +1,6 @@
 {
   "name": "@forgeax-extension/wb-game-video",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "description": "ForgeaX workbench plugin — Video Game (gameplay-on-video) editor & player. 视频游戏（玩法优先）编辑器：Boss 战 / 血条 / QTE 闯关 / 限时·暂停选择 / 可点热点 + 视频分支（fork of wb-reel）",
   "private": false,
   "repository": {
@@ -58,6 +58,7 @@
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
     "@dagrejs/dagre": "^3.0.0",
+    "@dnd-kit/core": "6.3.1",
     "@xyflow/react": "^12.10.2",
     "ajv": "^8.17.1",
     "cos-js-sdk-v5": "^1.10.1",

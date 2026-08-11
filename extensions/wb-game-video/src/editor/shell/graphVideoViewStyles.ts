@@ -115,21 +115,22 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .val-row-select { position: absolute !important; top: 50%; right: 10px; z-index: 2; display: grid !important; width: 18px; height: 18px; margin: 0 !important; padding: 0 !important; place-items: center; line-height: 1; transform: translateY(-50%); }
 .val-row-select input { margin: 0; accent-color: var(--gc-accent); }
 .val-row .gc-row-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.val-row-action { position: absolute; z-index: 3; top: 5px; display: grid; width: 26px; min-width: 26px; height: 26px; min-height: 26px; place-items: center; padding: 0; border: 1px solid rgba(255,255,255,.24); border-radius: 6px; background: rgba(0,0,0,.5); color: rgba(255,255,255,.95); cursor: pointer; font-size: 15px; opacity: 0; pointer-events: none; transition: opacity .15s ease, background .15s ease; }
-.val-row-rename { right: 58px; }
-.val-row-delete { right: 8px; }
-.val-row:hover > .gc-row, .val-row:has(> .val-row-action:focus-visible) > .gc-row { padding-right: 0; }
-.val-row:hover .val-row-action { opacity: 1; pointer-events: auto; }
-.val-row:has(> .val-row-action:focus-visible) .val-row-action { opacity: 1; pointer-events: auto; }
-.val-row-action:hover:not(:disabled), .val-row-action:focus-visible { background: rgba(0,0,0,.78); outline: 2px solid rgba(232,134,74,.75); outline-offset: 1px; }
-.val-row-action:disabled { cursor: default; opacity: 0.4; }
+.val-card-actions { position: absolute; z-index: 5; top: 6px; left: 6px; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+.val-card-more { display: grid; width: 18px; min-width: 18px; height: 18px; min-height: 18px; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.val-card-more img { display: block; width: 18px; height: 18px; }
+.val-card-more:hover:not(:disabled), .val-card-more:focus-visible, .val-card-more[aria-expanded="true"] { outline: 1px solid rgba(255,156,42,.8); outline-offset: 1px; }
+.val-card-more:disabled { cursor: default; opacity: .4; }
+.val-card-menu { position: absolute; z-index: 8; top: 26px; left: 0; display: flex; box-sizing: border-box; width: 130px; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: #141414; box-shadow: 0 8px 24px rgba(0,0,0,.38); }
+.val-card-menu button { display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: center; padding: 8px; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; font: inherit; font-size: 16px; line-height: 24px; }
+.val-card-menu button:hover, .val-card-menu button:focus-visible { background: rgba(255,255,255,.1); outline: none; }
+.val-row:hover .val-card-actions, .val-row.has-open-menu .val-card-actions, .val-card-actions:focus-within { opacity: 1; pointer-events: auto; }
 .gc-tab-video .gc-stage-video,
 .gc-tab-video .gc-video-top,
 .gc-tab-video .gvv-video-col { min-height: 0; }
 .gc-tab-video .gc-video-top { display: flex; height: 0; grid-template-columns: none; flex: 1 1 0; }
 .gc-tab-video .gvv-video-col { width: 100%; flex: 1 1 0; }
 .gc-tab-video .gc-frame { width: 100%; height: 100%; min-height: 0; max-height: none; flex: 1 1 0; aspect-ratio: auto; }
-@media (prefers-reduced-motion: reduce) { .val-row-action { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .val-card-actions { transition: none; } }
 .val-load-more { margin: 8px 24px 12px; border: 0; background: var(--asset-overlay); color: #fff; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
 .val-library-content { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
 .val-tag-action { flex: none; min-height: 26px; padding: 0 9px; border: 0; border-radius: 6px; background: var(--asset-overlay); color: #fff; cursor: pointer; font: inherit; font-size: 11px; }
@@ -140,7 +141,11 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .val-library .val-row > .gc-row, .val-folder-open { box-sizing: border-box; display: flex; width: 100%; min-height: 169px; height: 169px; flex-direction: column; align-items: center; gap: 0; padding: 0; overflow: visible; border: 0; border-radius: 0; background: transparent; color: #fff; cursor: pointer; font: inherit; font-size: 14px; line-height: 20px; text-align: center; }
 .val-library .val-row > .gc-row:hover, .val-library .val-row > .gc-row.is-on { background: transparent; }
 .val-library .val-row:hover, .val-folder-card:hover { transform: translateY(-1px); }
-.val-card-thumb { display: grid; width: 140px; height: 140px; min-height: 140px; flex: 0 0 140px; place-items: center; overflow: hidden; border-radius: 6px; background: var(--asset-overlay); color: #ff9c2a; font-size: 34px; }
+.val-library .val-row.is-dragging { z-index: 4; opacity: .28; }
+.val-card-thumb { position: relative; box-sizing: border-box; display: grid; width: 140px; height: 140px; min-height: 140px; flex: 0 0 140px; place-items: center; overflow: hidden; border: 1px solid transparent; border-radius: 6px; background: var(--asset-overlay); color: #ff9c2a; font-size: 34px; transition: border-color .15s ease, filter .15s ease; }
+.val-card-thumb::after { position: absolute; inset: 0; border-radius: inherit; background: rgba(255,255,255,.12); content: ''; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+.val-row:hover .val-card-thumb::after, .val-row.has-open-menu .val-card-thumb::after { opacity: 1; }
+.val-row:hover .val-card-thumb, .val-row.has-open-menu .val-card-thumb { border-color: rgba(255,156,42,.6); }
 .val-card-thumb video { display: block; width: 100%; height: 100%; object-fit: cover; background: #101114; }
 .val-card-thumb.is-generating { background: linear-gradient(145deg, rgba(240,136,64,.18), rgba(26,26,26,.94)); }
 .val-generation-spinner { width: 30px; height: 30px; border: 3px solid rgba(255,255,255,.16); border-top-color: var(--gc-accent); border-radius: 50%; animation: val-generation-spin .9s linear infinite; }
@@ -148,17 +153,19 @@ export const GRAPH_VIDEO_VIEW_CSS = `
 .val-card-copy { box-sizing: border-box; display: block; width: 100%; min-width: 0; padding: 4px 10px; overflow: hidden; }
 .val-card-copy .gc-row-label { display: block; width: 100%; overflow: hidden; color: #fff; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .val-folder-visual { position: relative; display: flex; width: 140px; height: 140px; flex: 0 0 140px; overflow: visible; background: var(--asset-overlay); clip-path: path('M0 6C0 2.6863 2.68629 0 6 0H50.8506C52.5206 0 54.115 0.695986 55.2505 1.92058L71.8399 19.813C72.9753 21.0376 74.5698 21.7335 76.2397 21.7335H134C137.314 21.7335 140 24.4198 140 27.7335V134C140 137.314 137.314 140 134 140H6C2.6863 140 0 137.314 0 134V6Z'); }
+.val-folder-card { border-radius: 6px; transition: filter .15s ease, transform .15s ease; }
+.val-folder-card.is-drop-target { filter: drop-shadow(0 0 8px rgba(255,156,42,.72)); transform: translateY(-2px) scale(1.025); }
+.val-folder-card.is-drop-target .val-folder-visual { background: rgba(255,156,42,.22); }
 .val-folder-preview { position: absolute; z-index: 1; top: 41px; left: 9px; display: grid; width: 121px; height: 78px; grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(2, 34px); gap: 8px; }
 .val-folder-preview-item { display: grid; min-width: 0; min-height: 0; place-items: center; overflow: hidden; border-radius: 6px; background: var(--asset-overlay); color: rgba(255,255,255,.6); font-size: 14px; }
 .val-folder-preview-item video { width: 100%; height: 100%; object-fit: cover; }
 .val-folder-name { box-sizing: border-box; display: block; width: 100%; padding: 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .val-library .gc-row-mark { position: absolute; z-index: 2; top: 7px; left: 7px; width: 20px; height: 20px; border-radius: 999px; background: rgba(0,0,0,.62); }
 .val-library .gvv-row-status { position: absolute; z-index: 2; top: 7px; right: 7px; margin-left: 0; }
-.val-library .val-row:hover > .gc-row, .val-library .val-row:has(> .val-row-action:focus-visible) > .gc-row { padding-right: 0; }
-.val-library .val-row-action { top: 5px; transform: none; }
-.val-library .val-row-rename { right: 35px; }
-.val-library .val-row-delete { right: 5px; }
+.val-library .val-row:hover > .gc-row, .val-library .val-row.has-open-menu > .gc-row { padding-right: 0; }
 .val-library .val-row-select { top: 7px; right: 8px; transform: none; }
+.val-drag-overlay { width: 140px; min-height: 169px; overflow: hidden; border-radius: 6px; background: rgba(20,20,20,.92); box-shadow: 0 14px 34px rgba(0,0,0,.48); cursor: grabbing; transform: rotate(2deg); }
+.val-drag-overlay .val-card-copy { text-align: center; }
 .val-library .val-empty { grid-column: 1 / -1; min-height: 160px; display: grid; place-items: center; padding: 24px; }
 .val-folder-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .val-folder-suggestions button { padding: 4px 7px; border: 1px solid var(--gc-line-soft); border-radius: 999px; background: transparent; color: var(--gc-muted); cursor: pointer; font-size: 11px; }
