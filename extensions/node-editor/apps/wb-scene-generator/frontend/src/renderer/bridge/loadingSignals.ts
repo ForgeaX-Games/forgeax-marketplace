@@ -25,11 +25,7 @@ export interface LoadingTaskState {
   total?: number
 }
 
-const TASK_LABELS: Record<LoadingTaskId, string> = {
-  previews: '节点预览',
-  baked: '烘焙图层',
-  aliases: '素材元数据',
-}
+import { sceneLoadingTaskLabel } from '../../sceneI18n.js'
 
 // Finished tasks are dropped a couple seconds after `endLoadingTask` so a
 // stale "done" entry doesn't linger forever in the payload across repeated
@@ -57,7 +53,7 @@ function schedulePost(): void {
 }
 
 export function beginLoadingTask(id: LoadingTaskId, progress?: { done?: number; total?: number }): void {
-  tasks.set(id, { id, label: TASK_LABELS[id], active: true, done: progress?.done, total: progress?.total })
+  tasks.set(id, { id, label: sceneLoadingTaskLabel(id), active: true, done: progress?.done, total: progress?.total })
   schedulePost()
 }
 

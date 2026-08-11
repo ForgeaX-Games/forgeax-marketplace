@@ -1,6 +1,6 @@
 # FarmlandGrid（农田生成）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_farmland_grid`，也可用 basename `FarmlandGrid`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_farmland_grid`，也可用 basename `FarmlandGrid`。
 
 把上游场景的足迹切片为可用区域掩码网格，用 `farmland_grid` 电池生成农田分区布局（规则网格 / 条带 / BSP 自由划分，含田垄/田地/作物点位多值网格），按值拆分后逐张建为命名场景子节点；输出与其它结构模板一致的五个固定端口。
 
@@ -33,4 +33,4 @@
 
 `scene_passthrough → node_explode → rect_grid → voxel_slice`（取顶层切片做掩码）→ `farmland_grid`（多值农田网格）→ `grid_split_by_value` → `grid2node`（按 `AssetName` 命名，挂 `asset_type=tile`）→ `add_child`；同时 `alg_region_subtract`（掩码 − 农田）得到 Rest 子树。最后 `scene_merge_subtrees` 合并并 `scene_focus_path` 分别聚焦，导出五个固定端口。
 
-`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。
+`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。

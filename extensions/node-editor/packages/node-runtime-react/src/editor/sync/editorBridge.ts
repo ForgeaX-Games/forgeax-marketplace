@@ -108,6 +108,12 @@ export interface SelectedNodeView {
   batteryNameEn?: string
   iconSvg?: string
   color?: string
+  sceneScriptStatus?: 'legacy' | 'script-callable' | 'equivalence-verified'
+  sceneScriptFunctionName?: string
+  sceneScriptPassedGates?: string[]
+  sceneScriptMissingGates?: string[]
+  sourcePath?: string
+  sourceFiles?: string[]
   inputs: SelectedPortView[]
   outputs: SelectedPortView[]
 }
@@ -351,12 +357,30 @@ function buildSelectedNodeView(
   let batteryNameEn: string | undefined
   let iconSvg: string | undefined
   let color: string | undefined
+  let sceneScriptStatus: SelectedNodeView['sceneScriptStatus']
+  let sceneScriptFunctionName: string | undefined
+  let sceneScriptPassedGates: string[] | undefined
+  let sceneScriptMissingGates: string[] | undefined
+  let sourcePath: string | undefined
+  let sourceFiles: string[] | undefined
 
   if (sel.batteryId === GROUP_SHADOW_BATTERY_ID) {
     const groupId = typeof sel.params?.groupId === 'string' ? sel.params.groupId : sel.id
     const group = (pipe.groups ?? []).find((g) => g.id === groupId)
     batteryName = group?.name
     batteryNameEn = group?.nameEn ?? group?.name
+    if (typeof sel.params?.__sceneScriptFunctionName === 'string') {
+      sceneScriptFunctionName = sel.params.__sceneScriptFunctionName
+      sceneScriptStatus = sel.params.__sceneScriptStatus === 'equivalence-verified'
+        ? 'equivalence-verified'
+        : 'script-callable'
+      sourcePath = typeof sel.params.__sceneScriptDefinitionId === 'string'
+        ? sel.params.__sceneScriptDefinitionId
+        : undefined
+      sourceFiles = typeof sel.params.__sceneScriptSourceFile === 'string'
+        ? [`file:${sel.params.__sceneScriptSourceFile}`]
+        : undefined
+    }
     inputs = (group?.exposedInputs ?? [])
       .filter((ep) => !ep.hidden)
       .map((ep) => ({
@@ -383,6 +407,12 @@ function buildSelectedNodeView(
     batteryNameEn = battery?.nameEn ?? formatIdAsLabel(sel.batteryId)
     iconSvg = battery?.iconSvg
     color = battery?.color
+    sceneScriptStatus = battery?.sceneScriptStatus
+    sceneScriptFunctionName = battery?.sceneScriptFunctionName
+    sceneScriptPassedGates = battery?.sceneScriptPassedGates
+    sceneScriptMissingGates = battery?.sceneScriptMissingGates
+    sourcePath = battery?.sourcePath
+    sourceFiles = battery?.sourceFiles
     inputs = (battery?.inputs ?? [])
       .filter((port) => !port.hidden)
       .map((port) => ({
@@ -423,6 +453,12 @@ function buildSelectedNodeView(
     batteryNameEn,
     iconSvg,
     color,
+    sceneScriptStatus,
+    sceneScriptFunctionName,
+    sceneScriptPassedGates,
+    sceneScriptMissingGates,
+    sourcePath,
+    sourceFiles,
     inputs,
     outputs,
   }

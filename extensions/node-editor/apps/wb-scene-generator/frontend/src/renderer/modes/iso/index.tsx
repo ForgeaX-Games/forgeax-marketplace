@@ -14,6 +14,8 @@ import { useLayerSurface } from '../../framework/useLayerSurface'
 import { useViewport2D } from '../../framework/useViewport'
 import { useRenderStore } from '../../store'
 import { voxelLayerCellSource, type CellSource } from '../../framework/cellSource'
+import { drawIsoGuides2d } from '../../framework/guides2d'
+import { ISO_CELL_H, ISO_CELL_W } from '../../framework/geometry/iso'
 import { mergeRenderableVoxelLayerKeys } from '../../framework/layerKeys'
 import { registerRenderPlugin, type PluginHandle } from '../../framework/plugin'
 import {
@@ -31,6 +33,7 @@ interface VoxelLayerEntry {
 const ModeIsoPlugin = forwardRef<PluginHandle, object>(function ModeIsoPlugin(_, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawMode = useRenderStore(s => s.drawMode)
+  const showGrid = useRenderStore(s => s.viewGuides.iso)
   const viewport = useViewport2D()
 
   // voxel 层数据表(整组送进 buildIsoSurface)
@@ -86,8 +89,8 @@ const ModeIsoPlugin = forwardRef<PluginHandle, object>(function ModeIsoPlugin(_,
   const compose = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    composeIsoFrame(canvas, master, viewport)
-  }, [master, viewport])
+    composeIsoFrame(canvas, master, viewport, showGrid)
+  }, [master, viewport, showGrid])
 
   useEffect(() => { compose() }, [compose])
 
@@ -142,6 +145,7 @@ function composeIsoFrame(
   canvas: HTMLCanvasElement,
   master: IsoMaster | null,
   viewport: { offsetX: number; offsetY: number; scale: number },
+  showGrid: boolean,
 ): void {
   // jsdom (no `canvas` pkg) throws on getContext rather than returning null;
   // treat any failure as "no 2D context" so the plugin still mounts cleanly.
@@ -170,7 +174,7 @@ function composeIsoFrame(
   ctx.fillStyle = readCanvasBg(canvas)
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  if (!master) return
+  if (!master && !showGrid) return
 
   ctx.scale(dpr, dpr)
 
@@ -182,11 +186,24 @@ function composeIsoFrame(
 
   ctx.imageSmoothingEnabled = false
 
-  // master 居中:把 master canvas 中心对到 (0, 0) 视口中心
-  const { canvas: vmCanvas, bbox } = master
-  // master 内部 (worldOffsetX, worldOffsetY) 对应世界 (0, 0)。让世界 (0, 0) 落在视口中心
-  // 即 master 画在 (-worldOffsetX, -worldOffsetY) 位置。
-  ctx.drawImage(vmCanvas as unknown as CanvasImageSource, -bbox.worldOffsetX, -bbox.worldOffsetY, bbox.pxW, bbox.pxH)
+  if (master) {
+    // master 居中:把 master canvas 中心对到 (0, 0) 视口中心
+    const { canvas: vmCanvas, bbox } = master
+    // master 内部 (worldOffsetX, worldOffsetY) 对应世界 (0, 0)。让世界 (0, 0) 落在视口中心
+    // 即 master 画在 (-worldOffsetX, -worldOffsetY) 位置。
+    ctx.drawImage(vmCanvas as unknown as CanvasImageSource, -bbox.worldOffsetX, -bbox.worldOffsetY, bbox.pxW, bbox.pxH)
+  }
+  if (showGrid) {
+    drawIsoGuides2d(ctx, {
+      cssW,
+      cssH,
+      offsetX: Math.round(viewport.offsetX),
+      offsetY: Math.round(viewport.offsetY),
+      scale: viewport.scale,
+      cellW: ISO_CELL_W,
+      cellH: ISO_CELL_H,
+    })
+  }
 }
 
 // ── voxel 层 subscriber ────────────────────────────────────────────────

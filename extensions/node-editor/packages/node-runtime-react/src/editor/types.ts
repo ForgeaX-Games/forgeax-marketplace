@@ -16,6 +16,8 @@ export type ShapeLacingMode = 'longest' | 'shortest' | 'cross' | 'pairwise'
 
 /** Per-port DataTree access mode: 'item' (fanout), 'list' (whole branch), 'tree' (whole tree). */
 export type BatteryAccess = 'item' | 'list' | 'tree'
+/** Scene Script authoring maturity, derived by the domain contract registry. */
+export type BatterySceneScriptStatus = 'legacy' | 'script-callable' | 'equivalence-verified'
 
 /** Dynamic input/output port config — a port-prefix template the runtime expands. */
 export interface DynamicPortsConfig {
@@ -105,6 +107,40 @@ export interface Battery {
   /** Physical/template source path hint used by template-mode grouping. */
   sourcePath?: string
   /**
+   * Public callable contract for a published native Scene Script Definition.
+   * Sealed implementation topology is never included.
+   */
+  nativeDefinition?: {
+    functionName: string
+    kind: 'group' | 'template'
+    contractVersion: string
+    definitionId?: string
+    definitionVersion?: string
+    description: string
+    inputs: Array<{
+      name: string
+      type: string
+      access?: BatteryAccess
+      required?: boolean
+      defaultValue?: unknown
+      runtimePort?: string
+      label?: string
+      hidden?: boolean
+      order?: number
+    }>
+    outputs: Array<{
+      name: string
+      type: string
+      access?: BatteryAccess
+      runtimePort?: string
+      label?: string
+      hidden?: boolean
+      order?: number
+    }>
+  }
+  /** Shallow, backend-sanitized local file tree for source inspection. */
+  sourceFiles?: string[]
+  /**
    * Origin marker for the two dual-source palette kinds (saved prompts + group
    * templates): `true` = preset shipped inside the plugin (read-only, cannot be
    * deleted), `false` = user content saved under `.forgeax` (right-click
@@ -126,6 +162,13 @@ export interface Battery {
    * `template` text — without a dedicated node-data channel.
    */
   dropParams?: Record<string, unknown>
+  /** Canonical authoring status; absent for domains without Scene Script. */
+  sceneScriptStatus?: BatterySceneScriptStatus
+  /** Function a Scene Script author should call for this battery. */
+  sceneScriptFunctionName?: string
+  /** Acceptance evidence supplied by the domain, not inferred by the UI. */
+  sceneScriptPassedGates?: string[]
+  sceneScriptMissingGates?: string[]
 }
 
 /** 2D layout position. */

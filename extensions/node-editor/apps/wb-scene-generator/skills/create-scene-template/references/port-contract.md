@@ -17,7 +17,7 @@
 
 | 字段 | 规范 |
 |------|------|
-| `id` | 库内稳定 id；`instantiateTemplate` 后运行时 **groupId 重新 mint**（除非 CLI 显式 pin） |
+| `id` | 库内稳定 id；实例化后运行时 **groupId 重新 mint**（除非 CLI 显式 pin） |
 | `name` / `nameEn` | UI 与 `TEMPLATES_INDEX` 显示名 |
 | `nodes[].opId` | 叶子 op 或 `__group__` |
 | `__group__.params.groupId` | **必须**等于 `_nestedGroups[].id` |
@@ -65,11 +65,11 @@
 - 父组 `nodes` 里 `__group__` 的 `id` 可与 `params.groupId` 相同
 - instantiate 时 `buildTemplateOps`：**子 createGroup 先于父**；缺子组定义 → inner view 空白或失败
 
-## 与 Sino 白名单的关系
+## 与消费方的关系
 
 - 模板**内部**可用任意 `alg_*`（私有实现）
-- **顶层**图只允许 compose-sino-scene 工具白名单 + `__group__` 实例
-- 新模板发布后，Sino 通过 `scene:pipeline.instantiateTemplate` 放置整组，**不在顶层直接 createNode alg_***
+- 人类/Workbench 通过 Templates 面板或 group-template HTTP route 放置整组
+- AI 场景编排只使用 Scene Script，不直接操作模板内部 runtime nodes
 
 ## README 端口表模板
 

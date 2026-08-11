@@ -1,6 +1,6 @@
 # AreaPartition（区域划分）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_area_partition_district`，也可用 basename `AreaPartition`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_area_partition_district`，也可用 basename `AreaPartition`。
 > 内部 1 个嵌套子组（TileAssetName）。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明
@@ -63,12 +63,12 @@
 
 ## 如何用命令调用（输入侧）
 
-> 文档标准见 [`../_DOC_STANDARD.md`](../_DOC_STANDARD.md)。Sino 双通道：模板组走 **通道 A** `instantiateTemplate`；接线走 **通道 B** `applyBatch`（仅白名单工具电池 + `connect`）。
+> 文档标准见 [`../_DOC_STANDARD.md`](../_DOC_STANDARD.md)。人类/Workbench 可从 Templates 面板拖入，再通过编辑器接线。
 
 ### 通道 A · 实例化
 
 ```json
-{ "toolId": "scene:pipeline.instantiateTemplate", "caller": { "kind": "ai" },
+{ "method": "POST", "path": "/api/v1/group-templates/<projectId>/instantiate", "caller": { "kind": "workbench" },
   "args": { "projectId": "<pid>", "templateId": "AreaPartition", "groupId": "verify_ap1",
             "position": { "x": -400, "y": 200 },
             "opts": { "actor": "ai:sino", "label": "实例化 AreaPartition" } } }
@@ -162,7 +162,7 @@ curl -s …/execute -d '{}' | jq '.outputs.<G_AP>.out_0[0].items[0].tree.childre
   "target": { "nodeId": "<G_NEXT>", "port": "in_0" } }
 ```
 
-> `scene_focus_path` 在 Sino 白名单内（`scene:composerUtilities.list`）。路径必须存在于 tree 中，否则 execute 报错。
+> `scene_focus_path` 可供人类/Workbench 接线。路径必须存在于 tree 中，否则 execute 报错。
 
 **动态拼路径**（父名/子名来自 panel）：
 
@@ -184,7 +184,7 @@ curl -s …/execute -d '{}' | jq '.outputs.<G_AP>.out_0[0].items[0].tree.childre
 - 逐 branch `connect` 到不同下游组；或
 - `tree_merge`（`inferredAccess:"item"`, `inferredType:"scene"`, `portCount`=子区数）再统一处理。
 
-> `scene_focus_children` 已在 Sino 白名单（2026-07-03 起），用于 AreaPartition / PickMulti 等多子节点扇出。
+> `scene_focus_children` 可用于 AreaPartition / PickMulti 等多子节点扇出。
 
 ### 模式 D · 嵌套再划分
 
@@ -231,7 +231,7 @@ curl -s …/execute -d '{}' | jq '.outputs.zone1_focus.scene[0].items[0].tree | 
 ### 1) 实例化
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "projectId":"p_mr3flg6p_io9iu4", "templateId":"AreaPartition", "groupId":"verify_ap1",
            "position":{"x":-400,"y":200}, "opts":{"actor":"ai:sino","label":"实例化 AreaPartition"} } }
 ```
@@ -308,7 +308,7 @@ curl -s -H 'content-type: application/json' -X POST \
 ### 前置：造一个独立 Demo Scene（可跨模板复用的固定写法）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AddBaseGrid", "groupId":"demo_abg", "position":{"x":-800,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid（独立 demo scene）"} } }
 ```
@@ -342,7 +342,7 @@ curl -s -H 'content-type: application/json' -X POST \
 ### applyBatch 片段（2 子区，可直接照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AreaPartition", "groupId":"demo_ap", "position":{"x":-400,"y":200},
            "opts":{"actor":"ai:sino","label":"实例化 AreaPartition"} } }
 ```

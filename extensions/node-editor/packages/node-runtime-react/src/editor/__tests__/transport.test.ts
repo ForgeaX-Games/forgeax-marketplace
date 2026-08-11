@@ -94,7 +94,7 @@ describe('EditorApiAdapter', () => {
     expect(battery.iconSvg).toContain('<svg')
   })
 
-  it('getBatteries includes reusable group templates as group batteries', async () => {
+  it('getBatteries includes reusable group templates and native public contracts', async () => {
     const client = createMockApiClient({ ops: [spec('a.one', 'One')] })
     client.listGroupTemplates = async () => [{
       id: 'terrain-template',
@@ -102,6 +102,14 @@ describe('EditorApiAdapter', () => {
       category: 'terrain',
       displayGroup: 'templates/terrain',
       sourcePath: 'templates/terrain/Terrain/Terrain.json',
+      nativeDefinition: {
+        functionName: 'terrainTemplate',
+        kind: 'template',
+        contractVersion: '1.0.0',
+        description: 'Terrain template',
+        inputs: [],
+        outputs: [],
+      },
     }]
     const { api } = createEditorTransport(client)
 
@@ -114,8 +122,61 @@ describe('EditorApiAdapter', () => {
         category: 'terrain',
         displayGroup: 'templates/terrain',
         sourcePath: 'templates/terrain/Terrain/Terrain.json',
+        nativeDefinition: expect.objectContaining({ functionName: 'terrainTemplate' }),
       }),
     ]))
+  })
+
+  it('delegates native Definition instantiation without applying a raw group batch', async () => {
+    const client = createMockApiClient()
+    const instantiate = vi.fn(async () => ({
+      status: 'ok' as const,
+      entityId: 'group-native',
+      statementId: 'stmt-native',
+      revision: 'rev-2',
+    }))
+    client.instantiateNativeDefinition = instantiate
+    const applySpy = vi.spyOn(client, 'applyBatch')
+    const { api } = createEditorTransport(client)
+
+    await expect(api.instantiateNativeDefinition('terrainTemplate', { x: 12, y: 34 })).resolves.toEqual(
+      expect.objectContaining({ entityId: 'group-native' }),
+    )
+    expect(instantiate).toHaveBeenCalledWith('terrainTemplate', { x: 12, y: 34 })
+    expect(applySpy).not.toHaveBeenCalled()
+  })
+
+  it('routes grouping intent through canonical project commands with revisions', async () => {
+    const client = createMockApiClient()
+    client.getSceneAuthoringProjectInfo = vi.fn(async () => ({
+      canonical: true,
+      canonicalModule: 'main.scene.ts',
+      projectRevision: 'project-rev-1',
+      moduleRevisions: {
+        'main.scene.ts': { moduleId: 'main', revision: 'module-rev-1' },
+      },
+    }))
+    const apply = vi.fn(async () => ({
+      status: 'ok' as const,
+      projectRevision: 'project-rev-2',
+      transaction: { applied: true, rolledBack: false, undoToken: 'undo-1' },
+    }))
+    client.applySceneAuthoringCommands = apply
+    const { api } = createEditorTransport(client)
+
+    expect(api.supportsSceneAuthoringCommands()).toBe(true)
+    await expect(api.applySceneAuthoringCommands([
+      { type: 'wrapInGroup', statementIds: ['a', 'b'] },
+    ], 'Extract Definition')).resolves.toEqual(expect.objectContaining({
+      projectRevision: 'project-rev-2',
+      transaction: expect.objectContaining({ undoToken: 'undo-1' }),
+    }))
+    expect(apply).toHaveBeenCalledWith({
+      expectedProjectRevision: 'project-rev-1',
+      expectedModuleRevisions: { 'main.scene.ts': 'module-rev-1' },
+      commands: [{ type: 'wrapInGroup', statementIds: ['a', 'b'] }],
+      label: 'Extract Definition',
+    })
   })
 
   it('getCategories groups batteries by big tag', async () => {
@@ -231,7 +292,7 @@ describe('EditorApiAdapter', () => {
     const { api } = createEditorTransport(client)
 
     await api.executePipeline()
-    expect(execSpy).toHaveBeenCalledWith(undefined)
+    expect(execSpy).toHaveBeenCalledWith({})
 
     await api.executePipeline({ startNodeId: 'n1' })
     expect(execSpy).toHaveBeenLastCalledWith({ nodeId: 'n1' })

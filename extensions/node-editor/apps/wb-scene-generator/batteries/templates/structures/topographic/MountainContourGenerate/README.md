@@ -8,7 +8,7 @@
 
 ## 五个固定输出端口
 
-> 连线一律用 **`portName`**（与 `instantiateTemplate` 返回一致；customLabelEn 仅作语义标签）。
+> 连线一律用 **`portName`**（与模板公开端口契约一致；customLabelEn 仅作语义标签）。
 
 | portName | customLabelEn | 语义 |
 |---|---|---|

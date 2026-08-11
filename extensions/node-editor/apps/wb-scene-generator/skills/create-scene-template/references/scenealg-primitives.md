@@ -163,7 +163,7 @@ scene ──explode/slice──► region (工作区)
 2. **先 Utils 再挂树**：主/Rest 必过 `alg_region_subtract`；多实例 partition 输出契约与 `region_flood_grow` 一致（`partition[]` rank=1）。
 3. **Points 只是掩码**：`alg_points_scatter` 输出的是 grid 点掩码，接 flood_grow / topology_connect 时用其 `points` 口，不是 scene tree。
 4. **Topology 与 Region 分源**：PathConnection 的 POI grid 与 obstacle/scene slice **不能同一源**（与 TEMPLATE_PATTERNS §4.4 一致）。
-5. **禁止顶层 alg_store**：`alg_store/Topology/*` 等可在 Develop 试验，但 **发布模板内只用 scenealg `alg_*`**（Sino 白名单 + 形态一致性）。
+5. **禁止顶层 alg_store**：`alg_store/Topology/*` 等可在 Develop 试验，但 **发布模板内只用 scenealg `alg_*`**（保持形态与发布契约一致）。
 
 ---
 

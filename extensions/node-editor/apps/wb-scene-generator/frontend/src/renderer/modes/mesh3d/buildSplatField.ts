@@ -62,7 +62,7 @@ export function buildSplatField(
   }
 
   const passes = opts?.blurPasses ?? 1
-  let cur = weights
+  let cur: Uint8Array<ArrayBufferLike> = weights
   for (let p = 0; p < passes; p++) {
     cur = boxBlurRgba(cur, width, height)
   }

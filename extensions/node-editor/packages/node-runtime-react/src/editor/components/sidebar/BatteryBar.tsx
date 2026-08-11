@@ -383,6 +383,15 @@ const BatteryRow = memo(function BatteryRow({
   const showCount = showDevNoteCount && devNoteCount > 0
   const hasMeta = showStars || showCount
   const cappedStars = Math.min(stars, 9)   // 行内宽度有限，最多显示 9 颗
+  const sceneScriptLabel =
+    battery.sceneScriptStatus === 'equivalence-verified'
+      ? 'Equivalent'
+      : battery.sceneScriptStatus === 'script-callable'
+        ? 'Script'
+        : null
+  const sceneScriptTitle = sceneScriptLabel
+    ? `${sceneScriptLabel}${battery.sceneScriptFunctionName ? ` · ${battery.sceneScriptFunctionName}()` : ''}${battery.sceneScriptMissingGates?.length ? ` · pending: ${battery.sceneScriptMissingGates.join(', ')}` : ''}`
+    : undefined
 
   // 模板行：拉宽电池栏时，先确保名称单行完整显示（否则保持换行不截断），
   // 一旦能单行容纳，再把名称 + 信息 + 日期整体等比放大（共用 --tpl-scale，保持相对大小一致），
@@ -465,6 +474,11 @@ const BatteryRow = memo(function BatteryRow({
             className={`battery-row-template-name${tplOneLine ? ' is-oneline' : ''}`}
             ref={tplNameRef}
           >{displayName}</span>
+          {sceneScriptLabel && (
+            <span className={`battery-row-scene-status battery-row-scene-status--${battery.sceneScriptStatus}`} title={sceneScriptTitle}>
+              {sceneScriptLabel}
+            </span>
+          )}
           <span className="battery-row-template-info">
             <span className="battery-row-template-info-line">
               {battery.version && (
@@ -509,6 +523,11 @@ const BatteryRow = memo(function BatteryRow({
         }
       </span>
       <span className="battery-row-name">{displayName}</span>
+      {sceneScriptLabel && (
+        <span className={`battery-row-scene-status battery-row-scene-status--${battery.sceneScriptStatus}`} title={sceneScriptTitle}>
+          {sceneScriptLabel}
+        </span>
+      )}
       {isFavorite && (
         <span className="battery-row-fav-star" title={langMode === 'en' ? 'Favorited' : '已收藏'}>
           <FavoriteStarIcon size={12} />
@@ -615,6 +634,8 @@ function BatteryBar() {
   }, [batteryFilterMode])
   const [isRailExpanded, setIsRailExpanded] = useState(false)
   const [isRailExpansionSuppressed, setIsRailExpansionSuppressed] = useState(false)
+  const railGroupRef = useRef<HTMLDivElement>(null)
+  const [railThumb, setRailThumb] = useState({ visible: false, top: 0, height: 20 })
   // 电池栏整体收起 / 展开（会话态，不持久化，与宽度一致刷新即恢复默认展开）。
   const [isCollapsed, setIsCollapsed] = useState(false)
 
@@ -628,6 +649,11 @@ function BatteryBar() {
       document.documentElement.style.setProperty('--bb-current-width', `${el.offsetWidth}px`)
     }
     publish()
+    if (typeof ResizeObserver === 'undefined') {
+      return () => {
+        document.documentElement.style.removeProperty('--bb-current-width')
+      }
+    }
     const ro = new ResizeObserver(publish)
     ro.observe(el)
     return () => {
@@ -911,6 +937,28 @@ function BatteryBar() {
     () => bigLabels.filter(label => !isCollectionLabel(label)),
     [bigLabels, isCollectionLabel],
   )
+  useLayoutEffect(() => {
+    const element = railGroupRef.current
+    if (!element) return
+    const update = () => {
+      const { clientHeight, scrollHeight, scrollTop } = element
+      const visible = scrollHeight > clientHeight + 1
+      const height = visible ? Math.max(20, clientHeight * clientHeight / scrollHeight) : clientHeight
+      const maxTop = Math.max(0, clientHeight - height)
+      const top = scrollHeight > clientHeight
+        ? (scrollTop / (scrollHeight - clientHeight)) * maxTop
+        : 0
+      setRailThumb({ visible, top, height })
+    }
+    update()
+    element.addEventListener('scroll', update, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(element)
+    return () => {
+      element.removeEventListener('scroll', update)
+      observer?.disconnect()
+    }
+  }, [batteryLabels.length])
   // 仅当前视图内的大标签参与滚动联动（rail 高亮 / 恢复滚动位置）。
   const activeViewLabels = railView === 'collection' ? collectionLabels : batteryLabels
 
@@ -1659,7 +1707,7 @@ function BatteryBar() {
       <div className="bb-body">
         {bigLabels.length > 0 && (
           <>
-            {/* 展开态下 nav 脱离文档流（绝对定位覆盖右侧），用占位元素保留 32px 槽位，
+            {/* 展开态下 nav 脱离文档流（绝对定位覆盖右侧），用占位元素保留 36px 槽位，
                 确保右侧 .bb-scroller 宽度不因 rail 展开而变化（不挤压、不回流）。 */}
             {isRailExpanded && <div className="bb-big-rail-spacer" aria-hidden />}
             <nav
@@ -1668,8 +1716,18 @@ function BatteryBar() {
               onMouseEnter={handleRailMouseEnter}
               onMouseLeave={handleRailMouseLeave}
             >
-              <div className="bb-rail-group bb-rail-group--batteries">
-                {batteryLabels.map(renderRailButton)}
+              <div className="bb-rail-scroll-region">
+                <div ref={railGroupRef} className="bb-rail-group bb-rail-group--batteries">
+                  {batteryLabels.map(renderRailButton)}
+                </div>
+                {railThumb.visible && (
+                  <span className="bb-rail-scrollbar" aria-hidden>
+                    <span
+                      className="bb-rail-scrollbar__thumb"
+                      style={{ height: railThumb.height, transform: `translateY(${railThumb.top}px)` }}
+                    />
+                  </span>
+                )}
               </div>
               <div className="bb-rail-group bb-rail-group--collection">
                 <button

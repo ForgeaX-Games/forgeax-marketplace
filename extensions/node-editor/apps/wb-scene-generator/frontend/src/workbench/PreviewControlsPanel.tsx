@@ -8,14 +8,12 @@ interface Props {
   editMode: boolean
   editTool: PreviewEditTool
   brushMode: BrushMode
-  showGrid: boolean
   editZ: number
   previewContext: PreviewEditContextBus
   bakedHistory: BakedHistoryStatusDTO | null
   selectedLayers: SelectedLayerSnapshot[]
   onPickTool: (tool: PreviewEditTool) => void
   onPickBrush: (mode: BrushMode) => void
-  onToggleGrid: () => void
   onUpdateEditZ: (value: number) => void
   onUndoBakedEdit: () => void
   onRedoBakedEdit: () => void
@@ -74,14 +72,12 @@ export function PreviewControlsPanel({
   editMode,
   editTool,
   brushMode,
-  showGrid,
   editZ,
   previewContext,
   bakedHistory,
   selectedLayers,
   onPickTool,
   onPickBrush,
-  onToggleGrid,
   onUpdateEditZ,
   onUndoBakedEdit,
   onRedoBakedEdit,
@@ -122,13 +118,11 @@ export function PreviewControlsPanel({
               editMode={editMode}
               editTool={editTool}
               brushMode={brushMode}
-              showGrid={showGrid}
               editZ={editZ}
               previewContext={previewContext}
               bakedHistory={bakedHistory}
               onPickTool={onPickTool}
               onPickBrush={onPickBrush}
-              onToggleGrid={onToggleGrid}
               onUpdateEditZ={onUpdateEditZ}
               onUndoBakedEdit={onUndoBakedEdit}
               onRedoBakedEdit={onRedoBakedEdit}
@@ -182,13 +176,11 @@ function EditToolsSection({
   editMode,
   editTool,
   brushMode,
-  showGrid,
   editZ,
   previewContext,
   bakedHistory,
   onPickTool,
   onPickBrush,
-  onToggleGrid,
   onUpdateEditZ,
   onUndoBakedEdit,
   onRedoBakedEdit,
@@ -236,10 +228,6 @@ function EditToolsSection({
           Box select
         </button>
       </div>
-      <label className="scene-left-pane__toolbar-row">
-        <input type="checkbox" checked={showGrid} onChange={onToggleGrid} />
-        <span>Show grid lines</span>
-      </label>
       {previewContext.editAvailable && (
         <label className="scene-left-pane__toolbar-row scene-left-pane__toolbar-row--z">
           <span>Z Layer</span>

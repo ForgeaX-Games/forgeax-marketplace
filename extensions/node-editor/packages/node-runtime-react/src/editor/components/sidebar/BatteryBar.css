@@ -109,15 +109,14 @@ body.bb-resizing {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  flex: 0 0 32px;
-  width: 32px;
+  flex: 0 0 36px;
+  width: 36px;
   padding: 4px 3px;
   gap: 3px;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: hidden;
   background: rgba(0, 0, 0, 0.16);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
-  scrollbar-width: none;
   transition: width 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
               background-color var(--transition-fast),
               box-shadow var(--transition-fast);
@@ -139,15 +138,11 @@ body.bb-resizing {
 
 /* 展开态时占据原 rail 槽位，保证右侧内容不发生回流。 */
 .bb-big-rail-spacer {
-  flex: 0 0 32px;
-  width: 32px;
+  flex: 0 0 36px;
+  width: 36px;
 }
 
-.bb-big-rail::-webkit-scrollbar {
-  display: none;
-}
-
-/* rail 分两组：电池组在上（占满剩余空间），收藏 / 预设组钉在底部并底部对齐。
+/* rail 分两组：电池组在上（独立滚动），收藏 / 预设组钉在底部并底部对齐。
    两组之间用一条分隔线区隔，与右侧两个独立滚动视图（电池 / 收藏）一一对应。 */
 .bb-rail-group {
   display: flex;
@@ -156,9 +151,41 @@ body.bb-resizing {
   gap: 3px;
 }
 
-.bb-rail-group--batteries {
-  flex: 1 1 auto;
+.bb-rail-scroll-region {
+  position: relative;
+  flex: 1 1 0;
   min-height: 0;
+}
+
+.bb-rail-group--batteries {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  scrollbar-width: none;
+}
+
+.bb-rail-group--batteries::-webkit-scrollbar {
+  display: none;
+}
+
+.bb-rail-scrollbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+
+.bb-rail-scrollbar__thumb {
+  display: block;
+  width: 100%;
+  border-radius: 999px;
+  background: rgba(var(--color-accent-rgb), 0.9);
+  box-shadow: 0 0 5px rgba(var(--color-accent-rgb), 0.35);
 }
 
 .bb-rail-group--collection {
@@ -852,6 +879,27 @@ body.bb-resizing {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Derived from the Scene Contract acceptance matrix, not a hand-maintained
+ * battery property. Text remains explicit so color is never the only signal. */
+.battery-row-scene-status {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  font-size: 8px;
+  line-height: 1.2;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+
+.battery-row-scene-status--script-callable {
+  color: var(--color-warning, var(--color-text-secondary));
+}
+
+.battery-row-scene-status--equivalence-verified {
+  color: var(--color-success, var(--color-text-primary));
 }
 
 /* 已收藏黄色五角星：紧贴名称右侧（非右对齐）；margin-right:auto 把后续 meta 推到行末。 */

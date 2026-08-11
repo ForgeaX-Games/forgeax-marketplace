@@ -99,6 +99,39 @@ export interface GroupTemplateBattery {
   tagLabels?: string[]
   /** True for preset templates shipped in the plugin (read-only); false for user templates under `.forgeax`. */
   builtin?: boolean
+  /**
+   * Public Scene Script surface for a published native Definition. The backend
+   * deliberately omits the sealed `definition` body; palette consumers only
+   * need the callable name and public ports.
+   */
+  nativeDefinition?: {
+    functionName: string
+    kind: 'group' | 'template'
+    contractVersion: string
+    definitionId?: string
+    definitionVersion?: string
+    description: string
+    inputs: Array<{
+      name: string
+      type: string
+      access?: 'item' | 'list' | 'tree'
+      required?: boolean
+      defaultValue?: unknown
+      runtimePort?: string
+      label?: string
+      hidden?: boolean
+      order?: number
+    }>
+    outputs: Array<{
+      name: string
+      type: string
+      access?: 'item' | 'list' | 'tree'
+      runtimePort?: string
+      label?: string
+      hidden?: boolean
+      order?: number
+    }>
+  }
 }
 
 /** Server response of POST /projects/:id/view. */
@@ -252,6 +285,50 @@ export interface ApiClient {
     groupId: string,
     opts?: { scope?: 'groups' | 'templates' },
   ): Promise<NodeGroup | null>
+  /**
+   * Add one published native Definition call to the canonical Scene Script and
+   * persist its authoring layout. This is intentionally distinct from loading
+   * JSON and applying raw createGroup ops.
+   */
+  instantiateNativeDefinition?(
+    functionName: string,
+    position: { x: number; y: number },
+  ): Promise<{ status: 'ok'; entityId: string; statementId: string; revision: string; graphHash?: string }>
+  /** Read the optimistic project revision used by canonical authoring commands. */
+  getSceneAuthoringProjectInfo?(): Promise<{
+    canonical: boolean
+    canonicalModule: string
+    projectRevision: string
+    moduleRevisions: Record<string, { moduleId: string; revision: string }>
+  }>
+  /** Apply graph intent through the canonical Scene Project command route. */
+  applySceneAuthoringCommands?(req: {
+    expectedProjectRevision: string
+    expectedModuleRevisions?: Record<string, string>
+    commands: unknown[]
+    label?: string
+  }): Promise<{
+    status: 'ok'
+    projectRevision: string
+    graphHash?: string
+    transaction?: { applied: boolean; rolledBack: boolean; undoToken?: string }
+  }>
+  /** Restore the previous canonical authoring source transaction and rebuild projections. */
+  undoSceneAuthoring?(req: { expectedProjectRevision: string }): Promise<{
+    status: 'ok'
+    direction: 'undo'
+    projectRevision: string
+    graphHash?: string
+    history: { cursor: number; length: number; canUndo: boolean; canRedo: boolean }
+  }>
+  /** Reapply the next canonical authoring source transaction and rebuild projections. */
+  redoSceneAuthoring?(req: { expectedProjectRevision: string }): Promise<{
+    status: 'ok'
+    direction: 'redo'
+    projectRevision: string
+    graphHash?: string
+    history: { cursor: number; length: number; canUndo: boolean; canRedo: boolean }
+  }>
   /** Persist a group as a reusable template battery. */
   saveGroupTemplate?(req: {
     group: NodeGroup

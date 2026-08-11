@@ -44,9 +44,9 @@ function makeBinding(): LayerAssetBinding {
     },
     rule: null,
     imgUrl: getRegisteredAssetUrl('grass'),
-    validVariantIdxs: { top: [], front: [] },
-    validVariantWeights: { top: undefined, front: undefined },
-    validVariantPoolsByTileId: { top: new Map(), front: new Map() },
+    validVariantIdxs: { top: [], front: [], entry: [] },
+    validVariantWeights: { top: undefined, front: undefined, entry: undefined },
+    validVariantPoolsByTileId: { top: new Map(), front: new Map(), entry: new Map() },
     regions: new Map(),
   }
 }

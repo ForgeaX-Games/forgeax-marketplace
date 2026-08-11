@@ -22,7 +22,7 @@ import { buildTemplateOps, splitTemplate } from '../src/lib/templateOps.js'
 const here = dirname(fileURLToPath(import.meta.url))
 // backend/tests → backend → wb-scene-generator
 const appRoot = resolve(here, '..', '..')
-const LAKE_REGIONS = resolve(appRoot, 'batteries/groups/scene/LakeRegions/LakeRegions.json')
+const LAKE_REGIONS = resolve(appRoot, 'batteries/groups/scene/LakeRegions/LakeRegions.generated.json')
 
 const GROUP_OP_ID = '__group__'
 

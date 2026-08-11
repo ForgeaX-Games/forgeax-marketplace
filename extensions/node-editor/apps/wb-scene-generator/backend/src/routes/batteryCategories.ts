@@ -15,12 +15,20 @@ import { readFile, readdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, basename } from 'node:path'
 import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
+import {
+  AcceptanceCoverageMatrix,
+  type AcceptanceGateId,
+  type ContractRegistry,
+  type SceneScriptStatus,
+} from '@forgeax/scene-authoring'
+import { getSceneContractRegistry } from '../scene-script/contracts.js'
 
 // This module lives in backend/src/routes, so the scene-generator repo root is
 // three levels up (routes → src → backend → repo).
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..', '..')
 const batteryScanRoots = resolveBatteryScanRoots(repoRoot)
+const acceptanceEvidenceFile = resolve(repoRoot, 'acceptance', 'promoted.json')
 
 export interface BatteryUiMeta {
   /** "bigTag/smallTag" — drives BatteryBar rail (big) + accordion (small). */
@@ -35,6 +43,15 @@ export interface BatteryUiMeta {
   hideOutputs?: boolean
   /** Inline SVG loaded from icon.svg beside meta.json, when present. */
   iconSvg?: string
+  /** Repository-relative directory; safe for display but never an open-file path. */
+  sourcePath?: string
+  /** Safe, shallow directory projection for Node Info. */
+  sourceFiles?: string[]
+  /** Derived authoring capability; never hand-maintained in battery meta.json. */
+  sceneScriptStatus?: SceneScriptStatus
+  sceneScriptFunctionName?: string
+  sceneScriptPassedGates?: string[]
+  sceneScriptMissingGates?: string[]
 }
 
 let cache: Map<string, BatteryUiMeta> | null = null
@@ -100,11 +117,43 @@ export async function scanBatteryCategories(roots: readonly string[]): Promise<M
       const hideOutputs =
         typeof frontend?.hideOutputs === 'boolean' ? frontend.hideOutputs : undefined
       const iconSvg = await readFile(resolve(dirname(file), 'icon.svg'), 'utf8').catch(() => undefined)
-      map.set(id, { category, displayGroup, type: bigTag, nodeType, hideOutputs, iconSvg })
+      const sourceFiles = (await readdir(dirname(file), { withFileTypes: true }).catch(() => []))
+        .filter((entry) => entry.isFile() || entry.isDirectory())
+        .map((entry) => `${entry.isDirectory() ? 'dir' : 'file'}:${entry.name}`)
+        .sort()
+      map.set(id, {
+        category,
+        displayGroup,
+        type: bigTag,
+        nodeType,
+        hideOutputs,
+        iconSvg,
+        sourcePath: rel.split(/[\\/]/).slice(0, -1).join('/'),
+        sourceFiles,
+      })
     }
   }
 
   return map
+}
+
+export function applyAcceptanceCoverage(
+  map: Map<string, BatteryUiMeta>,
+  registry: ContractRegistry,
+  promoted: Readonly<Record<string, readonly AcceptanceGateId[]>>,
+): void {
+  const coverage = new AcceptanceCoverageMatrix(promoted).byOpId(registry)
+  for (const [opId, record] of coverage) {
+    const current = map.get(opId)
+    if (!current) continue
+    map.set(opId, {
+      ...current,
+      sceneScriptStatus: record.status,
+      sceneScriptFunctionName: record.functionName,
+      sceneScriptPassedGates: record.passedGates,
+      sceneScriptMissingGates: record.missingGates,
+    })
+  }
 }
 
 /**
@@ -114,6 +163,14 @@ export async function scanBatteryCategories(roots: readonly string[]): Promise<M
 export async function getBatteryCategories(): Promise<Map<string, BatteryUiMeta>> {
   if (cache) return cache
   const map = await scanBatteryCategories(batteryScanRoots)
+  const registry = await getSceneContractRegistry()
+  const promoted = await readFile(acceptanceEvidenceFile, 'utf8')
+    .then((source) => {
+      const parsed = JSON.parse(source) as { coverage?: Record<string, AcceptanceGateId[]> }
+      return parsed.coverage ?? {}
+    })
+    .catch(() => ({}))
+  applyAcceptanceCoverage(map, registry, promoted)
   cache = map
   return map
 }

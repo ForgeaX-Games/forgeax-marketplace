@@ -46,14 +46,12 @@ describe('PreviewLayerInspector', () => {
         editMode
         editTool="paint"
         brushMode="free"
-        showGrid={true}
         editZ={1}
         previewContext={EDITABLE_PREVIEW_CONTEXT}
         bakedHistory={{ canUndo: false, canRedo: false, entries: [] }}
         selectedLayers={[]}
         onPickTool={vi.fn()}
         onPickBrush={vi.fn()}
-        onToggleGrid={vi.fn()}
         onUpdateEditZ={vi.fn()}
         onUndoBakedEdit={vi.fn()}
         onRedoBakedEdit={vi.fn()}
@@ -82,7 +80,6 @@ describe('PreviewLayerInspector', () => {
         editMode
         editTool="erase"
         brushMode="free"
-        showGrid={true}
         editZ={1}
         previewContext={EDITABLE_PREVIEW_CONTEXT}
         bakedHistory={{
@@ -95,7 +92,6 @@ describe('PreviewLayerInspector', () => {
         selectedLayers={[]}
         onPickTool={vi.fn()}
         onPickBrush={vi.fn()}
-        onToggleGrid={vi.fn()}
         onUpdateEditZ={vi.fn()}
         onUndoBakedEdit={onUndoBakedEdit}
         onRedoBakedEdit={onRedoBakedEdit}
@@ -116,14 +112,12 @@ describe('PreviewLayerInspector', () => {
         editMode
         editTool="paint"
         brushMode="free"
-        showGrid={true}
         editZ={0}
         previewContext={EDITABLE_PREVIEW_CONTEXT}
         bakedHistory={{ canUndo: false, canRedo: false, entries: [] }}
         selectedLayers={[]}
         onPickTool={vi.fn()}
         onPickBrush={vi.fn()}
-        onToggleGrid={vi.fn()}
         onUpdateEditZ={vi.fn()}
         onUndoBakedEdit={vi.fn()}
         onRedoBakedEdit={vi.fn()}
@@ -141,7 +135,7 @@ describe('PreviewLayerInspector', () => {
     useAssetStoreStore.setState({
       assets: [{
         id: 'a1',
-        alias: '[]_[]__[]_[]_[草地]_[]_[风格]_[正常]_[抠图]_[16]__[静态]_[]_[0].png',
+        alias: '[]_[]_[草地]_[]_[]_[风格]_[正常]_[抠图]_[16]_[静态]_[]_[0]_[]',
         zone: 'raw',
         blobSha256: 's',
         mimeType: 'image/png',
@@ -158,7 +152,7 @@ describe('PreviewLayerInspector', () => {
   })
 
   it('uses the selected-layer snapshot alias when the left pane asset list is not loaded', () => {
-    const alias = '[]_[]__[]_[]_[草地]_[]_[风格]_[正常]_[抠图]_[16]__[静态]_[]_[0].png'
+    const alias = '[]_[]_[草地]_[]_[]_[风格]_[正常]_[抠图]_[16]_[静态]_[]_[0]_[]'
 
     const { container, getByText, queryByText } = render(<PreviewLayerInspector layers={[layer({ assetAlias: alias })]} />)
 
@@ -176,7 +170,7 @@ describe('PreviewLayerInspector', () => {
     useAssetStoreStore.setState({
       assets: [{
         id: 'a1',
-        alias: '[]_[]__[]_[]_[石头]_[]_[风格]_[正常]_[抠图]_[16]__[静态]_[]_[0].png',
+        alias: '[]_[]_[石头]_[]_[]_[风格]_[正常]_[抠图]_[16]_[静态]_[]_[0]_[]',
         zone: 'raw',
         blobSha256: 's',
         mimeType: 'image/png',

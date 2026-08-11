@@ -1,22 +1,25 @@
 import type { FastifyInstance } from 'fastify'
 import type { NodeGroup, Op } from '@forgeax/node-runtime'
 import { applyBatch } from '@forgeax/node-runtime'
+import type { NodeFunctionContract, PortContract } from '@forgeax/scene-authoring'
 import { mkdir, readdir, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
-import { getProjectRegistry, getRuntimeForProject } from '../runtime.js'
-import { ensureMutationAccess } from './projects.js'
+import { getProjectDir, getProjectRegistry, getRuntimeForProject } from '../runtime.js'
+import { extractCaller, ensureMutationAccess } from './projects.js'
 import { buildTemplateOps, splitTemplate } from '../lib/templateOps.js'
+import { readSceneModule } from '../scene-script/store.js'
+import { getSceneContractRegistry } from '../scene-script/contracts.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(here, '..', '..', '..')
 
 // 成组电池有两类，物理隔离、用途分离：
-//   groups/<cat>    → Develop 可编辑开发版（保存默认落盘；Sino 不可见）
-//   templates/<cat> → Templates 稳定发布版（Sino instantiateTemplate 唯一来源）
-// GET ?scope=groups|templates|all 控制列表/读取范围；instantiate 仅扫 templates/。
+//   groups/<cat>    → Develop 可编辑开发版（保存默认落盘）
+//   templates/<cat> → Templates 稳定发布版（供只读 UI catalog 与拖放实例化）
+// GET ?scope=groups|templates|all 控制列表/读取范围；实例化仅扫 templates/。
 const appGroupRoot = resolve(repoRoot, 'batteries', 'groups')
 const appTemplateRoot = resolve(repoRoot, 'batteries', 'templates')
 const groupRoots = [
@@ -68,6 +71,17 @@ interface GroupTemplateBattery {
   sourcePath?: string
   /** True for preset templates shipped in the plugin (read-only); false for user templates under `.forgeax`. */
   builtin?: boolean
+  /** Public callable surface only; the sealed Definition body is never catalogued. */
+  nativeDefinition?: {
+    functionName: string
+    kind: 'group' | 'template'
+    contractVersion: string
+    definitionId?: string
+    definitionVersion?: string
+    description: string
+    inputs: Array<Omit<PortContract, 'parameterTarget'>>
+    outputs: Array<Omit<PortContract, 'parameterTarget'>>
+  }
 }
 
 // Templates 模式预览图：template 文件夹内若含图片（任意 png/jpg/jpeg/webp/gif），
@@ -119,6 +133,20 @@ async function collectJsonFiles(dir: string, out: string[]): Promise<void> {
   }
 }
 
+async function collectSceneDefinitionFiles(dir: string, out: string[]): Promise<void> {
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    const full = resolve(dir, entry.name)
+    if (entry.isDirectory()) await collectSceneDefinitionFiles(full, out)
+    else if (entry.isFile() && entry.name.endsWith('.scene.ts')) out.push(full)
+  }
+}
+
 async function readGroup(file: string): Promise<NodeGroup | null> {
   try {
     return JSON.parse(await readFile(file, 'utf8')) as NodeGroup
@@ -130,6 +158,32 @@ async function readGroup(file: string): Promise<NodeGroup | null> {
 function categoryFor(root: string, file: string): string {
   const rel = relative(root, file).split(/[\\/]/)
   return rel[0] || 'templates'
+}
+
+function publicPort(port: PortContract): Omit<PortContract, 'parameterTarget'> {
+  const { parameterTarget: _sealedTarget, ...visible } = port
+  return visible
+}
+
+async function nativeDefinitionFor(
+  scenePath: string,
+  registry: Awaited<ReturnType<typeof getSceneContractRegistry>>,
+): Promise<GroupTemplateBattery['nativeDefinition']> {
+  const source = await readFile(scenePath, 'utf8').catch(() => '')
+  const functionName = source.match(/\bexport\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*defineGroup\s*\(/)?.[1]
+  if (!functionName) return undefined
+  const contract: NodeFunctionContract | undefined = registry.get(functionName)
+  if (!contract || (contract.kind !== 'group' && contract.kind !== 'template')) return undefined
+  return {
+    functionName: contract.functionName,
+    kind: contract.kind,
+    contractVersion: contract.contractVersion,
+    ...(contract.definitionId ? { definitionId: contract.definitionId } : {}),
+    ...(contract.definitionVersion ? { definitionVersion: contract.definitionVersion } : {}),
+    description: contract.description,
+    inputs: contract.inputs.map(publicPort),
+    outputs: contract.outputs.map(publicPort),
+  }
 }
 
 type GroupCatalogScope = 'all' | 'groups' | 'templates'
@@ -199,15 +253,14 @@ async function removeGroupBatteryDirectory(dir: string, owningRoot: string): Pro
 
 async function collectCatalogItems(scope: GroupCatalogScope): Promise<GroupTemplateBattery[]> {
   const items: GroupTemplateBattery[] = []
+  const registry = await getSceneContractRegistry()
   const seenPaths = new Set<string>()
   const userRoot = userTemplateRoot()
   for (const { kind, roots } of kindsForScope(scope)) {
     for (const root of roots) {
       const files: string[] = []
-      await collectJsonFiles(root, files)
+      await collectSceneDefinitionFiles(root, files)
       for (const file of files) {
-        const group = await readGroup(file)
-        if (!group?.id) continue
         const sourcePath = relative(repoRoot, file)
         if (seenPaths.has(sourcePath)) continue
         seenPaths.add(sourcePath)
@@ -218,26 +271,23 @@ async function collectCatalogItems(scope: GroupCatalogScope): Promise<GroupTempl
               : undefined)
           : undefined
         const iconPng = kind === 'templates' ? await readIconPng(file) : undefined
-        const meta = group as { version?: unknown; author?: unknown; createdAt?: unknown }
-        const createdAt = typeof meta.createdAt === 'number'
-          ? meta.createdAt
-          : await stat(file).then((s) => s.mtimeMs).catch(() => undefined)
+        const nativeDefinition = await nativeDefinitionFor(file, registry)
+        if (!nativeDefinition) continue
+        const createdAt = await stat(file).then((s) => s.mtimeMs).catch(() => undefined)
         items.push({
-          id: group.id,
-          name: group.name ?? basename(file, '.json'),
-          nameEn: group.nameEn,
+          id: nativeDefinition.definitionId ?? nativeDefinition.functionName,
+          name: nativeDefinition.functionName,
+          nameEn: nativeDefinition.functionName,
           category,
           displayGroup: `${kind}/${category}`,
-          description: kind === 'templates'
-            ? `Group template: ${group.name ?? group.id}`
-            : `Group battery: ${group.name ?? group.id}`,
-          version: typeof meta.version === 'string' && meta.version.trim() ? meta.version : '1.0.0',
-          ...(typeof meta.author === 'string' && meta.author.trim() ? { author: meta.author } : {}),
+          description: nativeDefinition.description,
+          version: nativeDefinition.definitionVersion ?? nativeDefinition.contractVersion,
           ...(createdAt !== undefined ? { createdAt } : {}),
           sourcePath,
           // 用户内容（userTemplateRoot 下）= builtin:false（可右击删除）；
           // 其余 groups/ 与内置 templates/ = builtin:true（只读，不可删除）。
           builtin: root !== userRoot,
+          nativeDefinition,
           ...(iconSvg !== undefined ? { iconSvg } : {}),
           ...(iconPng !== undefined ? { iconPng } : {}),
         })
@@ -316,54 +366,20 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
 
   app.get<{ Params: { id: string }; Querystring: { scope?: string } }>(
     '/api/v1/group-templates/:id',
-    async (req, reply) => {
-      const id = req.params.id
-      const scopeRaw = req.query.scope
-      const scope: 'groups' | 'templates' =
-        scopeRaw === 'groups' || scopeRaw === 'templates' ? scopeRaw : 'templates'
-      const file = await findGroupFile(id, scope)
-      if (!file) return reply.code(404).send(null)
-      return readGroup(file)
-    },
+    async (_req, reply) => reply.code(410).send({
+      status: 'rejected',
+      code: 'legacy-template-body-removed',
+      reason: 'Raw JSON template bodies are not a production catalog API. Use the native Definition contract.',
+    }),
   )
 
-  app.post<{
-    Body: { group: NodeGroup; categoryName: string; batteryName: string }
-  }>('/api/v1/group-templates/save', async (req, reply) => {
-    // Validate up front: a missing `group`, `categoryName`, or `batteryName`
-    // previously threw a raw TypeError (e.g. `.trim` of undefined, `.nameEn` of
-    // undefined) which Fastify surfaced as an opaque 500. Return a clear 400
-    // instead so the client/user sees what is wrong.
-    const body = req.body as Partial<{ group: NodeGroup; categoryName: unknown; batteryName: unknown }> | undefined
-    if (!body || typeof body.group !== 'object' || body.group === null) {
-      return reply.code(400).send({ error: 'Missing or invalid "group" in request body' })
-    }
-    if (typeof body.categoryName !== 'string' || body.categoryName.trim() === '') {
-      return reply.code(400).send({ error: 'Missing or empty "categoryName" in request body' })
-    }
-    if (typeof body.batteryName !== 'string' || body.batteryName.trim() === '') {
-      return reply.code(400).send({ error: 'Missing or empty "batteryName" in request body' })
-    }
-
-    const categoryName = safeName(body.categoryName)
-    const batteryName = safeName(body.batteryName)
-    // 保存按钮产出普通成组电池 → batteries/groups/<cat>/<name>/<name>.json
-    const dir = resolve(appGroupRoot, categoryName, batteryName)
-    const filePath = resolve(dir, `${batteryName}.json`)
-    const group = stampTemplateMeta({ ...body.group, name: batteryName, nameEn: body.group.nameEn ?? batteryName })
-    try {
-      await mkdir(dir, { recursive: true })
-      await writeFile(filePath, `${JSON.stringify(group, null, 2)}\n`, 'utf8')
-    } catch (err) {
-      // Log the real failure (the app runs with logger:false, so without this
-      // the cause of a write/serialize failure would be invisible) and return a
-      // structured 500 carrying the message instead of a bare Internal Error.
-      app.log.error({ err, dir, filePath }, 'failed to save group template')
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.code(500).send({ error: `Failed to save group template: ${message}` })
-    }
-    return { filePath, groupId: group.id, categoryName, batteryName }
-  })
+  app.post('/api/v1/group-templates/save', async (_req, reply) =>
+    reply.code(410).send({
+      status: 'rejected',
+      code: 'json-template-authoring-removed',
+      reason: 'JSON Group authoring has been removed. Extract or edit a native .scene.ts Definition.',
+    }),
+  )
 
   // 删除 GROUPS 标签下的成组电池：从本地电池目录（groups/<cat>/<name>/）物理删除。
   // 只允许删 groupRoots 范围内的文件（templates/ 与项目外路径一律拒绝），删掉 json
@@ -405,35 +421,13 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
   // 同构——前端 getTemplateSmallLabel 据此把 <smallTag> 识别为小标签；若把 json 直接放在
   // <smallTag>/ 下，小标签会被误判为模板文件夹而丢失（小标签失效）。
   // 列表接口 /api/v1/group-templates 会一并扫描该根，内置+用户模板统一显示。
-  app.post<{
-    Body: { group: NodeGroup; smallTag: string; templateName: string }
-  }>('/api/v1/group-templates/save-user', async (req, reply) => {
-    const body = req.body as Partial<{ group: NodeGroup; smallTag: unknown; templateName: unknown }> | undefined
-    if (!body || typeof body.group !== 'object' || body.group === null) {
-      return reply.code(400).send({ error: 'Missing or invalid "group" in request body' })
-    }
-    if (typeof body.smallTag !== 'string' || body.smallTag.trim() === '') {
-      return reply.code(400).send({ error: 'Missing or empty "smallTag" in request body' })
-    }
-    if (typeof body.templateName !== 'string' || body.templateName.trim() === '') {
-      return reply.code(400).send({ error: 'Missing or empty "templateName" in request body' })
-    }
-
-    const smallTag = safeName(body.smallTag)
-    const templateName = safeName(body.templateName)
-    const dir = resolve(userTemplateRoot(), USER_TEMPLATE_BIG_LABEL, smallTag, templateName)
-    const filePath = resolve(dir, `${templateName}.json`)
-    const group = stampTemplateMeta({ ...body.group, name: templateName, nameEn: body.group.nameEn ?? templateName })
-    try {
-      await mkdir(dir, { recursive: true })
-      await writeFile(filePath, `${JSON.stringify(group, null, 2)}\n`, 'utf8')
-    } catch (err) {
-      app.log.error({ err, dir, filePath }, 'failed to save user template')
-      const message = err instanceof Error ? err.message : String(err)
-      return reply.code(500).send({ error: `Failed to save user template: ${message}` })
-    }
-    return { filePath, groupId: group.id, smallTag, templateName }
-  })
+  app.post('/api/v1/group-templates/save-user', async (_req, reply) =>
+    reply.code(410).send({
+      status: 'rejected',
+      code: 'json-template-authoring-removed',
+      reason: 'User JSON templates have been removed. Publish a versioned .scene.ts Definition.',
+    }),
+  )
 
   // 删除用户模板：仅限 userTemplateRoot 下的内容（预设模板只读，不在此可达）。
   // 删除 json 后顺手清理变空的小标签目录（保持「My templates」整洁，不留空分组）。
@@ -463,115 +457,19 @@ export async function registerGroupTemplateRoutes(app: FastifyInstance): Promise
   })
 
   // Instantiate a saved group template INTO the active project's graph as one
-  // first-class `__group__` shadow node (the AI/headless twin of "drag a saved
-  // group from the library onto the canvas"). Resolves the template by id /
+  // first-class `__group__` shadow node (the HTTP twin of dragging a saved group
+  // from the library onto the canvas). Resolves the template by id /
   // file-basename, remaps every inner node/edge/group id to fresh ones (so the
   // same template can be dropped many times without collision) while keeping the
   // exposed `portName`s stable (in_N/out_N), then applies a single ordered batch
   // of createNode + connect + createGroup against the active runtime.
-  //
-  // Sino-gate relationship: this route does NOT route through POST /api/v1/batch,
-  // so it never hits the sino op-allowlist hard gate (sinoOpGate). That is
-  // correct by design — instantiating one of the 6 scene template groups is the
-  // canonical *allowed* action, and the gate's only purpose is to block top-level
-  // `createNode`s of non-whitelisted (e.g. alg_*) opIds, which here are always
-  // adopted as group-private members anyway. The per-agent project lock IS still
-  // enforced via ensureMutationAccess (same as /api/v1/batch).
-  app.post<{
-    Params: { id: string }
-    Body: {
-      templateId?: string
-      position?: { x?: number; y?: number }
-      groupId?: string
-      opts?: { actor?: string; label?: string }
-    }
-  }>('/api/v1/group-templates/:id/instantiate', async (req, reply) => {
-    const body = (req.body ?? {}) as {
-      templateId?: string
-      projectId?: string
-      position?: { x?: number; y?: number }
-      groupId?: string
-      opts?: { actor?: string; label?: string }
-    }
-    const reg = await getProjectRegistry()
-    const projectId = body.projectId ?? reg.getViewingProjectId()
-    if (!projectId) return reply.code(400).send({ error: 'missing projectId' })
-    const access = await ensureMutationAccess(req, projectId)
-    if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-
-    const templateId = body.templateId ?? req.params.id
-    if (typeof templateId !== 'string' || !templateId.trim()) {
-      return reply.code(400).send({ error: 'missing templateId' })
-    }
-
-    const file = await findGroupFile(templateId, 'templates')
-    if (!file) return reply.code(404).send({ error: `template not found: ${templateId}` })
-    const parsed = await readGroup(file)
-    const split = splitTemplate(parsed)
-    if (!split) {
-      return reply.code(422).send({ error: `template '${templateId}' is not a valid NodeGroup` })
-    }
-
-    const rootPosition =
-      body.position === undefined
-        ? undefined
-        : {
-            x: typeof body.position.x === 'number' ? body.position.x : 0,
-            y: typeof body.position.y === 'number' ? body.position.y : 0,
-          }
-    const explicitGroupId =
-      typeof body.groupId === 'string' && body.groupId.trim() ? body.groupId : undefined
-
-    const { ops, rootGroupId, exposedInputs, exposedOutputs } = buildTemplateOps(
-      split.root,
-      split.deps,
-      rootPosition,
-      explicitGroupId,
-    )
-
-    // Stamp template provenance on the shadow node so the editor renders the
-    // locked purple template UI (same fields as drag-out from the Templates
-    // palette). buildTemplateOps/createGroup only sets `{ groupId }`; without
-    // this pass AI-instantiated templates look like ordinary group batteries.
-    const batchOps = [...ops] as Op[]
-    const templateRoot = templateRoots().find((root) => file.startsWith(resolve(root)))
-    if (templateRoot) {
-      const category = categoryFor(templateRoot, file)
-      const batteryName = split.root.name ?? basename(file, '.json')
-      batchOps.push({
-        type: 'updateNode',
-        nodeId: rootGroupId,
-        params: {
-          groupId: rootGroupId,
-          __groupIsTemplate: true,
-          __groupSourceGroupId: split.root.id,
-          __groupSourceCategory: category,
-          __groupSourceBatteryName: batteryName,
-        },
-      })
-    }
-
-    const rt = await getRuntimeForProject(projectId)
-    const result = await applyBatch(rt, batchOps as never, {
-      actor: typeof body.opts?.actor === 'string' ? body.opts.actor : 'instantiate-template',
-      label:
-        typeof body.opts?.label === 'string'
-          ? body.opts.label
-          : `instantiate template ${split.root.name ?? templateId}`,
-    })
-
-    if (result.status !== 'ok') {
-      const detail = result.diagnostics?.[0]?.message ?? result.reason ?? 'unknown'
-      return reply.code(422).send({ error: `instantiate rejected: ${detail}`, result })
-    }
-
-    return {
-      ...result,
-      groupId: rootGroupId,
-      name: split.root.name ?? templateId,
-      exposedInputs,
-      exposedOutputs,
-      opCount: ops.length,
-    }
-  })
+  // This human/workbench HTTP route remains separate from POST /api/v1/batch.
+  // The per-agent project lock is still enforced via ensureMutationAccess.
+  app.post('/api/v1/group-templates/:id/instantiate', async (_req, reply) =>
+    reply.code(410).send({
+      status: 'rejected',
+      code: 'legacy-template-instantiate-removed',
+      reason: 'Legacy Runtime Graph instantiation has been removed. Instantiate the native Definition through Scene Script.',
+    }),
+  )
 }

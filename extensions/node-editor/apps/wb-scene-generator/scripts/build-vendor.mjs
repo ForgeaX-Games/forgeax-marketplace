@@ -4,14 +4,12 @@
 // type-stripping does not map .js specifiers to .ts, so this lib must be
 // emitted as real .js. Output lives under vendor/dist (gitignored).
 import { execSync } from 'node:child_process'
-import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 // app root = this script's dir (scripts/) up one level — cwd-independent so this
 // works whether invoked from the app root or as the backend's prebuild step.
 const appRoot = resolve(import.meta.dirname, '..')
-
-rmSync(resolve(appRoot, 'vendor/dist/shared/types'), { recursive: true, force: true })
 
 const tsc = 'pnpm exec tsc'
 const cmd = [
@@ -45,7 +43,6 @@ console.log('[build-vendor] OK — vendor/dist/shared/types compiled')
 // (the backend / tsx) can import the output. Type-only imports (ruleCache/types)
 // are erased, so the emitted .js pulls in no browser/DOM code.
 const resolverOut = resolve(appRoot, 'vendor/dist/renderer-resolve')
-rmSync(resolverOut, { recursive: true, force: true })
 const resolverCmd = [
   tsc,
   '--module esnext --moduleResolution bundler --target es2022',

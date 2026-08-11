@@ -13,15 +13,17 @@ const PROJECTS = [{ id: 'p1', name: 'My Scene', type: 'scene' }]
 vi.mock('@forgeax/node-runtime-react/editor', () => ({
   ProjectPanel: ({
     headerActions,
-    renderProjectActions,
+    onSaveProject,
   }: {
     headerActions?: React.ReactNode
-    renderProjectActions?: (p: { id: string; name: string; type: string }) => React.ReactNode
+    onSaveProject?: (p: { id: string; name: string; type: string }) => void
   }) => (
     <div data-testid="project-panel">
       {headerActions}
       {PROJECTS.map((p) => (
-        <div key={p.id}>{renderProjectActions?.(p)}</div>
+        <div key={p.id}>
+          <button type="button" onClick={() => onSaveProject?.(p)}>Save</button>
+        </div>
       ))}
     </div>
   ),
@@ -35,11 +37,16 @@ vi.mock('@forgeax/node-runtime-react/editor', () => ({
       viewingProjectId: 'p1',
       createProject,
       switchProject,
+      setActiveGameSlug: vi.fn(),
+      setProjectSwitchRole: vi.fn(),
     }),
   },
 }))
-// The lower-half controls panel is unrelated to Open/Save — stub it out.
-vi.mock('../SceneGeneratorControlsPanel', () => ({ SceneGeneratorControlsPanel: () => null }))
+// The lower-half dashboard is unrelated to Open/Save — stub it out.
+vi.mock('../SceneGeneratorControlsPanel', () => ({
+  SceneGeneratorControlsPanel: () => null,
+  NodeInfoDashboard: () => null,
+}))
 
 import { WorkbenchLeftPane } from '../WorkbenchLeftPane'
 import type { HttpApiClient } from '../../api/HttpApiClient'

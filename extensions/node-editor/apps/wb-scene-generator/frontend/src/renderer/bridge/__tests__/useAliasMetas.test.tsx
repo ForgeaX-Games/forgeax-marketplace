@@ -62,7 +62,7 @@ describe('useAliasMetas', () => {
   it('fetches once on mount', async () => {
     renderHook(() => useAliasMetas(client))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/library/aliases-meta')
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/library/aliases-meta', undefined)
     expect(imageCache.clearAllImgCache).toHaveBeenCalledTimes(1)
   })
 

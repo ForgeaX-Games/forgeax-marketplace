@@ -226,6 +226,7 @@ describe('importPipelineGraph — groups', () => {
     ])
     await applyBatch(rt, [
       { type: 'createGroup', groupId: 'g1', name: 'Packed', memberNodeIds: ['a', 'b'], position: { x: 25, y: 0 } },
+      { type: 'updateNode', nodeId: 'g1', params: { __sceneScriptFunctionName: 'packedDefinition' } },
     ])
     const before = getPipeline(rt)!
     const beforeGroup = getGroup(rt, 'g1')!
@@ -244,8 +245,76 @@ describe('importPipelineGraph — groups', () => {
     const afterGroup = getGroup(rt, 'g1')!
     expect(afterGroup.nodes.map((n) => n.id).sort()).toEqual(['a', 'b'])
     expect(afterGroup.edges.map((e) => e.id)).toEqual(['e_ab'])
+    expect(after.nodes.g1?.params).toMatchObject({
+      groupId: 'g1',
+      __sceneScriptFunctionName: 'packedDefinition',
+    })
     // Boundary edge b→c rewritten to reference the group again.
     expect(after.edges.e_bc!.source.nodeId).toBe('g1')
+  })
+
+  it('materializes nested groups and rewrites their boundary edges before replay', async () => {
+    const rt = fresh()
+    const nested = {
+      id: 'inner',
+      name: 'Inner',
+      nodes: [{ id: 'inner_node', opId: 'demo.a', position: { x: 0, y: 0 }, params: {} }],
+      edges: [],
+      position: { x: 20, y: 20 },
+      exposedInputs: [
+        { portName: 'in_0', portType: 'any', sourceNodeId: 'inner_node', sourcePortName: 'in' },
+      ],
+      exposedOutputs: [
+        { portName: 'out_0', portType: 'any', sourceNodeId: 'inner_node', sourcePortName: 'out' },
+      ],
+    }
+    const outer = {
+      id: 'outer',
+      name: 'Outer',
+      nodes: [
+        { id: 'inner', opId: '__group__', position: { x: 20, y: 20 }, params: { groupId: 'inner' } },
+        { id: 'outer_node', opId: 'demo.b', position: { x: 80, y: 20 }, params: {} },
+      ],
+      edges: [
+        {
+          id: 'e_nested',
+          source: { nodeId: 'inner', port: 'out_0' },
+          target: { nodeId: 'outer_node', port: 'in' },
+        },
+      ],
+      position: { x: 50, y: 50 },
+      exposedInputs: [
+        { portName: 'in_0', portType: 'any', sourceNodeId: 'inner', sourcePortName: 'in_0' },
+      ],
+      exposedOutputs: [
+        { portName: 'out_0', portType: 'any', sourceNodeId: 'outer_node', sourcePortName: 'out' },
+      ],
+      _nestedGroups: [nested],
+    }
+
+    const res = await importPipelineGraph(rt, {
+      format: 'kernel-graph-v1',
+      graph: {
+        nodes: [
+          { id: 'source', opId: 'demo.a', position: { x: 0, y: 0 }, params: {} },
+          { id: 'outer', opId: '__group__', position: { x: 50, y: 50 }, params: { groupId: 'outer' } },
+          { id: 'sink', opId: 'demo.b', position: { x: 150, y: 0 }, params: {} },
+        ],
+        edges: [
+          { id: 'e_in', source: { nodeId: 'source', port: 'out' }, target: { nodeId: 'outer', port: 'in_0' } },
+          { id: 'e_out', source: { nodeId: 'outer', port: 'out_0' }, target: { nodeId: 'sink', port: 'in' } },
+        ],
+        groups: [outer],
+      },
+    })
+
+    expect(res.status).toBe('ok')
+    expect(getGroup(rt, 'inner')?.nodes.map((node) => node.id)).toEqual(['inner_node'])
+    expect(getGroup(rt, 'outer')?.nodes.map((node) => node.id).sort()).toEqual(['inner', 'outer_node'])
+    expect(getGroup(rt, 'outer')?.edges.map((edge) => edge.id)).toContain('e_nested')
+    const after = getPipeline(rt)!
+    expect(after.edges.e_in?.target).toEqual({ nodeId: 'outer', port: 'in_0' })
+    expect(after.edges.e_out?.source).toEqual({ nodeId: 'outer', port: 'out_0' })
   })
 
   it('drops an orphan __group__ shadow (no NodeGroup definition) + its dangling edges, keeps the rest', async () => {

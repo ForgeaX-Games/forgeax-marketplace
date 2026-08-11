@@ -1,6 +1,6 @@
 # BuildingStructures（建筑结构）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781831816652_3k380`，也可用 basename `BuildingStructures`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1781831816652_3k380`，也可用 basename `BuildingStructures`。
 
 在已有**建筑区域**上生成墙体/房间结构（含 `outer_door` 门子节点，供道路 POI 聚焦）。
 
@@ -18,7 +18,7 @@
 | OUT | `out_0` | Scene 含结构的建筑场景（主产物） |
 | OUT | `out_1` / `out_2` | Rooms / RoomsPath |
 
-完整端口以 `scene:templates.get` 为准。
+完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。
 
 > **实测端口（验证链 `p_mr4b9s3j_dycp8k/step-m3-buildingstructures.json`）**：本模板真正必接只有 `in_0`（Scene 建筑区域）与 `in_1`（Seed），其余 `in_23`/`in_24` 等 hidden 参数用默认即可，无需额外接线。
 
@@ -31,10 +31,10 @@
 ### 前置：造一栋独立 Demo 建筑（AddBaseGrid → PickOneBuilding）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AddBaseGrid", "groupId":"demo_abg", "position":{"x":-800,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid（独立 demo scene）"} } }
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"PickOneBuilding", "groupId":"demo_pk", "position":{"x":-400,"y":600},
            "opts":{"actor":"ai:sino","label":"实例化 PickOneBuilding"} } }
 ```
@@ -81,7 +81,7 @@
 ### applyBatch 片段（可直接照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"BuildingStructures", "groupId":"demo_bs", "position":{"x":-400,"y":900},
            "opts":{"actor":"ai:sino","label":"实例化 BuildingStructures"} } }
 ```

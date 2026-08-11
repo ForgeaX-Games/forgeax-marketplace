@@ -18,10 +18,12 @@ export interface VoxelLayer {
 export interface NameListEntry { id: number; name: string; type?: string }
 
 // A dense 2D preview layer projected from any node's `grid` output port (legacy
-// "preview" channel). `data` is indexed [row][col]; a value
-// of 0 means an empty cell. Unlike voxel layers (only from the scene_output
-// sink), every executed node with a grid output contributes one of these, so the
-// preview updates live as a graph is wired up — even without a scene_output.
+// "preview" channel). `data` is indexed [row][col]. Legacy 2D cell previews
+// treat 0 as empty; numeric-field consumers such as 3DMesh preserve every
+// finite value, including 0 (the XY plane) and negatives. Unlike voxel layers
+// (only from the scene_output sink), every executed node with a grid output
+// contributes one of these, so the preview updates live as a graph is wired up
+// — even without a scene_output.
 export interface GridLayer {
   key: string // `${nodeId}:${portName}`
   nodeId: string

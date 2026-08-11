@@ -23,7 +23,7 @@ import {
 } from '../transport/index.js'
 import { usePipelineStore } from '../stores/pipelineStore.js'
 import { useHistoryStore } from '../stores/historyStore.js'
-import { restoreSnapshot } from '../components/canvas/useCanvasUndoRedo.js'
+import { performUndoRedo, restoreSnapshot } from '../components/canvas/useCanvasUndoRedo.js'
 
 function spec(id: string, name: string): OpSpec {
   return { id, name, inputs: [], outputs: [], params: [], execute: () => null }
@@ -68,6 +68,53 @@ describe('undo/redo restore contract', () => {
   afterEach(() => {
     transport.dispose()
     configureEditorTransport(null)
+  })
+
+  it('prefers optional canonical undo/redo without moving snapshot history', async () => {
+    const canonicalUndo = vi.fn(async () => ({
+      status: 'ok' as const,
+      direction: 'undo' as const,
+      projectRevision: 'project-rev-1',
+      history: { cursor: 0, length: 1, canUndo: false, canRedo: true },
+    }))
+    client.getSceneAuthoringProjectInfo = vi.fn(async () => ({
+      canonical: true,
+      canonicalModule: 'main.scene.ts',
+      projectRevision: 'project-rev-2',
+      moduleRevisions: {},
+    }))
+    client.undoSceneAuthoring = canonicalUndo
+    client.redoSceneAuthoring = vi.fn(async () => ({
+      status: 'ok' as const,
+      direction: 'redo' as const,
+      projectRevision: 'project-rev-2',
+      history: { cursor: 1, length: 1, canUndo: true, canRedo: false },
+    }))
+    useHistoryStore.setState({
+      entries: [{
+        id: 'local-entry',
+        type: 'add_node',
+        timestamp: Date.now(),
+        snapshot: {
+          id: 'test',
+          name: 'test',
+          description: '',
+          nodes: [],
+          edges: [],
+          viewport: { x: 0, y: 0, zoom: 1 },
+          status: 'idle',
+          createdAt: '',
+          updatedAt: '',
+        },
+      }],
+      cursor: 1,
+      _redoTip: null,
+    })
+
+    await performUndoRedo('undo')
+
+    expect(canonicalUndo).toHaveBeenCalledWith({ expectedProjectRevision: 'project-rev-2' })
+    expect(useHistoryStore.getState().cursor).toBe(1)
   })
 
   it('local op: record → undo → redo targets the right snapshot and restores via the kernel apply path', async () => {

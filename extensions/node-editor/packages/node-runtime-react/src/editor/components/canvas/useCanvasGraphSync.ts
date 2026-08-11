@@ -73,6 +73,7 @@ export function buildCanvasNodes(groupCallbacks?: GroupNodeCallbacks): Node[] {
           groupCallbacks.onUngroup,
           groupCallbacks.onEnterGroup,
           readGroupProvenance(n.params).isTemplate === true,
+          n.params,
         ),
         selected: false,
       })

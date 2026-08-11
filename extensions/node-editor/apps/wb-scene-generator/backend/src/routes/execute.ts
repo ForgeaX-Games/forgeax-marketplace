@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { executeNode, getGroup, getPipeline, type ExecuteNodeRequest } from '@forgeax/node-runtime'
-import { getRuntimeForProject } from '../runtime.js'
+import { getProjectDir, getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
 import { summarizeExecutionResult } from '../execution-summary.js'
 import { syncTrace } from '../debug/syncTrace.js'
 import type { TopologyGraphEdge, TopologyGraphNode } from '../lib/topologyGate.js'
+import { buildExecutionLineage } from '../scene-script/lineage.js'
+import { readAuthoringState, writeResultLineage } from '../scene-script/store.js'
 
 /** Adapt `getPipeline`'s PipelineSnapshot (nodes may be an array or a map) into the edges+nodeById shape `summarizeExecutionResult`'s topology check expects. */
 function currentGraphForTopologyCheck(
@@ -58,7 +60,8 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
     const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
     const __t0 = Date.now()
-    const handle = await executeNode(await getRuntimeForProject(projectId), body)
+    const runtime = await getRuntimeForProject(projectId)
+    const handle = await executeNode(runtime, body)
     const result = await handle.done
     syncTrace('backend:execute-done', {
       projectId,
@@ -81,7 +84,24 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
         `runtimeDurationMs=${result.durationMs} routeTotalMs=${Date.now() - __t0} ` +
         `rss=${(mem.rss / 1024 / 1024).toFixed(1)}MB heapUsed=${(mem.heapUsed / 1024 / 1024).toFixed(1)}MB`,
     )
-    return result
+    const projectDir = await getProjectDir(projectId)
+    const authoring = projectDir ? await readAuthoringState(projectDir) : null
+    if (!authoring) return result
+    const lineage = buildExecutionLineage(
+      result,
+      authoring.sourceMap,
+      (nodeId, port) => runtime.outputs.read(nodeId, port)?.data,
+    )
+    await writeResultLineage(projectDir!, lineage)
+    const byPort = new Map(lineage.map((entry) => [`${entry.runtime.nodeId}\0${entry.runtime.port}`, entry]))
+    const resultMetadata = Object.fromEntries(Object.entries(result.resultMetadata ?? {}).map(([nodeId, ports]) => [
+      nodeId,
+      Object.fromEntries(Object.entries(ports).map(([port, metadata]) => {
+        const entry = byPort.get(`${nodeId}\0${port}`)
+        return [port, entry ? { ...metadata, authoring: entry.authoring, lineageRef: entry.lineageId } : metadata]
+      })),
+    ]))
+    return { ...result, resultMetadata, lineage }
   })
 
   app.post<{ Params: ProjectParams }>(`${prefix}/execute/summary`, async (req, reply) => {

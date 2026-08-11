@@ -1,4 +1,10 @@
-import { hydrateBlobRefs, type ActivateProjectResult, type ApiClient, type CreateProjectRequest } from '@forgeax/node-runtime-react'
+import {
+  hydrateBlobRefs,
+  type ActivateProjectResult,
+  type ApiClient,
+  type CreateProjectRequest,
+  type GroupTemplateBattery,
+} from '@forgeax/node-runtime-react'
 import type {
   ApplyBatchOptions,
   ApplyBatchResult,
@@ -28,23 +34,235 @@ import { pluginBasePath } from './pluginHttp'
 
 type Listener = (e: RuntimeEvent) => void
 
-interface GroupTemplateBattery {
-  id: string
-  name: string
-  nameEn?: string
-  category: string
-  description?: string
-  version?: string
-  iconSvg?: string
-  displayGroup?: string
-  sourcePath?: string
-}
-
 export interface HttpApiClientOptions {
   baseUrl?: string
   pipelineId: string
   /** Pin an embedded surface to one project without mutating workspace.viewingProjectId. */
   projectId?: string
+}
+
+export interface SceneScriptSourceRange {
+  file: string
+  start: number
+  end: number
+  line: number
+  column: number
+  endLine?: number
+  endColumn?: number
+  statementId?: string
+}
+
+export interface SceneScriptDiagnosticFix {
+  fixId: string
+  title: string
+  edits: Array<
+    | {
+        type: 'ReplaceReference'
+        statementId: string
+        argument: string
+        sourceStatementId: string
+        sourceOutput?: string
+      }
+    | {
+        type: 'ReplaceSource'
+        file: string
+        start: number
+        end: number
+        text: string
+      }
+  >
+}
+
+export interface SceneScriptTransaction {
+  applied: boolean
+  rolledBack: boolean
+  undoToken?: string
+}
+
+export interface SceneScriptDiagnostic {
+  code: string
+  phase: 'parse' | 'type' | 'resolve' | 'compile' | 'execute' | 'verify' | 'platform' | 'capability'
+  severity: 'error' | 'warning' | 'info'
+  title?: string
+  message: string
+  source?: SceneScriptSourceRange
+  graph?: {
+    authoringNodeId?: string
+    runtimeNodeIds?: string[]
+    runtimeEdgeIds?: string[]
+    sceneNodeIds?: string[]
+  }
+  expected?: unknown
+  actual?: unknown
+  fixes?: SceneScriptDiagnosticFix[]
+  transaction?: SceneScriptTransaction
+  retryable?: boolean
+  escalation?: 'none' | 'compiler' | 'battery' | 'platform'
+  debugAttachment?: string
+  statementId?: string
+}
+
+export function limitSceneScriptDiagnostics(
+  diagnostics: readonly SceneScriptDiagnostic[] | undefined,
+): SceneScriptDiagnostic[] {
+  if (!diagnostics?.length) return []
+  const primary = diagnostics.findIndex((item) => item.severity === 'error')
+  const ordered = primary > 0
+    ? [diagnostics[primary], ...diagnostics.slice(0, primary), ...diagnostics.slice(primary + 1)]
+    : [...diagnostics]
+  return ordered.slice(0, 3).map((item) => ({
+    ...item,
+    ...(item.fixes ? { fixes: item.fixes.slice(0, 3) } : {}),
+  }))
+}
+
+export interface SceneScriptSourceMapEntry {
+  moduleId?: string
+  file?: string
+  statementId: string
+  source: SceneScriptSourceRange
+  entityId: string
+  runtimeNodeIds: string[]
+  runtimeEdgeIds?: string[]
+  runtimeOrigins?: Record<string, string>
+  definitionId?: string
+  definitionVersion?: string
+  instancePath?: string
+}
+
+export interface SceneResultLineage {
+  lineageId: string
+  runtime: { nodeId: string; port: string; edgeIds?: string[] }
+  authoring: {
+    moduleId: string
+    file: string
+    statementId: string
+    entityId: string
+    source: SceneScriptSourceRange
+    definitionId?: string
+    definitionVersion?: string
+    instancePath?: string
+    runtimeOrigin?: string
+  }
+  sceneNodes: Array<{ id: string; path: string; graphIndex?: number }>
+  bakedLayers: Array<{
+    id: string
+    path: string
+    sourceSceneNodeId?: string
+    sourceScenePath?: string
+    cellSource?: { kind: 'scene-node-content'; ref: string }
+  }>
+  summary: { sceneNodeCount: number; bakedLayerCount: number; payload: 'reference-only' }
+}
+
+export interface SceneLineageResponse {
+  revision: string
+  count: number
+  lineage: SceneResultLineage[]
+  summary: { sceneNodeCount: number; bakedLayerCount: number; payload: 'reference-only' }
+}
+
+export interface SceneScriptModule {
+  file: string
+  source: string
+  revision: string
+  state: {
+    schemaVersion: 1 | 2
+    sourceRevision: string
+    compiledGraphHash?: string
+    updatedAt: string
+    modules: string[]
+    sourceMap: SceneScriptSourceMapEntry[]
+    resultLineage?: SceneResultLineage[]
+  } | null
+}
+
+export interface SceneScriptValidation {
+  valid: boolean
+  diagnostics: SceneScriptDiagnostic[]
+  canonicalSource: string
+  sourceMap?: SceneScriptSourceMapEntry[]
+  entityCount?: number
+  operationCount?: number
+  transaction?: SceneScriptTransaction
+}
+
+export interface SceneScriptSaveResult {
+  status: 'ok'
+  revision: string
+  graphHash: string
+  diagnostics: SceneScriptDiagnostic[]
+  sourceMap: SceneScriptSourceMapEntry[]
+  canonicalSource: string
+  entityCount: number
+  operationCount: number
+  transaction?: SceneScriptTransaction
+}
+
+export interface SceneScriptCommandResult {
+  status: 'ok'
+  revision: string
+  graphHash: string
+  canonicalSource: string
+  sourceMap: SceneScriptSourceMapEntry[]
+  diagnostics: SceneScriptDiagnostic[]
+  applied: number
+  transaction?: SceneScriptTransaction
+}
+
+export interface SceneGraphSample {
+  pipeline: PipelineSnapshot | null
+  groups: readonly NodeGroup[]
+}
+
+export interface SceneAgentWorkGraph {
+  version: number
+  projectId: string
+  activeTransactionId?: string
+  payload: 'bounded-work-overlay'
+  nodes: Array<{
+    id: string
+    kind: 'target-resolver' | 'edit-lens' | 'module-editor-agent' | 'incremental-compile' | 'verifier' | 'critic' | 'human-gate' | 'platform-recovery' | 'checkpoint'
+    status: 'planned' | 'running' | 'blocked' | 'failed' | 'preview' | 'verified' | 'accepted' | 'reverted'
+    targetIds: string[]
+    scope: string[]
+    artifacts: Record<'workOrder' | 'result' | 'astPatch' | 'semanticDiff' | 'verification' | 'progress' | 'checkpoint', string>
+    diagnostics: SceneScriptDiagnostic[]
+    checkpoint?: { id: string; projectRevision: string; createdAt: string }
+    humanGate?: { required: boolean; reasons: string[]; approvedAt?: string }
+    budget: { retries: number; maxRetries: number; stopped: boolean; circuitOpen: boolean }
+    updatedAt: string
+  }>
+}
+
+export class SceneScriptRequestError extends Error {
+  readonly status: number
+  readonly code?: string
+  readonly diagnostics: SceneScriptDiagnostic[]
+  readonly expectedRevision?: string
+  readonly actualRevision?: string
+  readonly transaction?: SceneScriptTransaction
+
+  constructor(
+    status: number,
+    payload: {
+      reason?: string
+      code?: string
+      diagnostics?: SceneScriptDiagnostic[]
+      expectedRevision?: string
+      actualRevision?: string
+      transaction?: SceneScriptTransaction
+    } | null,
+  ) {
+    super(payload?.reason ?? `Scene Script request failed (HTTP ${status})`)
+    this.name = 'SceneScriptRequestError'
+    this.status = status
+    this.code = payload?.code
+    this.diagnostics = limitSceneScriptDiagnostics(payload?.diagnostics)
+    this.expectedRevision = payload?.expectedRevision
+    this.actualRevision = payload?.actualRevision
+    this.transaction = payload?.transaction
+  }
 }
 
 /**
@@ -178,6 +396,145 @@ export class HttpApiClient implements ApiClient {
 
   getPipelineHash(): Promise<{ hash: string | null }> {
     return this.get<{ hash: string | null }>(`${this.projectPrefix()}/pipeline/hash`)
+  }
+
+  async getSceneGraphSample(projectId?: string | null): Promise<SceneGraphSample> {
+    const id = projectId ?? this.effectiveProjectId()
+    if (!id) throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    const prefix = `/api/v1/projects/${encodeURIComponent(id)}`
+    const [pipeline, groups] = await Promise.all([
+      this.get<PipelineSnapshot | null>(`${prefix}/pipeline`),
+      this.get<readonly NodeGroup[]>(`${prefix}/groups`),
+    ])
+    return { pipeline, groups }
+  }
+
+  getSceneScriptProjectInfo(projectId?: string | null): Promise<{
+    projectId: string
+    canonicalModule: string
+    revision: string
+    moduleCount: number
+    sourceMapEntries: number
+    updatedAt: string | null
+    files: Array<{ path: string; kind: 'module' | 'state'; bytes: number; updatedAt: string }>
+  }> {
+    const id = projectId ?? this.effectiveProjectId()
+    if (!id) throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    return this.get(`/api/v1/projects/${encodeURIComponent(id)}/scene-script/project-info`)
+  }
+
+  getSceneAgentWorkGraph(projectId?: string | null): Promise<SceneAgentWorkGraph> {
+    const id = projectId ?? this.effectiveProjectId()
+    if (!id) throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    return this.get(`/api/v1/projects/${encodeURIComponent(id)}/scene-agent/work-graph`)
+  }
+
+  getSceneScriptModule(file?: string, projectId?: string | null): Promise<SceneScriptModule> {
+    const id = projectId ?? this.effectiveProjectId()
+    if (!id) throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    const query = file ? `?file=${encodeURIComponent(file)}` : ''
+    return this.get(`/api/v1/projects/${encodeURIComponent(id)}/scene-script${query}`)
+  }
+
+  getSceneLineage(
+    query: { sceneNodeId?: string; path?: string; bakedLayerId?: string; runtimeNodeId?: string },
+    projectId?: string | null,
+  ): Promise<SceneLineageResponse> {
+    const id = projectId ?? this.effectiveProjectId()
+    if (!id) throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    const params = new URLSearchParams()
+    if (query.sceneNodeId) params.set('sceneNodeId', query.sceneNodeId)
+    if (query.path) params.set('path', query.path)
+    if (query.bakedLayerId) params.set('bakedLayerId', query.bakedLayerId)
+    if (query.runtimeNodeId) params.set('runtimeNodeId', query.runtimeNodeId)
+    return this.get(`/api/v1/projects/${encodeURIComponent(id)}/scene-script/lens?${params}`)
+  }
+
+  async validateSceneScript(
+    input: { file: string; source: string },
+    projectId?: string | null,
+  ): Promise<SceneScriptValidation> {
+    const id = projectId ?? this.effectiveProjectId()
+    if (!id) throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    const result = await this.sceneScriptRequest<SceneScriptValidation>(
+      `/api/v1/projects/${encodeURIComponent(id)}/scene-script/validate`,
+      'POST',
+      input,
+    )
+    return { ...result, diagnostics: limitSceneScriptDiagnostics(result.diagnostics) }
+  }
+
+  async saveSceneScript(
+    input: { file: string; source: string; expectedRevision: string; canonicalize?: boolean; label?: string },
+    projectId?: string | null,
+  ): Promise<SceneScriptSaveResult> {
+    const id = projectId ?? this.effectiveProjectId()
+    if (!id) throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    const result = await this.sceneScriptRequest<SceneScriptSaveResult>(
+      `/api/v1/projects/${encodeURIComponent(id)}/scene-script`,
+      'PUT',
+      input,
+    )
+    return { ...result, diagnostics: limitSceneScriptDiagnostics(result.diagnostics) }
+  }
+
+  async applySceneScriptFix(
+    input: { file: string; expectedRevision: string; fix: SceneScriptDiagnosticFix; label?: string },
+    projectId?: string | null,
+  ): Promise<SceneScriptCommandResult> {
+    const id = projectId ?? this.effectiveProjectId()
+    if (!id) throw new Error('[HttpApiClient] no viewing project — call viewProject or getWorkspace first')
+    if (!input.fix.edits.length || input.fix.edits.some((edit) => edit.type !== 'ReplaceReference')) {
+      throw new TypeError(`Scene Script fix '${input.fix.fixId}' is not safe for automatic application.`)
+    }
+    const commands = input.fix.edits.map((edit) => {
+      if (edit.type !== 'ReplaceReference') throw new TypeError('Unsupported Scene Script fix edit.')
+      return {
+        type: 'connectValue' as const,
+        statementId: edit.statementId,
+        input: edit.argument,
+        sourceStatementId: edit.sourceStatementId,
+        ...(edit.sourceOutput ? { output: edit.sourceOutput } : {}),
+      }
+    })
+    const result = await this.sceneScriptRequest<SceneScriptCommandResult>(
+      `/api/v1/projects/${encodeURIComponent(id)}/scene-script/commands`,
+      'POST',
+      {
+        file: input.file,
+        expectedRevision: input.expectedRevision,
+        commands,
+        label: input.label ?? `Apply diagnostic fix ${input.fix.fixId}`,
+      },
+    )
+    return { ...result, diagnostics: limitSceneScriptDiagnostics(result.diagnostics) }
+  }
+
+  private async sceneScriptRequest<T>(
+    path: string,
+    method: 'POST' | 'PUT',
+    body: unknown,
+  ): Promise<T> {
+    const response = await fetch(`${this.base}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const payload = (await response.json().catch(() => null)) as T | null
+    if (!response.ok) {
+      throw new SceneScriptRequestError(
+        response.status,
+        payload as {
+          reason?: string
+          code?: string
+          diagnostics?: SceneScriptDiagnostic[]
+          expectedRevision?: string
+          actualRevision?: string
+          transaction?: SceneScriptTransaction
+        } | null,
+      )
+    }
+    return payload as T
   }
 
   getNode(nodeId: string): Promise<GraphNode | null> {
@@ -345,20 +702,83 @@ export class HttpApiClient implements ApiClient {
     return this.get<NodeGroup | null>(`/api/v1/group-templates/${encodeURIComponent(groupId)}${suffix}`)
   }
 
-  saveGroupTemplate(req: {
-    group: NodeGroup
-    categoryName: string
-    batteryName: string
-  }): Promise<{ filePath: string; groupId: string; categoryName: string; batteryName: string }> {
-    return this.post('/api/v1/group-templates/save', req)
+  instantiateNativeDefinition(
+    functionName: string,
+    position: { x: number; y: number },
+  ): Promise<{ status: 'ok'; entityId: string; statementId: string; revision: string; graphHash?: string }> {
+    return this.post(
+      `${this.projectPrefix()}/scene-script/definitions/${encodeURIComponent(functionName)}/instantiate`,
+      { position },
+    )
   }
 
-  saveUserTemplate(req: {
-    group: NodeGroup
-    smallTag: string
-    templateName: string
-  }): Promise<{ filePath: string; groupId: string; smallTag: string; templateName: string }> {
-    return this.post('/api/v1/group-templates/save-user', req)
+  getSceneAuthoringProjectInfo(): Promise<{
+    canonical: boolean
+    authoringSource: 'scene-project' | 'legacy-runtime-graph'
+    runtimeGraphRole: 'cache-debug-export'
+    migrationRequired: boolean
+    canonicalModule: string
+    projectRevision: string
+    moduleRevisions: Record<string, { moduleId: string; revision: string }>
+  }> {
+    return this.get(`${this.projectPrefix()}/scene-script/project-info`)
+  }
+
+  liftLegacySceneProject(): Promise<{
+    status: 'canonical' | 'confirmation-required' | 'read-only'
+    canonical: boolean
+    readOnly: boolean
+    confidence: 'high' | 'medium' | 'low'
+    diagnostics: Array<{ entityId: string; confidence: 'high' | 'medium' | 'low'; message: string }>
+    source?: string
+  }> {
+    return this.post(`${this.projectPrefix()}/scene-script/lift`, {})
+  }
+
+  getLegacyRawGraph(): Promise<{ readOnly: true; newProjectsAllowed: false; rawGraph: unknown }> {
+    return this.get(`${this.projectPrefix()}/scene-script/raw-graph`)
+  }
+
+  generateSceneArtifact(): Promise<unknown> {
+    return this.post(`${this.projectPrefix()}/scene-script/artifact`, {})
+  }
+
+  getSceneArtifact(): Promise<unknown> {
+    return this.get(`${this.projectPrefix()}/scene-script/artifact`)
+  }
+
+  applySceneAuthoringCommands(req: {
+    expectedProjectRevision: string
+    expectedModuleRevisions?: Record<string, string>
+    commands: unknown[]
+    label?: string
+  }): Promise<{
+    status: 'ok'
+    projectRevision: string
+    graphHash?: string
+    transaction?: { applied: boolean; rolledBack: boolean; undoToken?: string }
+  }> {
+    return this.post(`${this.projectPrefix()}/scene-script/commands`, req)
+  }
+
+  undoSceneAuthoring(req: { expectedProjectRevision: string }): Promise<{
+    status: 'ok'
+    direction: 'undo'
+    projectRevision: string
+    graphHash?: string
+    history: { cursor: number; length: number; canUndo: boolean; canRedo: boolean }
+  }> {
+    return this.post(`${this.projectPrefix()}/scene-script/undo`, req)
+  }
+
+  redoSceneAuthoring(req: { expectedProjectRevision: string }): Promise<{
+    status: 'ok'
+    direction: 'redo'
+    projectRevision: string
+    graphHash?: string
+    history: { cursor: number; length: number; canUndo: boolean; canRedo: boolean }
+  }> {
+    return this.post(`${this.projectPrefix()}/scene-script/redo`, req)
   }
 
   deleteUserTemplate(groupId: string): Promise<{ ok: boolean }> {

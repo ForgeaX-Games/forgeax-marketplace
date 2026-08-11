@@ -1,6 +1,6 @@
 # DecorationBorder（规则装饰物 · 场景版）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1782200000001_dbrdr`，也可用 basename `DecorationBorder`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1782200000001_dbrdr`，也可用 basename `DecorationBorder`。
 
 把 `decoration_border` 电池封装为 scene 流水线：输入 Scene（上游空地/Rest），在其底面区域周围按规则摆放 1×1 装饰物，挂回场景树并产出标准五件套。
 

@@ -15,8 +15,8 @@ const PNG_2x1 =
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAQAAAB9D+ZGAAAADElEQVR42mNk+M9QDwAEhgGAQ0pHMQAAAABJRU5ErkJggg=='
 
 /** Patch IHDR on a minimal PNG so sniffDimensions returns the requested size. */
-function pngBase64(width: number, height: number): string {
-  const copy = Buffer.from(PNG_1x1, 'base64')
+function pngBase64(width: number, height: number, source = PNG_1x1): string {
+  const copy = Buffer.from(source, 'base64')
   copy.writeUInt32BE(width, 16)
   copy.writeUInt32BE(height, 20)
   return copy.toString('base64')
@@ -42,7 +42,7 @@ describe('texture publish bridge', () => {
       assetName: 'grassland',
       assetType: 'tile',
       autotileKind: 'common_16',
-      dataBase64: pngBase64(64, 64),
+      dataBase64: pngBase64(64, 320),
       sourceBlobId: 'blob-grass-1',
     })
     expect(res.statusCode).toBe(200)
@@ -87,10 +87,10 @@ describe('texture publish bridge', () => {
   it('is idempotent by sourceBlobId (re-publish updates in place, no duplicate)', async () => {
     const app = await buildApp()
     const first = (await publish(app, {
-      assetName: 'pond', assetType: 'tile', autotileKind: 'common_16', dataBase64: pngBase64(64, 64), sourceBlobId: 'blob-pond',
+      assetName: 'pond', assetType: 'tile', autotileKind: 'common_16', dataBase64: pngBase64(64, 320), sourceBlobId: 'blob-pond',
     })).json()
     const second = (await publish(app, {
-      assetName: 'pond', assetType: 'tile', autotileKind: 'common_16', dataBase64: pngBase64(64, 80), sourceBlobId: 'blob-pond',
+      assetName: 'pond', assetType: 'tile', autotileKind: 'common_16', dataBase64: pngBase64(64, 320, PNG_2x1), sourceBlobId: 'blob-pond',
     })).json()
     expect(second.id).toBe(first.id) // same record, updated
     expect(second.blobSha256).not.toBe(first.blobSha256) // bytes swapped
@@ -111,7 +111,7 @@ describe('texture publish bridge', () => {
       assetName: 'bad_grass', assetType: 'tile', autotileKind: 'common_16', dataBase64: PNG_1x1, sourceBlobId: 'blob-bad',
     })
     expect(badSize.statusCode).toBe(400)
-    expect(badSize.body).toContain('64×64px')
+    expect(badSize.body).toContain('64×320px')
     await app.close()
   })
 })

@@ -58,9 +58,9 @@ backend/                    # Fastify backend; registers kernel runtime + domain
 frontend/                   # Vite + React UI
   src/
     App.tsx                 # pane router (?pane= routing)
-    workbench/              # WorkbenchHost.tsx mounts kernel <Editor>; protocol.ts (7 postMessage types)
+    workbench/              # Renderer background + optional floating kernel <Editor>; protocol.ts
     renderer/               # bridge / modes (free3d, iso, top, topBillboard) / framework / host
-    surfaces/               # RendererSurface.tsx / AssetStoreSurface.tsx / library/
+    surfaces/               # RendererSurface.tsx / library data clients
     panels/                 # scenePanels.ts (custom inspector panels)
     api/                    # HttpApiClient.ts
 batteries/                  # ~276 scene domain batteries (file-based; scanned by kernel loader)
@@ -90,10 +90,11 @@ pnpm accept             # drive the forgeax CLI headlessly; assert deterministic
 
 ## Status
 
-Fully implemented: renderer 4 modes (free3d / iso / top / topBillboard), asset
-store (zone / search / paginated grid), multi-project management, per-agent
-exclusive lock, ~276 batteries, SQLite asset library, pipeline import/export,
-undo/redo, and the full LLM/CLI tool surface (18 tools).
+Fully implemented: renderer 4 modes (free3d / iso / top / topBillboard),
+multi-project management, per-agent exclusive lock, ~276 batteries, SQLite
+asset library, pipeline import/export, undo/redo, and the full LLM/CLI tool
+surface (18 tools). The asset library remains available to renderer and AI
+workflows; it is not exposed as a standalone workbench UI pane.
 
 ## Ports
 

@@ -1,6 +1,6 @@
 # LakeRegions（湖泊区域）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781238394903_rz71v`，也可用 basename `LakeRegions`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1781238394903_rz71v`，也可用 basename `LakeRegions`。
 > 内部 27 个节点、2 个嵌套子组。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明
@@ -48,7 +48,7 @@
 前置：链路里已有上游剩余场景（如 `<G_PATH>.out_2`，Rest；不是 `out_1`）。先实例化拿回 `<G_LAKE>`：
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"LakeRegions", "position":{"x":-500,"y":1400},
            "opts":{"actor":"ai:sino","label":"实例化 LakeRegions"} } }
 ```

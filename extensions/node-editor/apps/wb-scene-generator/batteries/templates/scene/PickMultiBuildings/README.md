@@ -1,6 +1,6 @@
 # PickMultiBuildings（多点建筑）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781857569273_sw86m`，也可用 basename `PickMultiBuildings`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1781857569273_sw86m`，也可用 basename `PickMultiBuildings`。
 
 一次放置**多栋**建筑（points 列表 + 各栋宽高/高度/资产）。**城镇补充散布**：读 runDir `town-building-scatter.json` 的 `supplementaryBuildings[]`，`BuildingAssets` 必须来自 catalog `itemName`，每栋 footprint ≥10×10。
 
@@ -20,4 +20,4 @@
 | OUT | `out_0` | BuildingsPaths |
 | OUT | `out_1` | Rest 剩余空地 |
 
-完整端口以 `scene:templates.get` 为准。
+完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。

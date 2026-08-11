@@ -17,6 +17,8 @@ import { registerProjectRoutes } from './routes/projects.js'
 import { registerGroupTemplateRoutes } from './routes/groupTemplates.js'
 import { registerAssetRoutes } from './routes/assets.js'
 import { registerCanvasPerfDebugRoutes } from './routes/canvasPerfDebug.js'
+import { registerSceneScriptRoutes } from './routes/sceneScript.js'
+import { registerSceneProjectAgentRoutes } from './routes/sceneProjectAgent.js'
 import { getRuntime, stopBatteryWatch } from './runtime.js'
 import { isCanvasPerfDebugEnabled, logPerfDebugStartup } from './lib/canvasPerfDebug.js'
 
@@ -45,6 +47,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerMesh3dExportRoutes(app)
   await registerProjectRoutes(app)
   await registerGroupTemplateRoutes(app)
+  await registerSceneScriptRoutes(app)
+  await registerSceneProjectAgentRoutes(app)
   await registerAssetRoutes(app)
   await getRuntime()
   return app

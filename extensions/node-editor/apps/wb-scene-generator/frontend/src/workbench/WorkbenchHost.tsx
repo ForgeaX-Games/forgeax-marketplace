@@ -1,14 +1,33 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
-import { Editor, useProjectStore, usePipelineStore, stripTooLargeSummaries } from '@forgeax/node-runtime-react/editor'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import {
+  Editor,
+  subscribeLocalParamEdit,
+  useProjectStore,
+  usePipelineStore,
+  stripTooLargeSummaries,
+} from '@forgeax/node-runtime-react/editor'
 import { HttpApiClient } from '../api/HttpApiClient.js'
 import { scenePanelTypes } from '../panels/scenePanels.js'
 import { paneUrl } from './paneUrls.js'
-import { isWorkbenchMessage, type WorkbenchFocus } from './protocol.js'
+import { isWorkbenchMessage, workbenchTargetOrigin, type WorkbenchFocus } from './protocol.js'
 import { sceneValueFormatter } from './sceneValueFormatter.js'
 import { scenePortTypes } from './scenePortTypes.js'
 import { syncTrace, syncTraceHintOnce, summarizeNodeOutputs } from '../debug/syncTrace.js'
 import { LoadingStatusPanel, type LoadingStep } from './LoadingStatusPanel.js'
+import {
+  EDITOR_OPACITY_DEFAULT,
+  EDITOR_OPACITY_MAX,
+  EDITOR_OPACITY_MIN,
+  LS_EDITOR,
+  LS_RENDERER,
+  clampEditorSurfaceOpacity,
+  isDefaultWorkspaceLayout,
+  restoreDefaultWorkspace,
+} from './workbenchLayout.js'
+import { sceneT, useSceneLocale } from '../sceneI18n.js'
+import { SceneScriptStudio } from './SceneScriptStudio.js'
+import { SceneWorkGraphOverlay } from './SceneWorkGraphOverlay.js'
+import type { PreviewCapture } from './sceneScriptDiff.js'
 import './WorkbenchHost.css'
 
 const sceneValueFormatters = [sceneValueFormatter]
@@ -20,18 +39,10 @@ const sceneValueFormatters = [sceneValueFormatter]
 // The kernel editor's gear button is hidden (showSettingsButton={false}); its
 // controls — history, data types, help — are re-surfaced in the LEFT pane
 // (<SceneGeneratorControlsPanel>).
-// embed-toggle STATE still lives here because it drives the embedded iframes;
-// the left pane flips it by writing these localStorage keys, and we mirror those
-// writes via a `storage` listener (same-origin sibling iframe → cross-document).
-const LS_RENDERER = 'wb-scene-generator.rendererInline'
-const LS_ASSETSTORE = 'wb-scene-generator.assetStoreInline'
-const LS_EDITOR = 'wb-scene-generator.editorInline'
+// Preview and floating-editor visibility live here because the left pane flips
+// them through localStorage, mirrored via a same-origin `storage` listener.
 // Must match the center <Editor editorSyncKey> ↔ left <SceneGeneratorControlsPanel syncKey>.
 const EDITOR_SYNC_KEY = 'wb-scene-generator-editor'
-
-// AssetStore pane's initial width on (re)load. Independent of any other pane;
-// dragging the column splitter overrides it at runtime (not persisted).
-const ASSETSTORE_WIDTH_DEFAULT = 290
 
 function readBool(key: string, fallback: boolean): boolean {
   if (typeof localStorage === 'undefined') return fallback
@@ -45,13 +56,13 @@ function readBool(key: string, fallback: boolean): boolean {
 function switchPhaseLabel(phase: string | null): string {
   switch (phase) {
     case 'persisting':
-      return '保存当前项目'
+      return sceneT('loading.switch.persisting')
     case 'viewing':
-      return '切换项目视图'
+      return sceneT('loading.switch.viewing')
     case 'hydrating':
-      return '载入节点图'
+      return sceneT('loading.switch.hydrating')
     default:
-      return '切换项目'
+      return sceneT('loading.switch.default')
   }
 }
 
@@ -82,21 +93,28 @@ function useLingeringStep(active: boolean, lingerMs = 1100): 'idle' | 'active' |
 
 type RendererLoadingTask = { id: string; label: string; active: boolean; done?: number; total?: number }
 
-// Legacy-style workbench host: the faithful kernel Editor sits at the bottom; an
-// embedded row of Renderer / AssetStore iframes sits on top, each a `?pane=`
-// surface of this same app. Mirrors the legacy editor App.tsx layout/focus model
-// minus the Viewer (which moves to the 3d-lowpoly plugin).
+// The Page owns the project sidebar. Inside its workspace panel, Renderer fills
+// the background while the kernel Editor is an optional floating card; this
+// avoids duplicating Page-owned project controls in a second iframe.
 export function WorkbenchHost(): JSX.Element {
+  useSceneLocale()
   const client = useMemo(() => new HttpApiClient({ baseUrl: '', pipelineId: 'main' }), [])
 
-  const [rendererInline, setRendererInline] = useState(() => readBool(LS_RENDERER, true))
-  const [assetStoreInline, setAssetStoreInline] = useState(() => readBool(LS_ASSETSTORE, true))
-  const [editorInline, setEditorInline] = useState(() => readBool(LS_EDITOR, true))
+  // Page no longer exposes the old Preview toggle. A persisted `false` from
+  // that removed control otherwise prevents the renderer iframe from mounting
+  // and leaves the new workspace blank.
+  const [rendererInline, setRendererInline] = useState(true)
+  // Bundle semantics: availability stays mounted; the Renderer capsule only
+  // opens/closes the floating card. This avoids recreating the editor bridge
+  // and makes `editor-visibility-changed` describe the visible card.
+  const [editorInline, setEditorInline] = useState(true)
+  const [editorCardOpen, setEditorCardOpen] = useState(false)
+  const [sceneScriptOpen, setSceneScriptOpen] = useState(true)
+  const [sceneScriptExpanded, setSceneScriptExpanded] = useState(false)
+  const [workGraphOpen, setWorkGraphOpen] = useState(false)
+  const [editorSurfaceOpacity, setEditorSurfaceOpacity] = useState(EDITOR_OPACITY_DEFAULT)
   const [focus, setFocus] = useState<WorkbenchFocus>(null)
-  const [workbenchHeight, setWorkbenchHeight] = useState<number | null>(null)
-  // AssetStore initial width. Not bound to any other pane at runtime.
-  const [assetStoreWidth, setAssetStoreWidth] = useState<number | null>(ASSETSTORE_WIDTH_DEFAULT)
-  const [isResizing, setIsResizing] = useState(false)
+  const [showRestore, setShowRestore] = useState(() => !isDefaultWorkspaceLayout())
 
   // Multi-project management (kernel-backed). Project switching / create / delete
   // lives in the left pane's <ProjectPanel>; the center pane only observes the
@@ -114,30 +132,117 @@ export function WorkbenchHost(): JSX.Element {
   const [rendererBooting, setRendererBooting] = useState(false)
   const [rendererTasks, setRendererTasks] = useState<RendererLoadingTask[]>([])
 
-  const rootRef = useRef<HTMLDivElement>(null)
   const rendererIframeRef = useRef<HTMLIFrameElement>(null)
-  const assetStoreIframeRef = useRef<HTMLIFrameElement>(null)
+  const editorContainerRef = useRef<HTMLDivElement>(null)
+  const previewCaptureSequenceRef = useRef(0)
+  const previewCapturePendingRef = useRef(new Map<string, {
+    resolve: (capture: PreviewCapture) => void
+    reject: (error: Error) => void
+    timer: ReturnType<typeof setTimeout>
+  }>())
+  const workbenchOrigin = workbenchTargetOrigin()
 
-  const hasEmbedded = rendererInline || assetStoreInline
-  // The editor (Scene Generator) is now toggleable too. The "split" 3-row layout
-  // (panes / resize / editor) only applies when BOTH the panes row and the editor
-  // are visible; otherwise whichever single section is on fills the grid. When all
-  // three are off we render an empty-state placeholder so the pane isn't blank.
-  const showSplit = hasEmbedded && editorInline
-  const showEmpty = !hasEmbedded && !editorInline
+  const postToRenderer = useCallback((msg: unknown) => {
+    rendererIframeRef.current?.contentWindow?.postMessage(msg, workbenchOrigin)
+  }, [workbenchOrigin])
+
+  const capturePreview = useCallback((): Promise<PreviewCapture> => {
+    const requestId = `scene-diff-${Date.now()}-${previewCaptureSequenceRef.current += 1}`
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        previewCapturePendingRef.current.delete(requestId)
+        reject(new Error('Renderer preview capture timed out.'))
+      }, 8000)
+      previewCapturePendingRef.current.set(requestId, { resolve, reject, timer })
+      postToRenderer({ type: 'workbench:capture-preview', requestId })
+    })
+  }, [postToRenderer])
+
+  useEffect(() => () => {
+    for (const pending of previewCapturePendingRef.current.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error('Workbench closed during preview capture.'))
+    }
+    previewCapturePendingRef.current.clear()
+  }, [])
+
+  const broadcastEditorVisibility = useCallback((visible: boolean) => {
+    postToRenderer({ type: 'workbench:editor-visibility-changed', visible })
+  }, [postToRenderer])
+
+  const toggleEditorVisibility = useCallback(() => {
+    setEditorCardOpen((open) => {
+      const next = !open
+      broadcastEditorVisibility(editorInline && next)
+      return next
+    })
+  }, [broadcastEditorVisibility, editorInline])
+
+  const restoreWorkspaceLayout = useCallback(() => {
+    restoreDefaultWorkspace()
+    setRendererInline(true)
+    setEditorInline(true)
+    setEditorCardOpen(false)
+    setEditorSurfaceOpacity(EDITOR_OPACITY_DEFAULT)
+    setFocus(null)
+    setShowRestore(false)
+    broadcastEditorVisibility(false)
+    postToRenderer({ type: 'workbench:restore-layout' })
+  }, [broadcastEditorVisibility, postToRenderer])
+
+  const onEditorOpacityChange = useCallback((value: number) => {
+    setEditorSurfaceOpacity(clampEditorSurfaceOpacity(value))
+  }, [])
+
+  const hasRenderer = rendererInline
+  const showFloatingEditor = hasRenderer && editorInline
+  const showEmpty = !hasRenderer && !editorInline
 
   // Mirror embed-toggle flips made in the left pane (which writes these keys).
   // `storage` fires only in OTHER same-origin documents, so this is exactly the
   // left-pane → center-pane channel for the relocated window toggles.
   useEffect(() => {
+    try { localStorage.setItem(LS_RENDERER, 'true') } catch { /* ignore */ }
     const onStorage = (e: StorageEvent) => {
-      if (e.key === LS_RENDERER) setRendererInline(readBool(LS_RENDERER, true))
-      else if (e.key === LS_ASSETSTORE) setAssetStoreInline(readBool(LS_ASSETSTORE, true))
-      else if (e.key === LS_EDITOR) setEditorInline(readBool(LS_EDITOR, true))
+      if (e.key === LS_RENDERER) {
+        // The removed Preview toggle cannot hide the always-present Page
+        // workspace; normalize stale writes from pre-migration documents.
+        if (readBool(LS_RENDERER, true) === false) {
+          try { localStorage.setItem(LS_RENDERER, 'true') } catch { /* ignore */ }
+        }
+        setRendererInline(true)
+      }
+      else if (e.key === LS_EDITOR) {
+        const visible = readBool(LS_EDITOR, true)
+        setEditorInline(visible)
+        if (!visible) setEditorCardOpen(false)
+        broadcastEditorVisibility(visible && editorCardOpen)
+      } else if (e.key === 'wb-scene-generator.preview-drawer-width') {
+        setShowRestore(!isDefaultWorkspaceLayout() || focus !== null)
+      }
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  }, [broadcastEditorVisibility, editorCardOpen, focus])
+
+  useEffect(() => {
+    setShowRestore(!isDefaultWorkspaceLayout() || focus !== null)
+  }, [focus, editorCardOpen, editorInline, editorSurfaceOpacity, rendererInline])
+
+  useEffect(() => {
+    if (!editorCardOpen) return
+    const frame = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+    return () => cancelAnimationFrame(frame)
+  }, [editorCardOpen])
+
+  // React 18 does not serialize the inert boolean attribute. Set it directly so
+  // the mounted hidden editor cannot receive pointer, keyboard, or focus events.
+  useEffect(() => {
+    const container = editorContainerRef.current
+    if (!container) return
+    if (editorCardOpen) container.removeAttribute('inert')
+    else container.setAttribute('inert', '')
+  }, [editorCardOpen])
 
   const isEditorFullscreen = focus === 'editor'
   const toggleEditorFullscreen = useCallback(() => {
@@ -148,29 +253,67 @@ export function WorkbenchHost(): JSX.Element {
   // reply / broadcast focus-changed back.
   useEffect(() => {
     const handler = (event: MessageEvent) => {
+      if (event.origin !== workbenchOrigin) return
+      const rendererWindow = rendererIframeRef.current?.contentWindow
+      if (!rendererWindow || event.source !== rendererWindow) return
       if (!isWorkbenchMessage(event.data)) return
       const data = event.data
-      if (data.type === 'workbench:request-focus') {
+      if (data.type === 'workbench:preview-captured') {
+        const pending = previewCapturePendingRef.current.get(data.requestId)
+        if (!pending) return
+        clearTimeout(pending.timer)
+        previewCapturePendingRef.current.delete(data.requestId)
+        if (data.error || !data.dataUrl || !data.width || !data.height) {
+          pending.reject(new Error(data.error ?? 'Renderer returned an empty preview frame.'))
+        } else {
+          pending.resolve({
+            dataUrl: data.dataUrl,
+            width: data.width,
+            height: data.height,
+            capturedAt: data.capturedAt,
+          })
+        }
+      } else if (data.type === 'workbench:request-focus') {
         setFocus((f) => (f === data.target ? null : data.target))
       } else if (data.type === 'workbench:query-focus') {
-        ;(event.source as Window | null)?.postMessage(
-          { type: 'workbench:focus-changed', focus },
-          '*',
+        rendererWindow.postMessage({ type: 'workbench:focus-changed', focus }, workbenchOrigin)
+      } else if (data.type === 'workbench:toggle-editor') {
+        toggleEditorVisibility()
+      } else if (data.type === 'workbench:query-editor-visibility') {
+        rendererWindow.postMessage(
+          { type: 'workbench:editor-visibility-changed', visible: editorInline && editorCardOpen },
+          workbenchOrigin,
         )
       } else if (data.type === 'workbench:loading-status') {
         setRendererTasks(data.tasks)
+      } else if (data.type === 'workbench:preview-lineage-selection') {
+        const projectId = useProjectStore.getState().viewingProjectId
+        if (!projectId) return
+        void client.getSceneLineage({
+          ...(data.sceneNodeId ? { sceneNodeId: data.sceneNodeId } : {}),
+          ...(data.path ? { path: data.path } : {}),
+          ...(data.bakedLayerId ? { bakedLayerId: data.bakedLayerId } : {}),
+        }, projectId).then((response) => {
+          const authoringNodeIds = [...new Set(response.lineage.map((entry) => entry.authoring.entityId))]
+          if (authoringNodeIds.length) usePipelineStore.getState().requestSelectNodes(authoringNodeIds)
+        }).catch(() => {
+          // Unknown/stale preview ids are an expected read-only miss after refresh.
+        })
       }
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [focus])
+  }, [client, focus, editorCardOpen, editorInline, toggleEditorVisibility, workbenchOrigin])
 
   // Broadcast focus changes so child buttons reflect fullscreen state.
   useEffect(() => {
-    const msg = { type: 'workbench:focus-changed', focus }
-    rendererIframeRef.current?.contentWindow?.postMessage(msg, '*')
-    assetStoreIframeRef.current?.contentWindow?.postMessage(msg, '*')
-  }, [focus])
+    postToRenderer({ type: 'workbench:focus-changed', focus })
+  }, [focus, postToRenderer])
+
+  // Keep the renderer capsule's Node Editor button in sync with host state.
+  useEffect(() => {
+    broadcastEditorVisibility(editorInline && editorCardOpen)
+  }, [editorInline, editorCardOpen, broadcastEditorVisibility])
 
   // Forward the kernel editor's node selection to the renderer pane so it can
   // apply the legacy editor-selection highlight. The kernel selection lives in
@@ -180,21 +323,36 @@ export function WorkbenchHost(): JSX.Element {
   // iframe `onLoad` re-seed selection after the renderer (re)mounts.
   const selectionRef = useRef<string[]>([])
   const postSelectionToRenderer = useCallback((ids: string[]) => {
-    rendererIframeRef.current?.contentWindow?.postMessage(
-      { type: 'workbench:editor-selection', selectedNodeIds: ids },
-      '*',
-    )
-  }, [])
+    postToRenderer({ type: 'workbench:editor-selection', selectedNodeIds: ids })
+  }, [postToRenderer])
   useEffect(() => {
+    let lineageSequence = 0
     const sync = (ids: string[]) => {
       selectionRef.current = ids
       postSelectionToRenderer(ids)
+      const projectId = useProjectStore.getState().viewingProjectId
+      const sequence = ++lineageSequence
+      if (!projectId || ids.length === 0) {
+        postToRenderer({ type: 'workbench:lineage-highlight', paths: [], bakedPaths: [] })
+        return
+      }
+      void Promise.all(ids.map((runtimeNodeId) =>
+        client.getSceneLineage({ runtimeNodeId }, projectId).catch(() => null),
+      )).then((responses) => {
+        if (sequence !== lineageSequence) return
+        const entries = responses.flatMap((response) => response?.lineage ?? [])
+        postToRenderer({
+          type: 'workbench:lineage-highlight',
+          paths: [...new Set(entries.flatMap((entry) => entry.sceneNodes.map((node) => node.path)))],
+          bakedPaths: [...new Set(entries.flatMap((entry) => entry.bakedLayers.map((layer) => layer.path)))],
+        })
+      })
     }
     sync(usePipelineStore.getState().selectedNodeIds)
     return usePipelineStore.subscribe((state, prev) => {
       if (state.selectedNodeIds !== prev.selectedNodeIds) sync(state.selectedNodeIds)
     })
-  }, [postSelectionToRenderer])
+  }, [client, postSelectionToRenderer, postToRenderer])
 
   // Forward the kernel editor's per-node preview toggle (`previewEnabled`) to the
   // renderer pane. The toggle lives client-side in the host's pipeline store and
@@ -204,11 +362,8 @@ export function WorkbenchHost(): JSX.Element {
   // View-only — never mutates the graph.
   const previewDisabledRef = useRef<string[]>([])
   const postPreviewToRenderer = useCallback((ids: string[]) => {
-    rendererIframeRef.current?.contentWindow?.postMessage(
-      { type: 'workbench:preview-change', previewDisabledNodeIds: ids },
-      '*',
-    )
-  }, [])
+    postToRenderer({ type: 'workbench:preview-change', previewDisabledNodeIds: ids })
+  }, [postToRenderer])
   useEffect(() => {
     const disabledIds = (state: ReturnType<typeof usePipelineStore.getState>): string[] =>
       (state.currentPipeline?.nodes ?? []).filter((n) => n.previewEnabled === false).map((n) => n.id)
@@ -237,6 +392,8 @@ export function WorkbenchHost(): JSX.Element {
   // preview repaints in the same frame instead of waiting ~200ms for the WS+GET
   // detour. The trailing exec:completed / graph:applied still own GC + the
   // durable post-drag refresh, so this is a pure latency shortcut, not a new SSOT.
+  const pendingPreviewOutputsRef = useRef<Record<string, Record<string, unknown>>>({})
+  const previewFrameRef = useRef<number | null>(null)
   const postPreviewDataToRenderer = useCallback((outputs: Record<string, Record<string, unknown>>) => {
     const stripped: Record<string, Record<string, unknown>> = {}
     for (const [nodeId, bag] of Object.entries(outputs)) {
@@ -244,11 +401,29 @@ export function WorkbenchHost(): JSX.Element {
       if (Object.keys(clean).length > 0) stripped[nodeId] = clean
     }
     if (Object.keys(stripped).length === 0) return
-    syncTrace('preview:postMessage', { nodes: summarizeNodeOutputs(stripped) })
-    rendererIframeRef.current?.contentWindow?.postMessage(
-      { type: 'workbench:preview-data', outputs: stripped },
-      '*',
-    )
+    // setNodeOutput writes ports individually. Merge every write in the same
+    // animation frame so voxel `layers` + `names` arrive as one coherent
+    // snapshot and the iframe never builds an intermediate half-updated mesh.
+    for (const [nodeId, bag] of Object.entries(stripped)) {
+      pendingPreviewOutputsRef.current[nodeId] = {
+        ...(pendingPreviewOutputsRef.current[nodeId] ?? {}),
+        ...bag,
+      }
+    }
+    if (previewFrameRef.current !== null) return
+    previewFrameRef.current = requestAnimationFrame(() => {
+      previewFrameRef.current = null
+      const merged = pendingPreviewOutputsRef.current
+      pendingPreviewOutputsRef.current = {}
+      if (Object.keys(merged).length === 0) return
+      syncTrace('preview:postMessage', { nodes: summarizeNodeOutputs(merged) })
+      postToRenderer({ type: 'workbench:preview-data', outputs: merged })
+    })
+  }, [postToRenderer])
+  useEffect(() => () => {
+    if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current)
+    previewFrameRef.current = null
+    pendingPreviewOutputsRef.current = {}
   }, [])
   useEffect(() => {
     let prevOutputs = usePipelineStore.getState().nodeOutputs
@@ -264,6 +439,13 @@ export function WorkbenchHost(): JSX.Element {
       postPreviewDataToRenderer(changed)
     })
   }, [postPreviewDataToRenderer])
+
+  // Signal at the START of a local scrub, before graph invalidation and execute
+  // events can reach the renderer. This makes drag refresh suppression explicit
+  // instead of inferring it from cross-socket graph event ordering.
+  useEffect(() => subscribeLocalParamEdit(() => {
+    postToRenderer({ type: 'workbench:param-edit-active' })
+  }), [postToRenderer])
 
   // Bootstrap the project list + viewing project on mount. switchProject sets
   // the HttpApiClient viewingProjectId and loads the graph via the view cascade.
@@ -290,11 +472,8 @@ export function WorkbenchHost(): JSX.Element {
     const prev = prevProjectRef.current
     if (prev === viewingProjectId) return
     prevProjectRef.current = viewingProjectId
-    rendererIframeRef.current?.contentWindow?.postMessage(
-      { type: 'workbench:project-changed', projectId: viewingProjectId },
-      '*',
-    )
-  }, [viewingProjectId])
+    postToRenderer({ type: 'workbench:project-changed', projectId: viewingProjectId })
+  }, [viewingProjectId, postToRenderer])
 
   // Project-switch loading-progress panel: merge the host-observed phases
   // (editor-side persist/view/hydrate + output fan-out) with whatever the
@@ -316,13 +495,13 @@ export function WorkbenchHost(): JSX.Element {
       steps.push({ id: 'switch', label: switchPhaseLabel(switchPhase), state: switchState })
     }
     if (bootState !== 'idle') {
-      steps.push({ id: 'boot', label: '重新加载渲染器', state: bootState })
+      steps.push({ id: 'boot', label: sceneT('loading.boot'), state: bootState })
     }
     if (outputsState !== 'idle') {
-      steps.push({ id: 'outputs', label: '拉取节点输出（编辑器）', state: outputsState })
+      steps.push({ id: 'outputs', label: sceneT('loading.outputs'), state: outputsState })
     }
     if (executingState !== 'idle') {
-      steps.push({ id: 'execute', label: '执行节点计算（编辑器）', state: executingState })
+      steps.push({ id: 'execute', label: sceneT('loading.execute'), state: executingState })
     }
     const rendererOrder = ['previews', 'baked', 'aliases']
     for (const id of rendererOrder) {
@@ -338,153 +517,145 @@ export function WorkbenchHost(): JSX.Element {
     return steps
   }, [switchState, switchPhase, bootState, outputsState, executingState, rendererTasks])
 
-  const beginRowResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const rect = rootRef.current?.getBoundingClientRect()
-    if (!rect) return
-    setIsResizing(true)
-    const onMove = (m: MouseEvent) => {
-      const max = Math.max(180, rect.height - 180 - 4)
-      setWorkbenchHeight(Math.max(180, Math.min(max, m.clientY - rect.top)))
-    }
-    const onUp = () => {
-      setIsResizing(false)
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }, [])
+  const editorSurfaceStyle = useMemo(
+    () => ({ '--editor-surface-opacity': editorSurfaceOpacity / 100 } as CSSProperties),
+    [editorSurfaceOpacity],
+  )
 
-  const beginColumnResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const rect = e.currentTarget.parentElement?.getBoundingClientRect()
-    if (!rect) return
-    setIsResizing(true)
-    const onMove = (m: MouseEvent) => {
-      const max = Math.max(180, rect.width - 240 - 4)
-      setAssetStoreWidth(Math.max(180, Math.min(max, m.clientX - rect.left)))
-    }
-    const onUp = () => {
-      setIsResizing(false)
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }, [])
-
-  // Pane column template: assetstore fixed-ish, renderer fills remainder; either
-  // alone fills the row. A 4px splitter sits between the two when both are open.
-  const gridTemplateColumns = useMemo(() => {
-    const cols: string[] = []
-    if (assetStoreInline) {
-      cols.push(rendererInline ? `var(--assetstore-width, ${ASSETSTORE_WIDTH_DEFAULT}px)` : 'minmax(180px, 1fr)')
-    }
-    if (rendererInline) cols.push('minmax(240px, 1fr)')
-    return cols.join(' 4px ')
-  }, [assetStoreInline, rendererInline])
-
-  const rootStyle: CSSProperties = {
-    ...(workbenchHeight !== null ? { '--workbench-height': `${workbenchHeight}px` } : {}),
-    ...(assetStoreWidth !== null ? { '--assetstore-width': `${assetStoreWidth}px` } : {}),
-  } as CSSProperties
-
-  const panes: Array<'assetstore' | 'renderer'> = [
-    ...(assetStoreInline ? ['assetstore' as const] : []),
-    ...(rendererInline ? ['renderer' as const] : []),
-  ]
+  const editorToolbarActions = useMemo(() => (
+    <>
+      <button
+        type="button"
+        className={`scene-script-toggle${sceneScriptOpen ? ' is-active' : ''}`}
+        aria-pressed={sceneScriptOpen}
+        onClick={() => setSceneScriptOpen((open) => !open)}
+      >
+        Scene Script
+      </button>
+      <button
+        type="button"
+        className={`scene-script-toggle${workGraphOpen ? ' is-active' : ''}`}
+        aria-pressed={workGraphOpen}
+        onClick={() => setWorkGraphOpen((open) => !open)}
+      >
+        Work Graph
+      </button>
+      <label className="scene-editor-opacity" title={sceneT('editor.opacity')}>
+        <span className="scene-editor-opacity__label">{sceneT('editor.opacity')}</span>
+        <input
+          type="range"
+          min={EDITOR_OPACITY_MIN}
+          max={EDITOR_OPACITY_MAX}
+          value={editorSurfaceOpacity}
+          aria-label={sceneT('editor.opacity')}
+          aria-valuemin={EDITOR_OPACITY_MIN}
+          aria-valuemax={EDITOR_OPACITY_MAX}
+          aria-valuenow={editorSurfaceOpacity}
+          onChange={(event) => onEditorOpacityChange(Number(event.currentTarget.value))}
+        />
+        <output className="scene-editor-opacity__value">{editorSurfaceOpacity}%</output>
+      </label>
+    </>
+  ), [editorSurfaceOpacity, onEditorOpacityChange, sceneScriptOpen, workGraphOpen])
 
   return (
     <div
-      ref={rootRef}
       className={[
         'scene-workbench',
-        showSplit ? 'scene-workbench--embedded' : '',
-        isResizing ? 'scene-workbench--resizing' : '',
+        showFloatingEditor ? 'scene-workbench--floating' : '',
         focus ? `scene-workbench--focus-${focus}` : '',
       ]
         .filter(Boolean)
         .join(' ')}
-      style={rootStyle}
     >
-      {hasEmbedded && (
-        <div className="scene-workbench__panes" style={{ gridTemplateColumns }}>
-          {panes.map((pane, idx) => {
-            const isLast = idx === panes.length - 1
-            return (
-              <Fragment key={pane}>
-                {pane === 'assetstore' && (
-                  <section className="scene-pane scene-pane--assetstore" aria-label="AssetStore">
-                    <iframe
-                      ref={assetStoreIframeRef}
-                      src={paneUrl('assetstore')}
-                      title="AssetStore"
-                      className="scene-pane__iframe"
-                    />
-                  </section>
-                )}
-                {pane === 'renderer' && (
-                  <section className="scene-pane scene-pane--renderer" aria-label="Renderer">
-                    <iframe
-                      key={`renderer-${rendererReloadKey}`}
-                      ref={rendererIframeRef}
-                      src={paneUrl('renderer')}
-                      title="Renderer"
-                      className="scene-pane__iframe"
-                      allow="clipboard-write"
-                      onLoad={() => {
-                        postSelectionToRenderer(selectionRef.current)
-                        postPreviewToRenderer(previewDisabledRef.current)
-                        setRendererBooting(false)
-                      }}
-                    />
-                    <LoadingStatusPanel steps={loadingSteps} />
-                  </section>
-                )}
-                {!isLast && (
-                  <div
-                    className="scene-pane__resize scene-pane__resize--col"
-                    onMouseDown={beginColumnResize}
-                    aria-label={`Resize ${pane} panel`}
-                  />
-                )}
-              </Fragment>
-            )
-          })}
+      {showRestore && (
+        <button
+          type="button"
+          className="scene-workbench__restore-layout"
+          title={sceneT('workbench.restoreLayoutTitle')}
+          onClick={restoreWorkspaceLayout}
+        >
+          {sceneT('workbench.restoreLayout')}
+        </button>
+      )}
+
+      {hasRenderer && (
+        <div className="scene-workbench__panes">
+          <section className="scene-pane scene-pane--renderer" aria-label={sceneT('preview.title')}>
+            <iframe
+              key={`renderer-${rendererReloadKey}`}
+              ref={rendererIframeRef}
+              src={paneUrl('renderer')}
+              title={sceneT('workbench.rendererIframe')}
+              className="scene-pane__iframe"
+              allow="clipboard-write"
+              onLoad={() => {
+                postSelectionToRenderer(selectionRef.current)
+                postPreviewToRenderer(previewDisabledRef.current)
+                setRendererBooting(false)
+              }}
+            />
+            <LoadingStatusPanel steps={loadingSteps} />
+          </section>
         </div>
       )}
 
-      {showSplit && (
-        <div
-          className="scene-pane__resize scene-pane__resize--row"
-          onMouseDown={beginRowResize}
-          aria-label="Resize workbench and editor"
-        />
-      )}
-
       {editorInline && (
-        <div className="scene-workbench__editor">
-          <Editor
-            apiClient={client}
-            title="Scene Generator"
-            showRunControl={false}
-            showSettingsButton={false}
-            editorSyncKey={EDITOR_SYNC_KEY}
-            domainNodeTypes={scenePanelTypes}
-            domainPortTypes={scenePortTypes}
-            domainValueFormatters={sceneValueFormatters}
-            isFullscreen={isEditorFullscreen}
-            onToggleFullscreen={toggleEditorFullscreen}
-          />
+        <div
+          ref={editorContainerRef}
+          className={`scene-workbench__editor${editorCardOpen ? '' : ' is-collapsed'}`}
+          style={editorSurfaceStyle}
+          aria-hidden={!editorCardOpen}
+        >
+          <div
+            className={[
+              'scene-workbench__authoring-layout',
+              sceneScriptOpen ? 'has-script' : '',
+              sceneScriptOpen && sceneScriptExpanded ? 'is-script-expanded' : '',
+            ].filter(Boolean).join(' ')}
+          >
+            <div className="scene-workbench__node-editor">
+              <Editor
+                apiClient={client}
+                title={sceneT('workbench.title')}
+                showRunControl={false}
+                showSettingsButton={false}
+                toolbarActions={editorToolbarActions}
+                editorSyncKey={EDITOR_SYNC_KEY}
+                domainNodeTypes={scenePanelTypes}
+                domainPortTypes={scenePortTypes}
+                domainValueFormatters={sceneValueFormatters}
+                isFullscreen={isEditorFullscreen}
+                onToggleFullscreen={toggleEditorFullscreen}
+              />
+              {viewingProjectId && (
+                <SceneWorkGraphOverlay
+                  client={client}
+                  projectId={viewingProjectId}
+                  open={workGraphOpen}
+                  onClose={() => setWorkGraphOpen(false)}
+                />
+              )}
+            </div>
+            {sceneScriptOpen && viewingProjectId && (
+              <SceneScriptStudio
+                client={client}
+                projectId={viewingProjectId}
+                capturePreview={capturePreview}
+                expanded={sceneScriptExpanded}
+                onToggleExpanded={() => setSceneScriptExpanded((expanded) => !expanded)}
+                onClose={() => setSceneScriptOpen(false)}
+              />
+            )}
+          </div>
         </div>
       )}
 
       {showEmpty && (
         <div className="scene-workbench__empty" role="status">
           <div className="scene-workbench__empty-inner">
-            <h2>All panels are hidden</h2>
-            <p>Use the AssetStore, Preview, and Scene Gen buttons in the left navigation to bring a panel back.</p>
+            <h2>{sceneT('workbench.emptyTitle')}</h2>
+            <p>{sceneT('workbench.emptyBody')}</p>
           </div>
         </div>
       )}

@@ -1,8 +1,8 @@
 # LakeRegions（湖泊区域）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1782133925585_686y2`，也可用 basename `LakeRegions`。
-> 内部 30 个节点、2 个嵌套子组。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
-> 端口序号和语义（`label`）以 `instantiateTemplate` 返回的 `exposedInputs`/`exposedOutputs` 为准，下表按当前模板 JSON 核对更新（2026-07）——**此前一版文档的端口号/语义整表写错**（`in_0`≠Scene、`out_0`≠Lake 等），已重新核对修正。
+> 当前生产入口是同目录 `lake-regions.scene.ts` 中的原生 Definition。Agent 和用户应在
+> canonical Scene Script 中调用该函数；JSON 实例化、raw graph batch/import API 已删除。
+> 下文端口表仅用于解释运行时 lowering，旧 CLI/raw-op 示例属于历史诊断资料，不是 authoring 指南。
 
 ## 功能说明
 
@@ -50,7 +50,7 @@
 前置：链路里已有上游剩余场景（如 `<G_PATH>.out_2`，Rest；**不是 `out_1`**）。先实例化拿回 `<G_LAKE>`：
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"LakeRegions", "position":{"x":-500,"y":1400},
            "opts":{"actor":"ai:sino","label":"实例化 LakeRegions"} } }
 ```
@@ -93,9 +93,7 @@ forgeax node connect --edge-id e_lk_seed    --from seed_main:seed      --to lake
 forgeax node connect --edge-id e_lk_out2merge --from lake:out_4        --to merge_all:item_N $G
 ```
 
-> CLI 目前没有 `appendMergeItem` 复合命令，仍需自己维护 `merge_all` 的 `portCount`/`item_N`；AI 走 `scene:pipeline.applyBatch` 工具通路时优先用 `appendMergeItem`（见上）。
->
-> 或 `forgeax pipeline apply --ops '<JSON array>'` 一次提交（同 applyBatch schema）。
+> 不要手工维护 `portCount` / `item_N`。在 Scene Script 中使用列表引用，Compiler 会确定性 lowering 对应连线。
 
 ## 使用场合
 

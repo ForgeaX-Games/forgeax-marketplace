@@ -1,6 +1,6 @@
 # ZoneNesting（区域嵌套地块）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_zonenesting_district`，也可用 basename `ZoneNesting`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_zonenesting_district`，也可用 basename `ZoneNesting`。
 > 内部 22 个节点、1 个嵌套子组（TileAssetName）。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明
@@ -48,7 +48,7 @@
 前置：链路里已有上游剩余场景（如 `<G_PATH>.out_1`）。先实例化拿回 `<G_ZONE>`：
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"ZoneNesting", "position":{"x":-500,"y":1800},
            "opts":{"actor":"ai:sino","label":"实例化 ZoneNesting"} } }
 ```

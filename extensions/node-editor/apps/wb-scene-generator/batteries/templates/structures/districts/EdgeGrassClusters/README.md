@@ -1,6 +1,6 @@
 # RiverbankZone（河岸侵蚀地块）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_riverbank_district`，也可用 basename `RiverbankZone`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_riverbank_district`，也可用 basename `RiverbankZone`。
 > 内部 22 个节点、1 个嵌套子组（TileAssetName）。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明
@@ -46,7 +46,7 @@
 ## 使用示例（applyBatch ops，可照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"RiverbankZone", "position":{"x":-500,"y":2200},
            "opts":{"actor":"ai:sino","label":"实例化 RiverbankZone"} } }
 ```

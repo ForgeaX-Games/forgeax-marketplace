@@ -278,7 +278,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
   // this heavy plugin and rebuildVoxelMaster on every click (~700ms–2s). The
   // highlight is drawn imperatively in drawOverlay (same pattern as voxelSelection).
   const activeBakedLayerKey = useRenderStore(s => s.activeBakedLayerKey)
-  const showGrid = useRenderStore(s => s.showGrid)
+  const showGrid = useRenderStore(s => s.viewGuides.topBillboard)
   // Edit-mode overlay inputs (brush ghost + box-select rubber-band).
   const editMode = useRenderStore(s => s.editMode)
   // NOTE: editHoverCell / editBox are intentionally NOT render-subscribed here.
@@ -787,7 +787,10 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
       ctx.lineWidth = 1.8 / viewportRef.current.scale
       ctx.setLineDash([6 / viewportRef.current.scale, 4 / viewportRef.current.scale])
       for (const entry of voxelLayersRef.current.values()) {
-        if (!entry.layer.visible || !selectedSet.has(entry.layer.nodeId)) continue
+        const layerKey = entry.layer.nodeId === '__baked__'
+          ? `baked:${entry.layer.nodePath}`
+          : `${entry.layer.nodeId}:${entry.layer.nodePath}`
+        if (!entry.layer.visible || (!selectedSet.has(entry.layer.nodeId) && !selectedSet.has(layerKey))) continue
         const { source } = entry
         const off = 1 / viewportRef.current.scale
         const x = originX + source.worldOffsetX * cellSize - off

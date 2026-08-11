@@ -1,6 +1,6 @@
 # AreaPartition（区域划分）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_area_partition_district`，也可用 basename `AreaPartition`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_area_partition_district`，也可用 basename `AreaPartition`。
 > 内部 1 个嵌套子组（TileAssetName）。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明
@@ -82,7 +82,7 @@
 ### 1) 实例化
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "projectId":"p_mr3flg6p_io9iu4", "templateId":"AreaPartition", "groupId":"verify_ap1",
            "position":{"x":-400,"y":200}, "opts":{"actor":"ai:sino","label":"实例化 AreaPartition"} } }
 ```

@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   applyBatch,
@@ -524,13 +524,18 @@ describe('ProjectRegistry — lock lease + FIFO wait queue', () => {
     const p = await reg.createProject({ name: 'P' })
     reg.claimWriteAccess(p.id, ai('A'))
 
-    // Two mutation "heartbeats" spaced under the lease window, spanning more
-    // than one full lease window in total — must never expire in between.
-    await sleep(25)
-    expect(reg.checkMutationAccess(p.id, ai('A'))).toEqual({ ok: true })
-    await sleep(25)
-    expect(reg.checkMutationAccess(p.id, ai('A'))).toEqual({ ok: true })
-    expect(reg.getProjectLock(p.id)?.agentId).toBe('A')
+    vi.useFakeTimers()
+    try {
+      // Two mutation "heartbeats" spaced under the lease window, spanning more
+      // than one full lease window in total — must never expire in between.
+      vi.advanceTimersByTime(25)
+      expect(reg.checkMutationAccess(p.id, ai('A'))).toEqual({ ok: true })
+      vi.advanceTimersByTime(25)
+      expect(reg.checkMutationAccess(p.id, ai('A'))).toEqual({ ok: true })
+      expect(reg.getProjectLock(p.id)?.agentId).toBe('A')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renewLock (explicit heartbeat) keeps an idle-but-alive agent from expiring', async () => {
@@ -539,12 +544,17 @@ describe('ProjectRegistry — lock lease + FIFO wait queue', () => {
     const p = await reg.createProject({ name: 'P' })
     reg.claimWriteAccess(p.id, ai('A'))
 
-    await sleep(20)
-    expect(reg.renewLock(p.id, ai('A'))).toEqual({ ok: true })
-    await sleep(20)
-    // 40ms have elapsed since claim, but the heartbeat at 20ms reset the
-    // 30ms window, so the lock must still be A's.
-    expect(reg.getProjectLock(p.id)?.agentId).toBe('A')
+    vi.useFakeTimers()
+    try {
+      vi.advanceTimersByTime(20)
+      expect(reg.renewLock(p.id, ai('A'))).toEqual({ ok: true })
+      vi.advanceTimersByTime(20)
+      // 40ms have elapsed since claim, but the heartbeat at 20ms reset the
+      // 30ms window, so the lock must still be A's.
+      expect(reg.getProjectLock(p.id)?.agentId).toBe('A')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renewLock rejects an agent that does not hold the project', async () => {

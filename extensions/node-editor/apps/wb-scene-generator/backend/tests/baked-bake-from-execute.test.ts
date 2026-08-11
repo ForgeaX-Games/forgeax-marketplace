@@ -3,6 +3,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { FastifyInstance } from 'fastify'
+import { applyBatch } from '@forgeax/node-runtime'
+import { getRuntimeForProject } from '../src/runtime.js'
 
 // Isolated workspace — module-level singleton registry (see runtime.ts), must be
 // set before the first buildApp()/getRuntime() call in this file.
@@ -28,11 +30,7 @@ describe('POST /api/v1/projects/:id/baked/bake-from-execute', () => {
   })
 
   it('rejects with 422 when execute completes but the scene subtree has zero cells to bake', async () => {
-    const batch = await app.inject({
-      method: 'POST',
-      url: '/api/v1/projects/main/batch',
-      payload: {
-        ops: [
+    const batch = await applyBatch(await getRuntimeForProject('main'), [
           {
             type: 'createNode',
             nodeId: 'empty_g2n',
@@ -40,28 +38,20 @@ describe('POST /api/v1/projects/:id/baked/bake-from-execute', () => {
             position: { x: 0, y: 0 },
             params: { name: 'Empty', grid: [[0, 0], [0, 0]] },
           },
-        ],
-      },
-    })
-    expect(batch.statusCode, batch.body).toBe(200)
+        ], { actor: 'test-runtime-fixture' })
+    expect(batch.status).toBe('ok')
 
     const bake = await app.inject({ method: 'POST', url: '/api/v1/projects/main/baked/bake-from-execute' })
     expect(bake.statusCode).toBe(422)
     expect(bake.json().error).toMatch(/zero scene layers/)
 
-    await app.inject({
-      method: 'POST',
-      url: '/api/v1/projects/main/batch',
-      payload: { ops: [{ type: 'deleteNode', nodeId: 'empty_g2n' }] },
+    await applyBatch(await getRuntimeForProject('main'), [{ type: 'deleteNode', nodeId: 'empty_g2n' }], {
+      actor: 'test-runtime-fixture',
     })
   })
 
   it('executes the graph, snapshots scene output ports into baked layers, and bakes them', async () => {
-    const batch = await app.inject({
-      method: 'POST',
-      url: '/api/v1/projects/main/batch',
-      payload: {
-        ops: [
+    const batch = await applyBatch(await getRuntimeForProject('main'), [
           {
             type: 'createNode',
             nodeId: 'g2n',
@@ -69,10 +59,8 @@ describe('POST /api/v1/projects/:id/baked/bake-from-execute', () => {
             position: { x: 0, y: 0 },
             params: { name: 'House', grid: [[1, 1], [1, 1]] },
           },
-        ],
-      },
-    })
-    expect(batch.statusCode, batch.body).toBe(200)
+        ], { actor: 'test-runtime-fixture' })
+    expect(batch.status).toBe('ok')
 
     const bake = await app.inject({ method: 'POST', url: '/api/v1/projects/main/baked/bake-from-execute' })
     expect(bake.statusCode, bake.body).toBe(200)

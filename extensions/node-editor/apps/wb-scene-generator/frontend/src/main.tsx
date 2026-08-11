@@ -4,6 +4,9 @@ import '@forgeax/node-runtime-react/editor.css'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './App.js'
+import { ensureSceneI18n } from './sceneI18n.js'
+
+ensureSceneI18n()
 
 const params = new URLSearchParams(window.location.search)
 const pane = params.get('pane') ?? 'center'

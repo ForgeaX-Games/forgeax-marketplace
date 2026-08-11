@@ -1,6 +1,6 @@
 # HillContourGenerate（小山包等高线）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_hill_contour_generate`，也可用 basename `HillContourGenerate`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_hill_contour_generate`，也可用 basename `HillContourGenerate`。
 
 把上游场景的足迹切片为掩码网格，用 `hill_contour_generate` 电池生成圆润的小山包同心等高线（多层多值网格），按值拆分后逐张建为命名场景子节点；输出与其它结构模板一致的五个固定端口。
 
@@ -36,4 +36,4 @@
 
 **体素 z**：`grid_split_by_value.values`（等高带键 1..N）必须接到 `grid2node.z`，否则各层节点都落在 `zRange=[0]` 平面上。
 
-`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。
+`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。

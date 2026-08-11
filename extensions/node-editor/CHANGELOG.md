@@ -22,6 +22,10 @@ calendar dates in the project timezone.
 
 ## Unreleased
 
+### Added
+- **Added the unified Scene Script diagnostic contract and executable structured Fix seam.** `packages/scene-authoring/src/{types,diagnostics,commands}.ts` preserves legacy `code/phase/severity/message/source` fields while adding graph location, bounded expected/actual evidence, fixes, transaction state, retryability, and escalation with one explicit policy table for all phases. `ReplaceReference` fixes execute through canonical authoring commands. Tests: `packages/scene-authoring/src/{diagnostics,scene-authoring}.test.ts`. *为什么：* failures must guide source repair without exposing Runtime payloads or requiring agents to investigate internal APIs.
+- **Added `@forgeax/scene-authoring` and a canonical-authoring interception seam in `@forgeax/editor-host`.** The new package provides the restricted Scene Script AST/parser/printer, versioned function contracts, deterministic Authoring Entity compiler, recursive module composition, source maps, structured diagnostics, scoped commands, and sealed-group capability checks. `ProjectPipelineRouteDeps.handleApplyBatch` lets a domain translate an existing visual editor batch into its canonical authoring transaction before the legacy runtime write occurs. Tests: `packages/scene-authoring/src/scene-authoring.test.ts`; build: `packages/editor-host/src/backend/projectPipelineRoutes.ts`. *为什么：* preserve the shared node editor while allowing AI-oriented apps to move their source of truth above opaque runtime graph mutations.
+
 ### Fixed
 - **电池栏拖入画布不再卡死（重复 onDrop + 巨型拖拽载荷 + 节点 id 碰撞 + Edge 拖拽幽灵图快照）。**
   `Canvas.tsx` 外层 `.canvas` 与内层 `<ReactFlow>` 均注册了 `onDrop`，同一原生 drop 事件会触发两次 `placeBattery`：两次 `node-${Date.now()}` 在同一毫秒内碰撞 → ReactFlow 节点表出现重复 id → 主线程卡死、刷新后仍异常。

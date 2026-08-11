@@ -1,10 +1,9 @@
 // postMessage protocol between the workbench host (the editor pane on 9555) and
-// its embedded child surfaces (Renderer / AssetStore iframes). Ported from the
-// legacy editor's `workbench:*` contract, trimmed to the panes the scene plugin
-// ships (no Viewer).
+// its embedded Renderer iframe. Ported from the legacy editor's `workbench:*`
+// contract and trimmed to the user-facing surfaces the scene plugin ships.
 
-export type WorkbenchFocus = 'editor' | 'renderer' | 'assetstore' | null
-export type WorkbenchSource = 'renderer' | 'assetstore'
+export type WorkbenchFocus = 'editor' | 'renderer' | null
+export type WorkbenchSource = 'renderer'
 
 export interface RequestFocusMessage {
   type: 'workbench:request-focus'
@@ -64,6 +63,11 @@ export interface PreviewDataMessage {
   outputs: Record<string, Record<string, unknown>>
 }
 
+/** Host → renderer: a local slider/inspector scrub started another live tick. */
+export interface ParamEditActiveMessage {
+  type: 'workbench:param-edit-active'
+}
+
 /**
  * Host → renderer pane: an AI/Agent renderer-control command forwarded from the
  * backend WS/REST control channel through the host into the renderer's store.
@@ -96,16 +100,90 @@ export interface LoadingStatusMessage {
   }>
 }
 
+/** Host → renderer pane: active project changed, so renderer state must reset. */
+export interface ProjectChangedMessage {
+  type: 'workbench:project-changed'
+  projectId: string
+}
+
+/** Renderer pane → host: toggle the floating Scene Gen editor card. */
+export interface ToggleEditorMessage {
+  type: 'workbench:toggle-editor'
+}
+
+/** Renderer pane → host: query whether the floating editor is visible. */
+export interface QueryEditorVisibilityMessage {
+  type: 'workbench:query-editor-visibility'
+}
+
+/** Host → renderer pane: floating editor visibility changed. */
+export interface EditorVisibilityChangedMessage {
+  type: 'workbench:editor-visibility-changed'
+  visible: boolean
+}
+
+/** Host → renderer pane: reset preview-internal chrome to defaults. */
+export interface RestoreLayoutMessage {
+  type: 'workbench:restore-layout'
+}
+
+/** Host → renderer: capture the actual composed frame for transaction evidence. */
+export interface CapturePreviewMessage {
+  type: 'workbench:capture-preview'
+  requestId: string
+}
+
+/** Renderer → host: actual PNG frame (or capture error) for the matching request. */
+export interface PreviewCapturedMessage {
+  type: 'workbench:preview-captured'
+  requestId: string
+  capturedAt: string
+  dataUrl?: string
+  width?: number
+  height?: number
+  error?: string
+}
+
+/** Renderer → host: resolve a clicked SceneGraph/baked layer back to graph + source. */
+export interface PreviewLineageSelectionMessage {
+  type: 'workbench:preview-lineage-selection'
+  sceneNodeId?: string
+  path?: string
+  bakedLayerId?: string
+}
+
+/** Host → renderer: SceneGraph paths produced by the current graph/code selection. */
+export interface LineageHighlightMessage {
+  type: 'workbench:lineage-highlight'
+  paths: string[]
+  bakedPaths: string[]
+}
+
+/** Same-origin target for all workbench postMessage calls. */
+export function workbenchTargetOrigin(): string {
+  return typeof window !== 'undefined' ? window.location.origin : ''
+}
+
 export type WorkbenchMessage =
   | RequestFocusMessage
   | QueryFocusMessage
   | FocusChangedMessage
+  | ToggleEditorMessage
+  | QueryEditorVisibilityMessage
+  | EditorVisibilityChangedMessage
   | StatusReportMessage
   | EditorSelectionMessage
   | PreviewChangeMessage
   | PreviewDataMessage
+  | ParamEditActiveMessage
   | RendererCommandMessage
   | LoadingStatusMessage
+  | ProjectChangedMessage
+  | RestoreLayoutMessage
+  | CapturePreviewMessage
+  | PreviewCapturedMessage
+  | PreviewLineageSelectionMessage
+  | LineageHighlightMessage
 
 export function isWorkbenchMessage(data: unknown): data is WorkbenchMessage {
   return (

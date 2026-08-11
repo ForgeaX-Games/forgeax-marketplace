@@ -8,7 +8,7 @@ import { splitTemplate, buildTemplateOps } from '../src/lib/templateOps.js'
 const here = dirname(fileURLToPath(import.meta.url))
 const AREA_PARTITION = resolve(
   here,
-  '../../batteries/templates/structures/districts/AreaPartition/AreaPartition.json',
+  '../../batteries/templates/structures/districts/AreaPartition/AreaPartition.generated.json',
 )
 
 describe('AreaPartition template instantiate ops', () => {

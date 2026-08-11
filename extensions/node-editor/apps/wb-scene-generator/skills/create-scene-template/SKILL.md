@@ -6,14 +6,14 @@ description: >-
   alg_* composition, six-stage pipeline, nested subgroups, exposed port contract,
   and verification. Use when creating or reviewing scene templates; when the user
   mentions template 模板组、groups/templates 双副本、scenealg、region partition
-  topology field points、instantiateTemplate、_nestedGroups.
+  topology field points、Templates 面板、_nestedGroups.
 ---
 
 # 场景模板组 · 制作 Skill（create-scene-template）
 
-> **用途**：在 wb-scene-generator 里**从零或从现有图**制作/发布一个 scene **模板组**（成组电池），供 Sino `scene:pipeline.instantiateTemplate` 与 UI Templates 面板使用。
+> **用途**：在 wb-scene-generator 里**从零或从现有图**制作/发布一个 scene **模板组**（成组电池），供 UI Templates 面板和人类/Workbench HTTP 工作流使用。
 >
-> **与 compose-sino-scene 的分工**：`compose-sino-scene` = **用**已有模板拼场景；本 skill = **做**模板本身。
+> AI 场景编排走 Scene Script；本 skill 只负责制作模板本身。
 
 ---
 
@@ -48,7 +48,7 @@ batteries/
     <Name>.json
     README.md（可选，开发期）
     icon.png（可选）
-  templates/<cat>/<Name>/       ← 【稳定发布版】Sino instantiateTemplate 唯一来源
+  templates/<cat>/<Name>/       ← 【稳定发布版】UI Templates 面板只读来源
     <Name>.json                 ← 与 groups 同内容快照（id/exposed 契约一致）
     README.md                   ← 必写：可见端口 + templateId + 静默空跑
     icon.png
@@ -57,14 +57,14 @@ batteries/
 | 路径 | 谁读 | 能否编辑 |
 |------|------|----------|
 | `groups/` | Develop → Groups 标签 | **可自由编辑**（保存默认落盘） |
-| `templates/` | `scene:templates.*` / instantiate | **只读发布**（builtin，Sino 用） |
+| `templates/` | UI Templates 面板 / group-template HTTP catalog | **只读发布**（builtin） |
 
 ### 双副本铁律
 
 1. **新建模板时必须同时创建 `groups/` 与 `templates/` 两份**，目录结构镜像、`<Name>.json` 初始内容一致。
 2. **日常迭代只在 `groups/<cat>/<Name>/` 改图**；定稿后再同步到 `templates/`（覆盖 json + README + icon）。
 3. **禁止**只在 `templates/` 有文件而 `groups/` 缺失——Develop 将无法打开可编辑副本。
-4. **禁止**只在 `groups/` 有文件而未 promote——Sino `instantiateTemplate` 找不到模板。
+4. **禁止**只在 `groups/` 有文件而未 promote——Templates 面板找不到模板。
 5. 同步时保持 **`id`、`exposedInputs`、`exposedOutputs`、`_nestedGroups` 完全一致**；仅发布流程更新 README / TEMPLATES_INDEX。
 
 ```bash
@@ -81,8 +81,8 @@ cp "$SRC/icon.png" "$DST/" 2>/dev/null || true
 | API / 工具 | scope | 说明 |
 |------------|-------|------|
 | `GET ?scope=groups` | groups | Develop 列表 |
-| `GET ?scope=templates` | templates | Sino 发现 |
-| `instantiateTemplate` | **仅 templates** | 不读 groups |
+| `GET ?scope=templates` | templates | Workbench 只读目录 |
+| `POST /api/v1/group-templates/:projectId/instantiate` | **仅 templates** | 人类/Workbench 落图，不读 groups |
 
 ---
 
@@ -96,8 +96,8 @@ Task Progress:
 - [ ] 4. 内部六段流水线合规 + 仅用 scenealg alg_* 复合 ③ 段（见 references/internal-pipeline.md）
 - [ ] 5. 嵌套子组自包含于 _nestedGroups（Tile/ObjectAssetName、MultiNames）
 - [ ] 6. exposedInputs/Outputs 契约 + customLabelEn（见 references/port-contract.md）
-- [ ] 7. groups 与 templates 两份 JSON 一致 → instantiate + execute 验证
-- [ ] 8. 写 README + 更新 TEMPLATES_INDEX + compose-sino-scene pipelines（若 Sino 要用）
+- [ ] 7. groups 与 templates 两份 JSON 一致 → Templates 面板拖入 + execute 验证
+- [ ] 8. 写 README + 更新 TEMPLATES_INDEX
 ```
 
 ### Step 1–2：创建双副本 + 在 Develop 搭内部图
@@ -181,7 +181,7 @@ AddBaseGrid **无 Rest**；BuildingStructures **无 Rest**（只细化已有建�
 - [ ] `_nestedGroups` 与 `__group__` member id / groupId 一致
 - [ ] **`groups/` 与 `templates/` 双副本存在且 JSON 一致**
 - [ ] ③ 段仅使用 `scenealg/alg_*`（无 alg_store/components 重型依赖）
-- [ ] promote 到 `templates/` 后 `scene:templates.get` 可见
+- [ ] promote 到 `templates/` 后 `GET /api/v1/group-templates/:id?scope=templates` 可见
 - [ ] instantiate + execute：主产物 children 非空，无静默空跑
 
 ---
@@ -209,13 +209,13 @@ pnpm test templateInstantiate
 
 | 文件 | 内容 |
 |------|------|
-| `<Name>.json` | NodeGroup + `_nestedGroups` |
-| `README.md` | templateId、可见 IN/OUT 表、串联示例、静默空跑条件 |
+| `<slug>.scene.ts` | canonical `defineGroup(meta, body)` Definition；内部以可读函数调用表达 |
+| `README.md` | 公开参数/输出语义、Scene Script 调用示例、约束与失败条件 |
 | `icon.png` | Templates 面板缩略图（可选但推荐） |
 
 并更新：
 - `batteries/templates/scene/TEMPLATES_INDEX.md` 一行
-- （若 Sino 使用）`skills/compose-sino-scene/instructions/pipelines/<Name>.md`
+- Scene Contract inventory 与七门验收证据；Sino 不维护模板专用 Prompt 文档
 
 ---
 

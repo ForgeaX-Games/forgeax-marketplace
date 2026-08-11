@@ -2,9 +2,13 @@
 // each with strict invariants documented in
 // docs/node-runtime-architecture/04-GRAPH-STATE.md:
 //
-//   graph.json           SSOT, overwrite-write, hash-validated
+//   graph.json           kernel execution projection, overwrite-write, hash-validated
 //   history.jsonl        append-only operation log
 //   outputs/<id>/<port>  execution cache (can be discarded)
+//
+// This layer intentionally does not define an authoring source of truth. A
+// canonical Scene Project owns semantics in `.scene.ts`; graph.json is rebuilt
+// from that project and remains authoritative only inside the runtime kernel.
 
 import type { GraphEdge, GraphNode, NodeGroup } from '../types/graph.js'
 

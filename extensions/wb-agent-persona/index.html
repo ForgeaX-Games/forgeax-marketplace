@@ -832,17 +832,6 @@ const GROUP_REGISTRY = [
     leadShortId: 'reia',
     memberShortIds: ['reel-storyboard', 'reel-video', 'reel-visual'],
   },
-  {
-    // Scene-asset pipeline family — mirrors agent-groups.ts. `director`
-    // (场景总监) leads, delegating to `sino` (场景构图) + `mira` (2D 资产).
-    // Unlike producer-family, `director` is a real agent plugin so it shows
-    // up in /api/extensions/list?kind=agent — no lead degradation needed.
-    // `mira` moved here out of art-family.
-    id: 'scene-pipeline-family',
-    kind: 'subagent-family',
-    leadShortId: 'director',
-    memberShortIds: ['sino', 'mira'],
-  },
 ];
 
 function shortAgentId(a) { return a.agent?.id ?? ''; }

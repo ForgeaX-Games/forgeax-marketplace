@@ -8,7 +8,7 @@
 //   4. Provide the breadcrumb navigation data.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Node, Edge, ReactFlowInstance } from '../../xyflow.js'
-import { usePipelineStore, setGroupInnerSink } from '../../stores/index.js'
+import { enqueueGroupParamExecute, usePipelineStore, setGroupInnerSink } from '../../stores/index.js'
 import { getPortTypeColor, type DomainPortTypes } from '../../utils/portTypes.js'
 import { DEFAULT_BATTERY_WIDTH, DEFAULT_GROUP_WIDTH, estimateBatteryNodeWidth, estimateGroupNodeWidth } from './canvasConstants.js'
 import type { Battery, NodeGroup, PipelineEdge, PipelineNode } from '../../types.js'
@@ -871,8 +871,12 @@ export function useCanvasGroupView({
     ))
     isDirtyRef.current = true
     scheduleInnerPersist()
+    const topLevelGroupId = usePipelineStore.getState().groupViewStack[0] ?? currentGroupId
+    if (topLevelGroupId) {
+      enqueueGroupParamExecute(() => usePipelineStore.getState(), topLevelGroupId)
+    }
     return true
-  }, [setNodes, scheduleInnerPersist])
+  }, [currentGroupId, setNodes, scheduleInnerPersist])
 
   // Register the inner param-edit sink while a group view is active so the store's
   // generic updateNodeParam routes an inner node's param edit here instead of the

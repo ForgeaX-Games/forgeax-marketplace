@@ -40,6 +40,9 @@ describe('battery category scanner', () => {
       type: 'common',
       nodeType: 'number_const',
       hideOutputs: true,
+      iconSvg: undefined,
+      sourcePath: 'common/number/numberConst',
+      sourceFiles: ['file:meta.json'],
     })
     expect(categories.get('inspect_probe')).toEqual({
       category: 'experimental/probe',
@@ -47,6 +50,9 @@ describe('battery category scanner', () => {
       type: 'experimental',
       nodeType: undefined,
       hideOutputs: undefined,
+      iconSvg: undefined,
+      sourcePath: 'experimental/probe/inspect',
+      sourceFiles: ['file:meta.json'],
     })
   })
 })

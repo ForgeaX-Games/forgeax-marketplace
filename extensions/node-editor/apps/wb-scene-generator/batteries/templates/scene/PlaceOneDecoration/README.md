@@ -1,6 +1,6 @@
 # PlaceOneDecoration（单点装饰物）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1783000010000_p1dec`，也可用 basename `PlaceOneDecoration`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1783000010000_p1dec`，也可用 basename `PlaceOneDecoration`。
 
 在指定**可放置区域**（上游 Scene 的底面形状）内，围绕参考 **Point** 尽可能贴近地放置**单个**装饰物：底面占地由 FootprintWidth × FootprintHeight 定义，竖向由 DecorationHeight 定义包围盒高度；放不下时 `alg_point2rect` 会自动缩小 footprint 直至完整落在区域内。
 
@@ -23,7 +23,7 @@
 | OUT | `out_0` | Scene 整树中间态 |
 | OUT | `out_4` | RestPath |
 
-其余 `in_*` 为 hidden 高级参数，默认即可。完整端口以 `scene:templates.get` 为准。
+其余 `in_*` 为 hidden 高级参数，默认即可。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。
 
 ## 内部算法链（固定操作）
 
@@ -115,7 +115,7 @@ PlaceOneDecoration.out_2(Rest)       → 下一层 in_1 或 LakeRegions
 ```bash
 PID=p_mr4b9s3j_dycp8k
 curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
-  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: ai' \
+  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: workbench' \
   -d '{"narrativeLocationNames":["父区域","路口石灯"]}' \
   | jq '.outputs.verify_p1dec | {out_1:.out_1.totalCellCount, out_2:.out_2.totalCellCount, out_3:.out_3.itemCount}'
 # 预期：out_1/out_2 totalCellCount > 0；out_3 itemCount ≥ 1
@@ -136,7 +136,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 ### 前置：造一个独立 Demo Scene（可跨模板复用的固定写法）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AddBaseGrid", "groupId":"demo_abg", "position":{"x":-800,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid（独立 demo scene）"} } }
 ```
@@ -169,7 +169,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 ### applyBatch 片段（可直接照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"PlaceOneDecoration", "groupId":"demo_p1dec", "position":{"x":-400,"y":1500},
            "opts":{"actor":"ai:sino","label":"实例化 PlaceOneDecoration"} } }
 ```

@@ -1,4 +1,56 @@
 import Fastify, { type FastifyInstance } from 'fastify'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import { registerGroupTemplateRoutes } from '../src/routes/groupTemplates.js'
+
+let app: FastifyInstance
+
+beforeEach(async () => {
+  app = Fastify({ logger: false })
+  await registerGroupTemplateRoutes(app)
+  await app.ready()
+})
+
+afterEach(async () => {
+  await app.close()
+})
+
+describe('native-only Group/Template catalog', () => {
+  it('loads all 52 production entries from .scene.ts Definitions', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/v1/group-templates?scope=all' })
+    expect(response.statusCode).toBe(200)
+    const items = response.json() as Array<{
+      sourcePath: string
+      nativeDefinition?: { functionName: string; inputs: Array<Record<string, unknown>>; definition?: unknown }
+    }>
+    expect(items).toHaveLength(52)
+    expect(items.every((item) => item.sourcePath.endsWith('.scene.ts'))).toBe(true)
+    expect(items.every((item) => item.nativeDefinition && !('definition' in item.nativeDefinition))).toBe(true)
+  })
+
+  it('keeps group and template scopes separate', async () => {
+    const groups = await app.inject({ method: 'GET', url: '/api/v1/group-templates?scope=groups' })
+    const templates = await app.inject({ method: 'GET', url: '/api/v1/group-templates?scope=templates' })
+    expect((groups.json() as Array<{ displayGroup: string }>).every((item) => item.displayGroup.startsWith('groups/'))).toBe(true)
+    expect((templates.json() as Array<{ displayGroup: string }>).every((item) => item.displayGroup.startsWith('templates/'))).toBe(true)
+  })
+})
+
+describe('removed legacy JSON authoring endpoints', () => {
+  for (const [name, url] of [
+    ['group save', '/api/v1/group-templates/save'],
+    ['user template save', '/api/v1/group-templates/save-user'],
+    ['legacy instantiate', '/api/v1/group-templates/legacy/instantiate'],
+  ] as const) {
+    it(`returns 410 for ${name}`, async () => {
+      const response = await app.inject({ method: 'POST', url, payload: {} })
+      expect(response.statusCode).toBe(410)
+      expect(response.json()).toEqual(expect.objectContaining({ status: 'rejected' }))
+    })
+  }
+})
+/*
+import Fastify, { type FastifyInstance } from 'fastify'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -137,6 +189,28 @@ describe('DELETE /api/v1/group-templates/groups/:id', () => {
 })
 
 describe('GET /api/v1/group-templates scope', () => {
+  it('publishes native function name and public contract without sealed internals', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/v1/group-templates?scope=templates' })
+    expect(res.statusCode).toBe(200)
+    const items = res.json() as Array<{
+      sourcePath?: string
+      nativeDefinition?: {
+        functionName: string
+        kind: string
+        inputs: Array<Record<string, unknown>>
+        definition?: unknown
+      }
+    }>
+    const addBaseGrid = items.find((item) => item.sourcePath?.includes('AddBaseGrid'))
+    expect(addBaseGrid?.nativeDefinition).toEqual(expect.objectContaining({
+      functionName: 'addBaseGrid',
+      kind: 'template',
+      inputs: expect.arrayContaining([expect.objectContaining({ name: 'rootScene' })]),
+    }))
+    expect(addBaseGrid?.nativeDefinition).not.toHaveProperty('definition')
+    expect(addBaseGrid?.nativeDefinition?.inputs.every((port) => !('parameterTarget' in port))).toBe(true)
+  })
+
   it('scope=templates excludes groups-only develop batteries', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/v1/group-templates?scope=templates' })
     expect(res.statusCode).toBe(200)
@@ -198,15 +272,12 @@ describe('POST /api/v1/group-templates/save-user', () => {
     const written = JSON.parse(await readFile(body.filePath, 'utf8'))
     expect(written.name).toBe('My Template')
 
-    // It surfaces in the unified listing as a template under big-label "My templates".
+    // JSON-only user content is not production-visible until migrated to a
+    // native Scene Definition.
     const list = await app.inject({ method: 'GET', url: '/api/v1/group-templates' })
     const items = list.json() as Array<{ id: string; category: string; displayGroup: string; sourcePath?: string }>
     const found = items.find((i) => i.id === 'u-test-1')
-    expect(found).toBeTruthy()
-    expect(found!.category).toBe('My templates')
-    expect(found!.displayGroup).toBe('templates/My templates')
-    // sourcePath contains a literal `templates` segment so the frontend can derive the small tag.
-    expect(found!.sourcePath?.replace(/\\/g, '/')).toContain('templates/My templates/my_tag/')
+    expect(found).toBeUndefined()
   })
 
   it('marks user templates builtin:false and deletes them by id', async () => {
@@ -221,14 +292,11 @@ describe('POST /api/v1/group-templates/save-user', () => {
     })
     expect(save.statusCode).toBe(200)
 
-    // Listed as a user template (builtin:false); any preset stays read-only.
+    // JSON-only content remains deletable but is excluded from production catalog.
     const list = await app.inject({ method: 'GET', url: '/api/v1/group-templates' })
     const items = list.json() as Array<{ id: string; category: string; builtin?: boolean }>
     const mine = items.find((i) => i.id === 'u-del-1')
-    expect(mine?.builtin).toBe(false)
-    expect(
-      items.every((i) => i.builtin !== false || i.id === 'u-del-1' || i.category === 'My templates'),
-    ).toBe(true)
+    expect(mine).toBeUndefined()
 
     // Delete by id → disappears from the listing.
     const del = await app.inject({ method: 'DELETE', url: '/api/v1/group-templates/user/u-del-1' })
@@ -253,7 +321,7 @@ describe('POST /api/v1/group-templates/save-user', () => {
     expect(res.json().error).toMatch(/smallTag/)
   })
 
-  it('reads any .png in the template folder as preview (not just icon.png)', async () => {
+  it('does not publish previews for JSON-only user templates', async () => {
     const save = await app.inject({
       method: 'POST',
       url: '/api/v1/group-templates/save-user',
@@ -275,6 +343,7 @@ describe('POST /api/v1/group-templates/save-user', () => {
     const list = await app.inject({ method: 'GET', url: '/api/v1/group-templates' })
     const items = list.json() as Array<{ id: string; iconPng?: string }>
     const found = items.find((i) => i.id === 'u-png-1')
-    expect(found?.iconPng).toMatch(/^data:image\/png;base64,/)
+    expect(found).toBeUndefined()
   })
 })
+*/

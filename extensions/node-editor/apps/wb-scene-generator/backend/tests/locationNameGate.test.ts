@@ -101,7 +101,7 @@ describe('checkLocationNameAlignment', () => {
     expect(rejection).toBeNull()
   })
 
-  it('is a DEFAULT-OFF no-op when no narrative names are supplied (mirrors isSinoBatch/checkSinoOpAllowlist)', () => {
+  it('is a DEFAULT-OFF no-op when no narrative names are supplied', () => {
     expect(checkLocationNameAlignment([], ['whatever'])).toBeNull()
   })
 })

@@ -5,8 +5,8 @@ import { getProjectRegistry, getRuntimeForProject } from '../runtime.js'
 import { extractCaller } from './projects.js'
 import { getBatteryCategories } from './batteryCategories.js'
 import { logOutputFetch, logPersistBatch } from '../lib/persistTrace.js'
-import { checkPlaceOneSeedOnPointMiswire, checkSinoOpAllowlist, isSinoBatch } from './sinoOpGate.js'
 import { pipelineHashOnly, summarizePipeline } from '../pipeline-summary.js'
+import { handleAuthoringRuntimeBatch } from '../scene-script/runtimeBatchAdapter.js'
 
 export async function registerQueryRoutes(app: FastifyInstance): Promise<void> {
   await registerProjectPipelineRoutes(app, {
@@ -16,43 +16,7 @@ export async function registerQueryRoutes(app: FastifyInstance): Promise<void> {
     getBatteryCategories: async () =>
       (await getBatteryCategories()) as unknown as Map<string, Record<string, unknown>>,
     logOutputFetch,
-    beforeApplyBatch: async (req, projectId, ops) => {
-      const opts = (req.body as { opts?: { actor?: string } })?.opts
-      if (isSinoBatch(opts, req.headers['x-forgeax-caller-agent-id'])) {
-        const rejection = checkSinoOpAllowlist(ops)
-        if (rejection) {
-          return {
-            status: 403,
-            body: {
-              reason: rejection.reason,
-              fix: rejection.fix,
-              opIndex: rejection.opIndex,
-              opId: rejection.opId,
-              channel: 'applyBatch channel B — use instantiateTemplate (channel A) for template groups',
-            },
-          }
-        }
-        try {
-          const snap = getPipeline(await getRuntimeForProject(projectId))
-          const miswire = checkPlaceOneSeedOnPointMiswire(ops, snap?.nodes ?? null)
-          if (miswire) {
-            return {
-              status: 422,
-              body: {
-                reason: miswire.reason,
-                fix: miswire.fix,
-                opIndex: miswire.opIndex,
-                opId: miswire.opId,
-                channel: 'applyBatch PlaceOne Point≠Seed',
-              },
-            }
-          }
-        } catch {
-          // Gate is best-effort; never block unrelated batches if snapshot read fails.
-        }
-      }
-      return null
-    },
+    handleApplyBatch: handleAuthoringRuntimeBatch,
     logPersistBatch: (ops, result, meta) => {
       logPersistBatch(
         ops as never,

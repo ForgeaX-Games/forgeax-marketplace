@@ -4,23 +4,33 @@
 //   * No imports from other modes (free3d / billboard / iso / top).
 //   * Shared primitives only from `../../framework/*` and local `./` modules.
 //
-// Data: tile layers → heightfield terrain; object layers with matching
-// materials/models assetName → GLB instances (exact name).
+// Data: tile layers → smooth terrain; dense grid layers → discrete stepped
+// heightfields; object layers with matching materials/models assetName → GLB
+// instances (exact name).
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { useBakedLayer, useBakedLayerKeys, useVoxelLayer, useVoxelLayerKeys } from '../../framework/useLayer'
+import {
+  useBakedLayer,
+  useBakedLayerKeys,
+  useGridLayer,
+  useGridLayerKeys,
+  useVoxelLayer,
+  useVoxelLayerKeys,
+} from '../../framework/useLayer'
 import { useLayerSurface } from '../../framework/useLayerSurface'
 import { useRenderStore } from '../../store'
 import { registerRenderPlugin, type PluginHandle } from '../../framework/plugin'
 import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
+import { createViewGuides3d, disposeViewGuides3d } from '../../framework/guides3d'
 import { mergeRenderableVoxelLayerKeys, orderBakedKeysForRender } from '../../framework/layerKeys'
 import {
   buildSplatField,
   createSplatControlTexture,
   rankSplatMaterialNames,
 } from './buildSplatField'
+import { buildGridHeightMesh, disposeGridHeightMesh } from './buildGridHeightMesh'
 import { buildTerrainMesh, disposeTerrainMesh, type TerrainSplatInput } from './buildTerrainMesh'
 import { disposePbrMaps, loadPbrMaps } from './loadPbrTextures'
 import { loadObjectTemplate } from './loadObjectModel'
@@ -38,14 +48,17 @@ import './ModeMesh3d.css'
 const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlugin(_, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const drawMode = useRenderStore(s => s.drawMode)
+  const viewGuidesVisible = useRenderStore(s => s.viewGuides['3DMesh'])
 
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
   const rootGroupRef = useRef<THREE.Group | null>(null)
+  const viewGuidesRef = useRef<THREE.Group | null>(null)
   const meshRef = useRef<THREE.Mesh | null>(null)
   const objectsRef = useRef<THREE.Group | null>(null)
+  const gridMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map())
   const userInteractedRef = useRef(false)
 
   const [, forceTick] = useState(0)
@@ -80,6 +93,9 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
     renderer.domElement.style.touchAction = 'none'
 
     const scene = new THREE.Scene()
+    const viewGuides = createViewGuides3d()
+    viewGuides.visible = viewGuidesVisible
+    scene.add(viewGuides)
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1 * BASE_CELL_SIZE, 10000 * BASE_CELL_SIZE)
     camera.up.set(0, 0, 1)
     const initDist = 12 * BASE_CELL_SIZE
@@ -116,6 +132,7 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
     cameraRef.current = camera
     controlsRef.current = controls
     rootGroupRef.current = root
+    viewGuidesRef.current = viewGuides
 
     const syncSize = (): boolean => {
       const rect = container.getBoundingClientRect()
@@ -132,13 +149,15 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
 
     if (meshRef.current) root.add(meshRef.current)
     if (objectsRef.current) root.add(objectsRef.current)
-    if (!userInteractedRef.current && (meshRef.current || objectsRef.current)) {
+    for (const mesh of gridMeshesRef.current.values()) root.add(mesh)
+    if (!userInteractedRef.current && (meshRef.current || objectsRef.current || gridMeshesRef.current.size > 0)) {
       autoFitToContent(root, camera, controls)
     }
 
     const renderOnce = () => {
       const sizeChanged = syncSize()
-      if (sizeChanged && !userInteractedRef.current && meshRef.current) {
+      if (sizeChanged && !userInteractedRef.current
+        && (meshRef.current || objectsRef.current || gridMeshesRef.current.size > 0)) {
         autoFitToContent(root, camera, controls)
       }
       const mesh = meshRef.current
@@ -193,6 +212,8 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
         disposeObjectGroup(objectsRef.current)
         objectsRef.current = null
       }
+      scene.remove(viewGuides)
+      disposeViewGuides3d(viewGuides)
       scene.clear()
       renderer.dispose()
       if (renderer.domElement.parentElement === container) {
@@ -203,18 +224,31 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
       cameraRef.current = null
       controlsRef.current = null
       rootGroupRef.current = null
+      viewGuidesRef.current = null
       userInteractedRef.current = false
     }
+    // Visibility changes are applied imperatively below; setup remains mount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (viewGuidesRef.current) viewGuidesRef.current.visible = viewGuidesVisible
+    const sched = (rendererRef.current as unknown as { __scheduleRender?: () => void } | null)?.__scheduleRender
+    sched?.()
+  }, [viewGuidesVisible])
 
   const onMeshUpdate = useCallback((mesh: THREE.Mesh | null) => {
     const prev = meshRef.current
+    if (prev === mesh) return
     meshRef.current = mesh
     const root = rootGroupRef.current
     if (root) {
-      if (prev) root.remove(prev)
       if (mesh) root.add(mesh)
-      if (!userInteractedRef.current && (mesh || objectsRef.current)) {
+      if (prev) {
+        root.remove(prev)
+        disposeTerrainMesh(prev)
+      }
+      if (!userInteractedRef.current && (mesh || objectsRef.current || gridMeshesRef.current.size > 0)) {
         autoFitToContent(root, cameraRef.current, controlsRef.current)
       }
     }
@@ -225,17 +259,41 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
 
   const onObjectsUpdate = useCallback((group: THREE.Group | null) => {
     const prev = objectsRef.current
+    if (prev === group) return
     objectsRef.current = group
     const root = rootGroupRef.current
     if (root) {
+      if (group) root.add(group)
       if (prev) {
         root.remove(prev)
         disposeObjectGroup(prev)
       }
-      if (group) root.add(group)
-      if (!userInteractedRef.current && (group || meshRef.current)) {
+      if (!userInteractedRef.current && (group || meshRef.current || gridMeshesRef.current.size > 0)) {
         autoFitToContent(root, cameraRef.current, controlsRef.current)
       }
+    }
+    const sched = (rendererRef.current as unknown as { __scheduleRender?: () => void } | null)?.__scheduleRender
+    sched?.()
+    bumpTick()
+  }, [bumpTick])
+
+  const onGridMeshUpdate = useCallback((key: string, mesh: THREE.Mesh | null) => {
+    const previous = gridMeshesRef.current.get(key)
+    if (previous === mesh) return
+    const root = rootGroupRef.current
+    if (mesh) {
+      gridMeshesRef.current.set(key, mesh)
+      if (mesh.parent !== root) root?.add(mesh)
+    } else {
+      gridMeshesRef.current.delete(key)
+    }
+    if (previous) {
+      root?.remove(previous)
+      disposeGridHeightMesh(previous)
+    }
+    if (root && !userInteractedRef.current
+      && (meshRef.current || objectsRef.current || gridMeshesRef.current.size > 0)) {
+      autoFitToContent(root, cameraRef.current, controlsRef.current)
     }
     const sched = (rendererRef.current as unknown as { __scheduleRender?: () => void } | null)?.__scheduleRender
     sched?.()
@@ -266,6 +324,7 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
 
   const voxelKeys = useVoxelLayerKeys()
   const bakedKeys = useBakedLayerKeys()
+  const gridKeys = useGridLayerKeys()
   const orderedKeys = useMemo(
     () => mergeRenderableVoxelLayerKeys(voxelKeys, orderBakedKeysForRender(bakedKeys)),
     [voxelKeys, bakedKeys],
@@ -285,6 +344,14 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
         assetMode={assetMode}
         onMeshUpdate={onMeshUpdate}
       />
+      {gridKeys.map((key) => (
+        <GridHeightMeshInstance
+          key={key}
+          layerKey={key}
+          wireframe={wireframe}
+          onMeshUpdate={onGridMeshUpdate}
+        />
+      ))}
       <ObjectModelsInstance
         orderedKeys={orderedKeys}
         // GLB props resolve by family stem (firtree/shrub/…) — not Asset Store PNGs.
@@ -296,6 +363,40 @@ const ModeMesh3dPlugin = forwardRef<PluginHandle, object>(function ModeMesh3dPlu
   )
 })
 ModeMesh3dPlugin.displayName = 'ModeMesh3dPlugin'
+
+interface GridHeightMeshInstanceProps {
+  layerKey: string
+  wireframe: boolean
+  onMeshUpdate(key: string, mesh: THREE.Mesh | null): void
+}
+
+function GridHeightMeshInstance({
+  layerKey,
+  wireframe,
+  onMeshUpdate,
+}: GridHeightMeshInstanceProps) {
+  const layer = useGridLayer(layerKey)
+  const selectedEditorNodeIds = useRenderStore(s => s.selectedEditorNodeIds)
+  const selectedKey = selectedEditorNodeIds.join(',')
+  const cacheKey = layer?.visible
+    ? `${layer.updatedAt}|${layer.rows}x${layer.cols}|w=${wireframe ? 1 : 0}|sel=${selectedKey}`
+    : undefined
+  const mesh = useLayerSurface<THREE.Mesh | null>(
+    cacheKey,
+    () => buildGridHeightMesh({
+      layer: layer!,
+      wireframe,
+      selectedEditorNodeIds,
+    }),
+  )
+
+  useEffect(() => {
+    onMeshUpdate(layerKey, mesh)
+  }, [layerKey, mesh, onMeshUpdate])
+
+  useEffect(() => () => onMeshUpdate(layerKey, null), [layerKey, onMeshUpdate])
+  return null
+}
 
 function disposeObjectGroup(group: THREE.Group): void {
   // Templates are cached; only dispose instanced scene graph leaves that own nothing unique.
@@ -368,7 +469,19 @@ function TerrainMeshInstance({
   const versionsRef = useRef<Map<string, string>>(new Map())
   const [revision, setRevision] = useState(0)
   const [splat, setSplat] = useState<TerrainSplatInput | null>(null)
+  const splatRef = useRef<TerrainSplatInput | null>(null)
+  splatRef.current = splat
   const [splatReadyKey, setSplatReadyKey] = useState('')
+  const retiredSplatsRef = useRef<TerrainSplatInput[]>([])
+  const settledSplatKeyRef = useRef('')
+  if (!splatReadyKey.startsWith('loading:')) settledSplatKeyRef.current = splatReadyKey
+
+  const replaceSplat = useCallback((next: TerrainSplatInput | null) => {
+    setSplat((prev) => {
+      if (prev && prev !== next) retiredSplatsRef.current.push(prev)
+      return next
+    })
+  }, [])
 
   const onLayerSamples = useCallback((key: string, samples: TileCellSample[] | null, version: string) => {
     if (!samples || samples.length === 0) {
@@ -397,10 +510,7 @@ function TerrainMeshInstance({
   // Async splat resolve — top-4 assetNames by coverage, exact pack match each.
   useEffect(() => {
     if (!assetMode || wireframe) {
-      setSplat((prev) => {
-        disposeSplatInput(prev)
-        return null
-      })
+      replaceSplat(null)
       setSplatReadyKey('')
       return
     }
@@ -408,10 +518,7 @@ function TerrainMeshInstance({
     const field = buildSurfaceField(samples)
     const ranked = rankSplatMaterialNames(field)
     if (ranked.length === 0) {
-      setSplat((prev) => {
-        disposeSplatInput(prev)
-        return null
-      })
+      replaceSplat(null)
       setSplatReadyKey('none')
       return
     }
@@ -435,10 +542,7 @@ function TerrainMeshInstance({
         }
         if (cancelled) return
         if (loadedNames.length === 0) {
-          setSplat((prev) => {
-            disposeSplatInput(prev)
-            return null
-          })
+          replaceSplat(null)
           setSplatReadyKey(`miss:${ranked.join('+')}`)
           return
         }
@@ -454,17 +558,11 @@ function TerrainMeshInstance({
           controlMap,
           layers: loadedLayers,
         }
-        setSplat((prev) => {
-          disposeSplatInput(prev)
-          return next
-        })
+        replaceSplat(next)
         setSplatReadyKey(`ok:${loadedNames.join('+')}`)
       } catch {
         if (cancelled) return
-        setSplat((prev) => {
-          disposeSplatInput(prev)
-          return null
-        })
+        replaceSplat(null)
         setSplatReadyKey(`err:${ranked.join('+')}`)
       }
     })()
@@ -472,13 +570,12 @@ function TerrainMeshInstance({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assetMode, wireframe, orderedKeys, revision])
+  }, [assetMode, wireframe, orderedKeys, revision, replaceSplat])
 
   useEffect(() => () => {
-    setSplat((prev) => {
-      disposeSplatInput(prev)
-      return null
-    })
+    disposeSplatInput(splatRef.current)
+    splatRef.current = null
+    for (const retired of retiredSplatsRef.current.splice(0)) disposeSplatInput(retired)
   }, [])
 
   const cacheKey = useMemo(() => {
@@ -486,7 +583,7 @@ function TerrainMeshInstance({
       `w=${wireframe ? 1 : 0}`,
       `c=${colorMode ? 1 : 0}`,
       `a=${assetMode ? 1 : 0}`,
-      `splat=${splatReadyKey}`,
+      `splat=${settledSplatKeyRef.current}`,
       `sel=${selectedKey}`,
     ]
     for (const k of orderedKeys) {
@@ -511,11 +608,13 @@ function TerrainMeshInstance({
         splat: useSplat ? splat : null,
       })
     },
-    (m) => { if (m) disposeTerrainMesh(m) },
   )
 
   useEffect(() => {
     onMeshUpdate(mesh)
+    // The scene swap above has detached and disposed the old terrain mesh, so
+    // textures referenced by its retired splat material are now safe to free.
+    for (const retired of retiredSplatsRef.current.splice(0)) disposeSplatInput(retired)
   }, [mesh, onMeshUpdate])
 
   useEffect(() => () => onMeshUpdate(null), [onMeshUpdate])

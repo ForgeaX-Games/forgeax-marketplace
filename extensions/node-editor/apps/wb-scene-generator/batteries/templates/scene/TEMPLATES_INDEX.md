@@ -1,13 +1,13 @@
 # 场景模板组总览索引（TEMPLATES_INDEX）
 
-> **这是 sino agent 用模板电池的第一步入口。** 工作流程：
-> **① 先查这张总表**——根据需求定位要用哪几个 template 电池；
-> **② 再去读对应电池的 `<Name>/README.md` 详细文档**；
-> **③ 按 README 实例化 + 连线；④ 连线后立即 `pipeline.get` + `execute` 验证**。
+> **这是 Workbench 的模板目录索引，不是 Agent 调用规范。**
+> Sino 只读取版本化 `scene:script.contracts`，通过公开 Scene Script 函数调用密封
+> Template Definition；不会读取端口号、内部连线或本目录的运行时图说明。
 >
 > 若要理解「模板**内部**反复出现的固定子流程」（输入规范化、主/Rest 拆分、Path 句柄、嵌套子组等），见 **[TEMPLATE_PATTERNS.md](./TEMPLATE_PATTERNS.md)**。
 >
-> 端口语义以 `scene:templates.get` / 各 `README.md` 为准。实例化用 `scene:pipeline.instantiateTemplate`，返回**全新运行时 groupId**，连线一律用返回值，不要硬编下表的库 id。
+> 对 Agent 而言，参数与输出语义只以 Scene Contract 为准。下表中的运行时端口与
+> templateId 仅供 Workbench 维护和历史排障。
 >
 > ### ⛰️ 高差与连通（选模板前必读）
 > **当前尚无坡道/台阶系统**，高度层之间无法自动衔接。因此：**先**放置关键内容（建筑、结构）并 **`PathConnection` 确认连通**，**再**在剩余区域用 **`MountainContourGenerate`** 添加高差以体现层次；**`MaxElevationLayers` 建议不超过 `2`**（`0`=平地，`1~2`=轻度层次）。高差**避开叙事核心区**（建筑/道路/广场/地标），只加在外围 Rest。**地形完成后**再按选型放装饰。典型顺序：分区/分带 → 建筑 → 道路 → 高差（Rest 外围）→ **装饰（按选型）** → 湖。
@@ -15,7 +15,7 @@
 > ### 🌿 装饰选型（按能力，不必硬凑三种）
 > - **`PlaceOneDecoration`**：少量、有明确位置和/或底面尺寸 → **优先**（唯一可控 footprint）。
 > - **`LocalPreciseDecoration` / `NaturalDecorationDistribution`**：**仅**挂底面简单、结构简单的小物件做簇/背景填充；禁止复杂体量。
-> - 大片 Rest 空白时再叠加 Local → Natural；装饰很少且全是精准物件时可以只用 PlaceOne。详见 compose-sino-scene SKILL「装饰选型」。
+> - 大片 Rest 空白时再叠加 Local → Natural；装饰很少且全是精准物件时可以只用 PlaceOne。
 
 > **当前发布版模板** 由 `batteries/groups/scene/` 同步而来；旧版 `ArchitectureRegions` / `ArchitectureStructures` / `FarmlandRegions` / `PointSampleBuilding` / `RandomNaturalDecoration` 已移除。
 
@@ -35,7 +35,7 @@
 | **AreaPartition**<br>区域划分 | `group_area_partition_district` | 按 point2d 中心点+面积权重纯划分父区域（无 Rest） | `in_0`Scene / `in_1`Points / `in_2`Areas / `in_3`ZoneNames / `in_4`ZoneAssets | `out_0`Scene / `out_1`Zones / `out_2`ZonesPath | 结构/分区层 | [README](../structures/districts/AreaPartition/README.md) |
 | **MountainContourGenerate**<br>等高线山头 | `group_mountain_contour_generate` | 剩余区域 FBM 高度场 + 整数层截断（**道路连通后**；层数 ≤2） | `in_0`Scene / `in_1`AssetName / `in_3`MaxElevationLayers / `in_2`Seed | `out_2`Mountain / `out_1`Rest | **高差层**（建筑+道路之后，装饰之前） | [README](../structures/topographic/MountainContourGenerate/README.md) |
 
-> 所有模板组其余 `in_*` 多为 `[hidden]` 高级调参，默认即可；细节见各 README 或 `scene:templates.get`。
+> 所有模板组其余 `in_*` 多为 `[hidden]` 高级调参，默认即可；细节见各 README 或 `GET /api/v1/group-templates/:id?scope=templates`。
 
 > ⚠️ **必接 scene 端口悬空会「静默空跑」**：该组不产输出、`execute` 仍 `completed`。典型：`PathConnection` 的 POI(`in_3`) 或 `NaturalDecorationDistribution.in_1` 未接有效上游 scene。
 
@@ -56,7 +56,8 @@
 
 ### CLI 已实现命令（forgeax，权威，以 `node-runtime-cli/src/index.ts` 为准）
 
-定位参数（三选一）：`--project-id <id> --project-root <ws>` ｜ `--graph-file <path>` ｜ `--pipeline-id <id> --project-root <ws>`；运行 op 类命令再加 `--batteries <dir>`。输出默认 JSON，加 `--ndjson` 出流式。
+> 本节 raw graph CLI 表仅保留为历史运行时诊断参考，不再是生产 authoring 接口。
+> 新项目必须通过 `.scene.ts`、Scene Authoring Commands 或 Studio 节点编辑器写回 canonical Scene Script。
 
 | 操作 | CLI 命令 | 等价 op |
 |---|---|---|
@@ -65,10 +66,10 @@
 | 连线 | `forgeax node connect --edge-id <id> --from <node:port> --to <node:port>` | `connect` |
 | 改参数/位置 | `forgeax node update --node-id <id> --params '<json>' [--x --y]` | `updateNode`（只合并 params） |
 | 删节点 / 删边 | `forgeax node delete --node-id <id>` / `forgeax node disconnect --edge-id <id>` | `deleteNode` / `disconnect` |
-| 批量 op | `forgeax pipeline apply --ops '<JSON array of ops>'` | 同 `scene:pipeline.applyBatch` schema |
+| 批量 op | 已移除 | 使用 Scene Authoring Commands |
 | 读图结构 | `forgeax pipeline get` | 返回顶层 nodes/edges + groups（可断言 `__group__`/嵌套组/exposed 连边） |
 | 执行 | `forgeax pipeline execute [--node <id>]` | 省略 `--node` 跑整图；带 `--node` 只跑该节点上游闭包 |
-| 导入整图 | `forgeax pipeline import --file <path> [--mode replace\|merge] [--remap] [--execute none\|downstream\|full]` | — |
+| 导入整图 | 已移除 | 使用 Legacy Lift 生成 canonical Scene Project |
 | 项目 | `forgeax project list\|create\|open\|delete`（create 需 `--name`） | — |
 
 > **未实现（会抛错，勿用）**：`pipeline list`、`node list`、`asset *`、`path-slot *`、`history *`。CLI README 里的 `node list --type` 等是 stub 阶段画饼，实际未实现。

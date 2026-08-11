@@ -28,6 +28,17 @@ export interface ProjectPipelineRouteDeps {
     projectId: string,
     ops: unknown[],
   ) => Promise<{ status: number; body: unknown } | null>
+  /**
+   * Optional canonical-authoring interceptor. Returning a response means the
+   * interceptor committed the mutation through its own transaction and the
+   * legacy runtime batch must not run a second time.
+   */
+  handleApplyBatch?: (
+    req: FastifyRequest,
+    projectId: string,
+    ops: unknown[],
+    opts: { actor?: string; label?: string; batchId?: string; ephemeral?: boolean; expectedPrevHash?: string } | undefined,
+  ) => Promise<{ status: number; body: unknown } | null>
   getBatteryCategories?: () => Promise<Map<string, Record<string, unknown>>>
   logOutputFetch?: (
     nodeId: string,
@@ -554,6 +565,8 @@ export async function registerProjectPipelineRoutes(
     }
     const rejection = await deps.beforeApplyBatch?.(req, projectId, ops)
     if (rejection) return reply.code(rejection.status).send(rejection.body)
+    const handled = await deps.handleApplyBatch?.(req, projectId, ops, opts)
+    if (handled) return reply.code(handled.status).send(handled.body)
     const rt = await deps.getRuntimeForProject(projectId)
     const result = await applyBatch(rt, ops as never, {
       actor: opts?.actor ?? 'ui',

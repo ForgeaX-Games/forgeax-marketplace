@@ -55,6 +55,7 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
   const drawMode = useRenderStore(s => s.drawMode)
   const aliasMetas = useRenderStore(s => s.aliasMetas)
   const selectedEditorNodeIds = useRenderStore(s => s.selectedEditorNodeIds)
+  const showGrid = useRenderStore(s => s.viewGuides.top)
   // Viewport (pan/zoom) is intentionally NOT React-subscribed — same fix as
   // mode-topBillboard (see its index.tsx for the full rationale): subscribing
   // re-renders this whole plugin (+ every VoxelLayerInstance/GridLayerInstance
@@ -118,7 +119,7 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
         rows: entry.rows,
         cols: entry.cols,
         isSelected: false,
-        isEditorSelected: selectedEditorNodeIds.includes(entry.nodeId),
+        isEditorSelected: selectedEditorNodeIds.includes(entry.nodeId) || selectedEditorNodeIds.includes(key),
         worldAlign: entry.worldAlign,
         worldOffsetX: entry.worldOffsetX,
         worldOffsetY: entry.worldOffsetY,
@@ -164,8 +165,9 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
       offsetX: viewportRef.current.offsetX,
       offsetY: viewportRef.current.offsetY,
       scale: viewportRef.current.scale,
+      showGrid,
     })
-  }, [sortedSurfaces, maxRows, maxCols])
+  }, [sortedSurfaces, maxRows, maxCols, showGrid])
 
   useEffect(() => { compose() }, [compose])
 

@@ -83,6 +83,7 @@ describe('faithful sidebar smoke', () => {
     expect(bar).not.toBeNull()
     expect(bar?.classList.contains('battery-bar--vertical')).toBe(true)
     expect(container.querySelector('.bb-body')).not.toBeNull()
+    expect(container.querySelector('.bb-rail-scroll-region')).not.toBeNull()
     expect(container.querySelector('.bb-scroller')).not.toBeNull()
 
     // The seeded battery renders as a draggable .battery-row with its name.

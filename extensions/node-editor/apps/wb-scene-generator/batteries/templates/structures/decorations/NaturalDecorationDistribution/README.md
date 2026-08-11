@@ -1,6 +1,6 @@
 # NaturalDecorationDistribution（自然装饰散布）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1782117984754_5oqi1`，也可用 basename `NaturalDecorationDistribution`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1782117984754_5oqi1`，也可用 basename `NaturalDecorationDistribution`。
 
 在剩余空地上按密度散布自然装饰。接上一组的 Rest/Non-Path 场景。
 
@@ -19,7 +19,7 @@
 | OUT | `out_1` | Decoration 装饰（主产物；**单份**已内部 `scene_merge_subtrees` 收束的 scene，不再按装饰点 fan-out 成 N 份整树） |
 | OUT | `out_2` | Rest 剩余空地 |
 
-`in_1` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。
+`in_1` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。
 
 ---
 
@@ -64,7 +64,7 @@
 ```bash
 PID=p_mr4b9s3j_dycp8k
 curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
-  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: ai' \
+  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: workbench' \
   -d '{"narrativeLocationNames":["父区域"]}' \
   | jq '.outputs.verify_nd1.out_4.itemCount'
 # 预期 ≥ 3（含前缀 自然）
@@ -79,7 +79,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 ### 前置：造一个独立 Demo Scene（可跨模板复用的固定写法）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AddBaseGrid", "groupId":"demo_abg", "position":{"x":-800,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid（独立 demo scene）"} } }
 ```
@@ -112,7 +112,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 ### applyBatch 片段（可直接照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"NaturalDecorationDistribution", "groupId":"demo_nd", "position":{"x":-400,"y":1800},
            "opts":{"actor":"ai:sino","label":"实例化 NaturalDecorationDistribution"} } }
 ```

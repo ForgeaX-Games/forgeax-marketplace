@@ -86,6 +86,7 @@ function debugPreviewErrors(): boolean {
 // still own eviction and the durable post-drag refresh.
 type LiveProjector = (outputs: Record<string, Record<string, unknown>>) => void
 let _liveProjector: LiveProjector | null = null
+let _localParamEditNotifier: (() => void) | null = null
 
 /**
  * Project a directly-pushed outputs map (`nodeId → portName → value`) into the
@@ -96,6 +97,11 @@ let _liveProjector: LiveProjector | null = null
 export function projectLiveOutputs(outputs: Record<string, Record<string, unknown>>): void {
   syncTrace('preview:live-push', { nodes: summarizeNodeOutputs(outputs) })
   _liveProjector?.(outputs)
+}
+
+/** Explicit host pulse sent before a local slider tick mutates the graph. */
+export function notifyLocalParamEdit(): void {
+  _localParamEditNotifier?.()
 }
 
 export function useNodePreviews(client: HttpApiClient): void {
@@ -129,6 +135,11 @@ export function useNodePreviews(client: HttpApiClient): void {
     // direct-push projector reads this (instead of re-fetching listNodes per
     // tick) to map a pushed (nodeId, port) value to its port types + label.
     const nodeMeta = new Map<string, { opId: string; name: string }>()
+    // A network refresh can start before an execute response is pushed directly
+    // from the editor, then finish afterwards with an older cached value. Track
+    // the latest live write per node so that stale fetches cannot paint over it.
+    let liveProjectionRevision = 0
+    const liveNodeRevisions = new Map<string, number>()
     async function ensureOpOutputs(): Promise<Map<string, PortSpec[]>> {
       if (opOutputs) return opOutputs
       const ops = await client.listOps()
@@ -205,9 +216,14 @@ export function useNodePreviews(client: HttpApiClient): void {
     // AND voxel_layers sinks (scene_output) ride this path so param edits on the
     // root graph update the preview in the same frame as the wire probe.
     _liveProjector = (outputs) => {
+      // A direct output push is authoritative evidence that the editor already
+      // has this execution's values. Suppress the redundant WS→GET refresh even
+      // if the preceding activity pulse was delayed or dropped.
+      _localParamEditNotifier?.()
       const overrides = useRenderStore.getState().previewOverrides
       let missingMeta = false
       for (const [nodeId, ports] of Object.entries(outputs)) {
+        liveNodeRevisions.set(nodeId, ++liveProjectionRevision)
         const meta = nodeMeta.get(nodeId)
         if (!meta) {
           missingMeta = true
@@ -223,6 +239,7 @@ export function useNodePreviews(client: HttpApiClient): void {
 
     async function refresh(onlyNodeIds?: ReadonlySet<string>): Promise<void> {
       const revision = projectRevision
+      const liveRevisionAtStart = liveProjectionRevision
       const __t0 = performance.now()
       syncTrace('preview:refresh-start', { narrowed: onlyNodeIds?.size ?? 'full' })
       await client.ensureViewingProject()
@@ -240,6 +257,10 @@ export function useNodePreviews(client: HttpApiClient): void {
       // Refresh the node meta cache used by the live push projector.
       nodeMeta.clear()
       for (const n of allNodes) nodeMeta.set(n.id, { opId: n.opId, name: n.name ?? n.id })
+      // Keep the race guard bounded across long editing sessions.
+      for (const nodeId of liveNodeRevisions.keys()) {
+        if (!nodeMeta.has(nodeId)) liveNodeRevisions.delete(nodeId)
+      }
 
       // Narrowed re-pull (drag-tick fast path): a high-frequency `exec:completed`
       // only needs the nodes this execution actually touched (collected from the
@@ -377,7 +398,35 @@ export function useNodePreviews(client: HttpApiClient): void {
         return
       }
 
+      // Index the current layer keys once per refresh. A live push may have
+      // landed during the fetch wave, so build this after the awaits. This keeps
+      // stale/empty-output retention O(grid ports + preview layers), rather than
+      // rescanning every preview layer for every affected port.
+      const existingGridKeysByPort = new Map<string, string[]>()
+      const gridPortIndexKey = (nodeId: string, portName: string): string =>
+        `${nodeId}\u0000${portName}`
+      for (const { node, port } of gridTasks) {
+        existingGridKeysByPort.set(gridPortIndexKey(node.id, port.name), [])
+      }
+      for (const [key, layer] of Object.entries(useRenderStore.getState().previewLayers)) {
+        const exactIndexKey = gridPortIndexKey(layer.nodeId, layer.portName)
+        let bucket = existingGridKeysByPort.get(exactIndexKey)
+        if (!bucket) {
+          const multiValueMatch = /^(.*)\[\d+\]$/.exec(layer.portName)
+          if (multiValueMatch) {
+            bucket = existingGridKeysByPort.get(gridPortIndexKey(layer.nodeId, multiValueMatch[1]))
+          }
+        }
+        bucket?.push(key)
+      }
+      const retainExistingGridKeys = (nodeId: string, portName: string) => {
+        for (const key of existingGridKeysByPort.get(gridPortIndexKey(nodeId, portName)) ?? []) {
+          desiredGridKeys.add(key)
+        }
+      }
+
       for (const { node, layers, names } of voxelResults) {
+        if ((liveNodeRevisions.get(node.id) ?? 0) > liveRevisionAtStart) continue
         if (layers.length) setLayers(node.id, node.opId, layers, names)
         // empty payload: keep the last good frame. Param-drag emits
         // graph:applied (cache invalidated) BEFORE execute finishes, so
@@ -385,13 +434,25 @@ export function useNodePreviews(client: HttpApiClient): void {
       }
 
       for (const { node, port, raw } of gridResults) {
+        // The editor's direct push is newer than this fetch wave. Keep its keys
+        // and discard the stale network result instead of visibly jumping back.
+        if ((liveNodeRevisions.get(node.id) ?? 0) > liveRevisionAtStart) {
+          retainExistingGridKeys(node.id, port.name)
+          continue
+        }
         // Declared grid ports: one flattened item == one dense grid. Wider
         // (any/array/list) ports: recursively pull grids out of the payload.
         const isDeclaredGrid = port.type === 'grid'
         const grids = isDeclaredGrid
           ? flattenWire<number[][]>(raw).filter(isGrid2D)
           : collectGrids(raw)
-        if (grids.length === 0) continue
+        if (grids.length === 0) {
+          // Output caches are briefly empty between graph:applied and execute.
+          // A declared grid cannot change runtime type, so retain its last good
+          // frame; node deletion, port removal and preview-off are still GC'd.
+          if (isDeclaredGrid) retainExistingGridKeys(node.id, port.name)
+          continue
+        }
         grids.forEach((grid, i) => {
           const portKey = grids.length > 1 ? `${port.name}[${i}]` : port.name
           setPreviewLayer(node.id, portKey, node.name ?? node.id, grid)
@@ -423,7 +484,11 @@ export function useNodePreviews(client: HttpApiClient): void {
     // in-flight refreshes; if a trigger lands mid-flight, run exactly one more.
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
     let graphRefreshTimer: ReturnType<typeof setTimeout> | null = null
+    let localParamSettleTimer: ReturnType<typeof setTimeout> | null = null
     const GRAPH_REFRESH_DEBOUNCE_MS = 400
+    const LOCAL_PARAM_SETTLE_MS = 190
+    let localParamEditUntil = 0
+    const executionsInFlight = new Set<string>()
     let inFlight = false
     let pending = false
     let pendingNarrow: Set<string> | null = null
@@ -470,6 +535,37 @@ export function useNodePreviews(client: HttpApiClient): void {
       }, 30)
     }
 
+    // Local slider batches invalidate output caches before their execute
+    // completes. Direct workbench preview-data pushes own the live frames; one
+    // cache refresh after both the drag and the final execute settle owns GC.
+    const scheduleLocalParamSettle = (): void => {
+      if (localParamSettleTimer) clearTimeout(localParamSettleTimer)
+      const wait = Math.max(30, localParamEditUntil - Date.now())
+      localParamSettleTimer = setTimeout(() => {
+        localParamSettleTimer = null
+        if (executionsInFlight.size > 0 || Date.now() < localParamEditUntil) {
+          scheduleLocalParamSettle()
+          return
+        }
+        scheduleRefresh()
+      }, wait)
+    }
+    _localParamEditNotifier = () => {
+      // Cover slow group execution as well as the pointermove cadence. Every
+      // pulse extends the window; the settle callback also waits for all known
+      // executions, so this does not delay the final durable refresh.
+      localParamEditUntil = Date.now() + 600
+      if (refreshTimer) {
+        clearTimeout(refreshTimer)
+        refreshTimer = null
+      }
+      if (graphRefreshTimer) {
+        clearTimeout(graphRefreshTimer)
+        graphRefreshTimer = null
+      }
+      scheduleLocalParamSettle()
+    }
+
     // Refresh on execution completion (live output values) AND on any graph
     // mutation. The latter is the fix for stale previews: deleting a node that
     // has no downstream triggers NO execution, so without a graph trigger the
@@ -477,16 +573,28 @@ export function useNodePreviews(client: HttpApiClient): void {
     // broadcasts it over WS, so the renderer iframe (subscribed to the 'graph'
     // channel) re-runs the GC and the orphaned grid/voxel layers vanish.
     const unsubExec = client.subscribe('execution', (e) => {
+      if (e.kind === 'exec:started') {
+        executionsInFlight.add(e.executionId)
+        return
+      }
+      if (e.kind === 'exec:error') {
+        executionsInFlight.delete(e.executionId)
+      }
       // Always full refresh after execute — scene_output must re-pull even when
       // upstream-only exec:node:output events fired. Narrow scope caused stale
       // sinks; racing graph:applied before exec caused empty cache → black preview.
       if (e.kind === 'exec:completed') {
+        executionsInFlight.delete(e.executionId)
         syncTrace('preview:exec-completed', {})
         if (graphRefreshTimer) {
           clearTimeout(graphRefreshTimer)
           graphRefreshTimer = null
         }
-        scheduleRefresh()
+        if (Date.now() < localParamEditUntil || localParamSettleTimer) {
+          scheduleLocalParamSettle()
+        } else {
+          scheduleRefresh()
+        }
       }
     })
     const unsubGraph = client.subscribe('graph', (e) => {
@@ -495,6 +603,15 @@ export function useNodePreviews(client: HttpApiClient): void {
       // invalidated (empty) scene_output mid-flight. Structural edits still GC
       // after the debounce window (delete/disconnect with no exec).
       if (e.kind === 'graph:applied') {
+        if (e.batchId.startsWith('editor-param-')) {
+          localParamEditUntil = Date.now() + LOCAL_PARAM_SETTLE_MS
+          if (graphRefreshTimer) {
+            clearTimeout(graphRefreshTimer)
+            graphRefreshTimer = null
+          }
+          scheduleLocalParamSettle()
+          return
+        }
         syncTrace('preview:graph-applied-debounced', {})
         if (graphRefreshTimer) clearTimeout(graphRefreshTimer)
         graphRefreshTimer = setTimeout(() => {
@@ -540,8 +657,10 @@ export function useNodePreviews(client: HttpApiClient): void {
     return () => {
       cancelled = true
       _liveProjector = null
+      _localParamEditNotifier = null
       if (refreshTimer) clearTimeout(refreshTimer)
       if (graphRefreshTimer) clearTimeout(graphRefreshTimer)
+      if (localParamSettleTimer) clearTimeout(localParamSettleTimer)
       unsubExec()
       unsubGraph()
       unsubOverrides()

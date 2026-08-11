@@ -114,6 +114,7 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
   useEffect(() => {
     const store = usePipelineStore.getState()
     const ui = useUIStore.getState()
+    let disposed = false
     // Reflect backend reachability in the StatusBar: a successful initial load
     // of the catalog + pipeline means we're live (the legacy editor surfaced
     // this via its ws bus; here we derive it from the transport round-trips).
@@ -163,6 +164,7 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
       })(),
     ])
       .then(([, ownedByProjectStore]) => {
+        if (disposed) return
         useUIStore.getState().setConnectionStatus('connected')
         // Seed the nodeOutputs cache from the backend's retained last-run values
         // so the wire data-probe / port tooltips show data on first load, not
@@ -175,7 +177,9 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
           void usePipelineStore
             .getState()
             .refreshConnectedOutputs('mount')
-            .then(() => usePipelineStore.getState().autoExecuteOnOpen())
+            .then(() => {
+              if (!disposed) return usePipelineStore.getState().autoExecuteOnOpen()
+            })
         }
         // Rebuild the operation-history panel from this project's persistent log
         // (history.jsonl), so a refresh keeps the recent ops instead of starting
@@ -193,6 +197,7 @@ export function Editor({ apiClient, domainNodeTypes, domainPortTypes, domainValu
     // the viewing project. Agent projects.open does not change viewing.
     const unsubProject = useProjectStore.getState().subscribeProjectActivation()
     return () => {
+      disposed = true
       unsubscribe()
       unsubProject()
       useUIStore.getState().setConnectionStatus('disconnected')

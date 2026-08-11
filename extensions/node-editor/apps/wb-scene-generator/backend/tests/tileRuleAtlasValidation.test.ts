@@ -5,20 +5,18 @@ import {
 } from '../src/library/tileRuleAtlasValidation.js'
 
 describe('tileRuleAtlasValidation', () => {
-  it('common_16 accepts 64×64 (no variant row) and 64×80 (with variants)', () => {
+  it('common_16 accepts its complete 64×320 production atlas', () => {
     expect(getAllowedAtlasSizes('common_16')).toEqual([
-      { widthPx: 64, heightPx: 64 },
-      { widthPx: 64, heightPx: 80 },
+      { widthPx: 64, heightPx: 320 },
     ])
-    expect(validateTileAtlasDimensions('common_16', 64, 64).ok).toBe(true)
-    expect(validateTileAtlasDimensions('common_16', 64, 80).ok).toBe(true)
-    const bad = validateTileAtlasDimensions('common_16', 64, 72)
+    expect(validateTileAtlasDimensions('common_16', 64, 320).ok).toBe(true)
+    const bad = validateTileAtlasDimensions('common_16', 64, 64)
     expect(bad.ok).toBe(false)
-    if (!bad.ok) expect(bad.error).toContain('64×64px')
+    if (!bad.ok) expect(bad.error).toContain('64×320px')
   })
 
-  it('floor_1 accepts only 16×16', () => {
-    expect(validateTileAtlasDimensions('floor_1', 16, 16).ok).toBe(true)
+  it('floor_1 accepts only its complete 48×48 variant atlas', () => {
+    expect(validateTileAtlasDimensions('floor_1', 48, 48).ok).toBe(true)
     expect(validateTileAtlasDimensions('floor_1', 32, 32).ok).toBe(false)
   })
 

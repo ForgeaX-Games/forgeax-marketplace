@@ -1,6 +1,6 @@
 # LocalPreciseDecoration（局部精准装饰播撒）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_local_precise_decoration`，也可用 basename `LocalPreciseDecoration`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_local_precise_decoration`，也可用 basename `LocalPreciseDecoration`。
 
 以**兴趣点**为中心，在父区域有效格内的圆形半径内采样多个小型装饰物点位并挂树；算法核心为 scenealg **`alg_points_center_scatter`**（源自 `components/decoration/precise_decoration_scatter`）。
 
@@ -29,7 +29,7 @@
 | OUT | `out_1` | Decoration 装饰（主产物） |
 | OUT | `out_2` | Rest 剩余空地 |
 
-`in_1` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。
+`in_1` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。
 
 ## 内部管线（③ 段 scenealg）
 

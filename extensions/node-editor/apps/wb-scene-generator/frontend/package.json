@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@forgeax/i18n": "workspace:*",
     "@forgeax/node-runtime": "workspace:*",
     "@forgeax/node-runtime-react": "workspace:*",
     "@napi-rs/canvas": "^1.0.0",

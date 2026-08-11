@@ -1,17 +1,13 @@
-// Location-name alignment gate (硬门控 `stage3.location_names`).
-//
-// 2026-07-01 修复：用户反馈"输出的场景节点名称没有和输入的叙事节点树的名称完全
-// 对齐"。compose-sino-scene/SKILL.md 里写了这条
-// 硬门控的*描述*（"上游叙事节点树/契约里每个地点 name 必须原样字符串出现在对应
-// 场景节点名里"），但仓库里从未有真正的代码校验它——门控只存在于 prompt 文字里，
-// 从不拦截，于是 Sino 可以静默改名/漏项/合并叙事命名的实体而不被发现。本文件补
-// 上服务端的真正校验，风格与 sinoOpGate.ts 的白名单门控同构：
+// Optional location-name alignment gate for callers that provide an external
+// location contract. Every required location name must remain discoverable in
+// the generated scene. The gate is implemented here rather than in an Agent
+// prompt so it remains deterministic for every caller:
 //   - 纯函数，无 Fastify / runtime 依赖，可独立单测；
 //   - `null` = 通过；非 null = 结构化拒绝结果（reason + 明细 + fix），供 LLM
-//     （aw-support/Sino）直接读懂"缺了什么、该怎么补"，而不是一个裸的布尔值。
+//     直接读懂"缺了什么、该怎么补"，而不是一个裸的布尔值。
 //
-// 命名对齐是「下限」，不是「上限」：Sino 被要求（且必须）在保留原名节点的前提下
-// 独立展开更丰富的子结构（例如"市集/城镇"要补足够多的建筑物）。本门控只检查每个
+// 命名对齐是「下限」，不是「上限」：调用方可以在保留原名节点的前提下
+// 独立展开更丰富的子结构。本门控只检查每个
 // 上游 name 能否在场景节点名集合里找到匹配，绝不会因为场景里出现了额外的补充/
 // 装饰节点而判定不通过——多产出的结构不是违规，只有"核心命名缺失"才是。
 
@@ -26,7 +22,7 @@ export interface MissingLocationName {
 export interface LocationNameGateRejection {
   reason: string
   missing: MissingLocationName[]
-  /** Actionable fix — mirrors sinoOpGate.ts's buildSinoRejection.fix shape. */
+  /** Actionable remediation returned with the structured rejection. */
   fix: string
 }
 
@@ -90,8 +86,7 @@ export function findMissingLocationNames(
  * just pass/fail.
  *
  * Returns `null` when `narrativeNames` is empty (nothing to gate against — the
- * caller didn't supply an upstream contract, so this check is a no-op, same
- * DEFAULT-OFF philosophy as `isSinoBatch`/`checkSinoOpAllowlist`) or when every
+ * caller didn't supply an upstream contract, so this check is a no-op) or when every
  * narrative name has a match.
  */
 export function checkLocationNameAlignment(

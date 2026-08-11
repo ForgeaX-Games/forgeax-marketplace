@@ -19,6 +19,7 @@
     "build:vendor": "pnpm --filter './apps/*/backend' run --if-present build:vendor",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
+    "verify:scene-script": "pnpm --dir apps/wb-scene-generator verify:scene-script",
     "pretypecheck": "pnpm --filter './packages/**' run --if-present build && pnpm build:vendor",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r clean && rm -rf node_modules"

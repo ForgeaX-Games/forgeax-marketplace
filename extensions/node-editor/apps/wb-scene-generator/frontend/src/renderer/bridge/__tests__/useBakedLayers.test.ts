@@ -17,7 +17,7 @@ import {
 import type { BakedLayerDTO } from '../bakedApi'
 
 function mockList(layers: BakedLayerDTO[]): void {
-  vi.spyOn(bakedApi, 'list').mockResolvedValue(layers)
+  vi.spyOn(bakedApi, 'listResult').mockResolvedValue({ layers })
 }
 
 const FLOOR = (cells: BakedLayerDTO['cells'], version: number): BakedLayerDTO => ({
@@ -39,7 +39,7 @@ describe('refreshBakedLayers reconcile semantics', () => {
     s.paintBakedCells('baked:/Floor', [{ x: 0, y: 0, z: 0, token: 'grass' }])
     expect(hasLocalBakedLayerEdits()).toBe(true)
 
-    const fetchSpy = vi.spyOn(bakedApi, 'list').mockResolvedValue([])
+    const fetchSpy = vi.spyOn(bakedApi, 'listResult').mockResolvedValue({ layers: [] })
 
     await refreshBakedLayers() // default deferIfLocalPending: true
 

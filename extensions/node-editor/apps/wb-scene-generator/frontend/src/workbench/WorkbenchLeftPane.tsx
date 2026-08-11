@@ -8,47 +8,15 @@ import {
 } from '@forgeax/node-runtime-react/editor'
 import type { ActivePipelineRunInfo } from '@forgeax/node-runtime-react/editor'
 import type { HttpApiClient } from '../api/HttpApiClient.js'
-import { SceneGeneratorControlsPanel } from './SceneGeneratorControlsPanel.js'
+import { NodeInfoDashboard } from './SceneGeneratorControlsPanel.js'
 import { scenePortTypes } from './scenePortTypes.js'
-import { AssetStorePanel } from './AssetStorePanel.js'
-import {
-  readSelectedRule,
-  subscribeSelectedRule,
-  type RuleFaceSummary,
-  type RuleListItem,
-} from '../surfaces/library/rulesApi.js'
-import {
-  readSelectedLayers,
-  subscribeSelectedLayers,
-} from '../surfaces/library/selectedLayerBus.js'
-import {
-  readEditMode,
-  subscribeEditMode,
-  readPreviewEditContext,
-  subscribePreviewEditContext,
-  readShowGrid,
-  writeShowGrid,
-  readBrushMode,
-  writeBrushMode,
-  readEditTool,
-  writeEditTool,
-  subscribeEditTool,
-  readEditZ,
-  writeEditZ,
-  type BrushMode,
-  type PreviewEditTool,
-  type PreviewEditContextBus,
-} from '../surfaces/library/editToolbarBus.js'
-import { bakedApi, type BakedHistoryStatusDTO } from '../renderer/bridge/bakedApi.js'
-import { PreviewControlsPanel } from './PreviewControlsPanel.js'
+import { useAssetStoreStore } from '../surfaces/library/assetStoreStore.js'
+import { sceneT, useSceneLocale } from '../sceneI18n.js'
 import './WorkbenchLeftPane.css'
 
-// Keep in sync with WorkbenchHost (the center <Editor editorSyncKey> + the embed
-// localStorage keys it mirrors via its `storage` listener).
+// Must match the center <Editor editorSyncKey>; Node Info reads this mirror from
+// the Page sidebar without owning a second editor instance.
 const EDITOR_SYNC_KEY = 'wb-scene-generator-editor'
-const LS_RENDERER = 'wb-scene-generator.rendererInline'
-const LS_ASSETSTORE = 'wb-scene-generator.assetStoreInline'
-const LS_EDITOR = 'wb-scene-generator.editorInline'
 
 const AW_SUPPORT_BASE =
   typeof location !== 'undefined'
@@ -69,6 +37,7 @@ interface LeftPaneSnapshot {
 }
 
 export function WorkbenchLeftPane({ client, slug }: Props): JSX.Element {
+  useSceneLocale()
   const [, setSnapshot] = useState<LeftPaneSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activePipelineRuns, setActivePipelineRuns] = useState<ActivePipelineRunInfo[]>([])
@@ -91,6 +60,12 @@ export function WorkbenchLeftPane({ client, slug }: Props): JSX.Element {
       cancelled = true
       clearInterval(timer)
     }
+  }, [])
+
+  // PreviewLayerInspector resolves thumbnails from the read-only asset index.
+  // Load it here because the former AssetStore browser pane no longer mounts.
+  useEffect(() => {
+    void useAssetStoreStore.getState().init()
   }, [])
 
   // The left pane is its own iframe/document, so it owns its own editor
@@ -149,168 +124,18 @@ export function WorkbenchLeftPane({ client, slug }: Props): JSX.Element {
     }
   }, [client])
 
-  // Which interface's controls/info the lower half of the pane is showing. The
-  // three group buttons (below the project list) switch between them; the right
-  // panels' open/close lives separately in the panel tabs (LS_* embed toggles).
-  const [group, setGroup] = useState<ControlGroup>('scene')
-
-  // Selected rule, mirrored from the AssetStore pane over the localStorage bus
-  // (sibling iframe → `storage` events). Picking a rule there flips this pane to
-  // the AssetStore group so its detail is immediately visible.
-  const [selectedRule, setSelectedRule] = useState<RuleListItem | null>(() => readSelectedRule())
-  useEffect(() => {
-    return subscribeSelectedRule((rule) => {
-      setSelectedRule(rule)
-      if (rule) setGroup('assetstore')
-    })
-  }, [])
-
-  // Selected preview layer(s), mirrored from the renderer pane.
-  const [selectedLayersState, setSelectedLayersState] = useState(() => readSelectedLayers())
-  useEffect(() => {
-    return subscribeSelectedLayers((state) => {
-      setSelectedLayersState(state)
-      if (state?.layers.length) setGroup('preview')
-    })
-  }, [])
-
-  const [previewContext, setPreviewContext] = useState<PreviewEditContextBus>(() => readPreviewEditContext())
-  useEffect(() => subscribePreviewEditContext(setPreviewContext), [])
-
-  // Edit toolbar — mirrored from the renderer pane (editMode) and the shared
-  // showGrid flag. The toolbar only expands while the canvas is in edit mode;
-  // toggling grid here publishes to the renderer (cross-iframe via storage bus).
-  const [editMode, setEditMode] = useState<boolean>(() => readEditMode())
-  const [showGrid, setShowGrid] = useState<boolean>(() => readShowGrid())
-  const [brushMode, setBrushMode] = useState<BrushMode>(() => readBrushMode())
-  const [editTool, setEditTool] = useState<PreviewEditTool>(() => readEditTool())
-  const [editZ, setEditZ] = useState<number>(() => readEditZ())
-  const [bakedHistory, setBakedHistory] = useState<BakedHistoryStatusDTO | null>(null)
-  useEffect(() => subscribeEditMode((on) => {
-    setEditMode(on)
-    if (on) setGroup('preview')
-  }), [])
-  useEffect(() => subscribeEditTool(setEditTool), [])
-  const refreshBakedHistory = useCallback(async () => {
-    try {
-      setBakedHistory(await bakedApi.history())
-    } catch (e) {
-      console.warn('[baked] history refresh failed', e)
-    }
-  }, [])
-  useEffect(() => {
-    if (!editMode) {
-      setBakedHistory(null)
-      return
-    }
-    void refreshBakedHistory()
-  }, [editMode, refreshBakedHistory, selectedLayersState])
-  const toggleGrid = useCallback(() => {
-    setShowGrid((prev) => {
-      const next = !prev
-      writeShowGrid(next)
-      return next
-    })
-  }, [])
-  const pickBrush = useCallback((mode: BrushMode) => {
-    setBrushMode(mode)
-    writeBrushMode(mode)
-  }, [])
-  const pickTool = useCallback((tool: PreviewEditTool) => {
-    setEditTool(tool)
-    writeEditTool(tool)
-  }, [])
-  const updateEditZ = useCallback((value: number) => {
-    const next = Math.trunc(Number.isFinite(value) ? value : 0)
-    setEditZ(next)
-    writeEditZ(next)
-  }, [])
-  const undoBakedEdit = useCallback(async () => {
-    try {
-      setBakedHistory(await bakedApi.undo())
-    } catch (e) {
-      console.warn('[baked] undo failed', e)
-    }
-  }, [])
-  const redoBakedEdit = useCallback(async () => {
-    try {
-      setBakedHistory(await bakedApi.redo())
-    } catch (e) {
-      console.warn('[baked] redo failed', e)
-    }
-  }, [])
-
   return (
-    <aside className="scene-left-pane" aria-label="Scene Workbench Navigation">
-      <header className="scene-left-pane__hero">
-        <FluidPaneTitle>Scene Workbench Navigation</FluidPaneTitle>
-      </header>
-
+    <aside className="scene-left-pane" aria-label={sceneT('leftPane.title')}>
       {error && (
         <section className="scene-left-pane__notice">
-          <strong>Status unavailable</strong>
+          <strong>{sceneT('leftPane.statusUnavailable')}</strong>
           <span>{error}</span>
         </section>
       )}
 
-      {/* Flat tabs that open/close the two right-side iframe panels. They write
-          the same localStorage keys the center pane mirrors via its `storage`
-          listener, so flipping one here shows/hides the embedded pane live. */}
-      <div className="scene-left-pane__panel-tabs" role="group" aria-label="Toggle preview panels">
-        <EmbedToggle storageKey={LS_ASSETSTORE} label="AssetStore" />
-        <EmbedToggle storageKey={LS_RENDERER} label="Preview" />
-        <EmbedToggle storageKey={LS_EDITOR} label="Scene Gen" />
-      </div>
-
       <WorkbenchProjectsSection client={client} activePipelineRuns={activePipelineRuns} />
 
-      {/* Group switcher: picks which interface's controls/info fill the lower
-          half below. Pure left-pane view state — does not touch the panels. */}
-      <div className="scene-left-pane__group-tabs" role="tablist" aria-label="Control group">
-        <GroupTab current={group} value="scene" label="Scene Generator" onSelect={setGroup} />
-        <GroupTab current={group} value="assetstore" label="AssetStore" onSelect={setGroup} />
-        <GroupTab current={group} value="preview" label="Preview" onSelect={setGroup} />
-      </div>
-
-      {group === 'scene' && (
-        <section className="scene-left-pane__section scene-left-pane__section--controls">
-          <SceneGeneratorControlsPanel syncKey={EDITOR_SYNC_KEY} domainPortTypes={scenePortTypes} />
-        </section>
-      )}
-
-      {group === 'assetstore' && (
-        <>
-          {selectedRule && (
-            <section className="scene-left-pane__section scene-left-pane__section--rule">
-              <RuleDetail rule={selectedRule} />
-            </section>
-          )}
-          <section className="scene-left-pane__section scene-left-pane__section--controls">
-            <AssetStorePanel />
-          </section>
-        </>
-      )}
-
-      {group === 'preview' && (
-        <section className="scene-left-pane__section scene-left-pane__section--controls">
-          <PreviewControlsPanel
-            editMode={editMode}
-            editTool={editTool}
-            brushMode={brushMode}
-            showGrid={showGrid}
-            editZ={editZ}
-            previewContext={previewContext}
-            bakedHistory={bakedHistory}
-            selectedLayers={selectedLayersState?.layers ?? []}
-            onPickTool={pickTool}
-            onPickBrush={pickBrush}
-            onToggleGrid={toggleGrid}
-            onUpdateEditZ={updateEditZ}
-            onUndoBakedEdit={() => { void undoBakedEdit() }}
-            onRedoBakedEdit={() => { void redoBakedEdit() }}
-          />
-        </section>
-      )}
+      <NodeInfoDashboard syncKey={EDITOR_SYNC_KEY} domainPortTypes={scenePortTypes} client={client} />
 
     </aside>
   )
@@ -355,7 +180,7 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
         }
         const [snap, groups] = await Promise.all([client.getPipeline(), client.listGroups()])
         if (!snap || Object.keys(snap.nodes ?? {}).length === 0) {
-          setProjectError('Canvas is empty — nothing to save.')
+          setProjectError(sceneT('leftPane.canvasEmpty'))
           return
         }
         const base = project.name?.trim() || new Date().toISOString().slice(0, 19).replace('T', '_')
@@ -394,7 +219,7 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
       try {
         parsed = JSON.parse(await file.text())
       } catch (err) {
-        setProjectError(`Invalid JSON: ${(err as Error).message}`)
+        setProjectError(sceneT('leftPane.invalidJson', { message: (err as Error).message }))
         return
       }
       const wrapper = parsed as { format?: string; graph?: unknown; name?: string }
@@ -402,7 +227,7 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
       const graph = hasWrapper ? wrapper.graph : parsed
       const format = hasWrapper ? wrapper.format : undefined
       if (graph == null) {
-        setProjectError('No graph found in file.')
+        setProjectError(sceneT('leftPane.noGraph'))
         return
       }
       const rawName =
@@ -414,7 +239,7 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
         await client.importPipelineInline({ format, graph, options: { mode: 'replace', executeAfter: 'full' } })
         setProjectError(null)
       } catch (err) {
-        setProjectError(`Import failed: ${(err as Error).message}`)
+        setProjectError(sceneT('leftPane.importFailed', { message: (err as Error).message }))
       }
     },
     [client],
@@ -431,7 +256,7 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
       />
       {projectError && (
         <section className="scene-left-pane__notice">
-          <strong>Project action failed</strong>
+          <strong>{sceneT('leftPane.projectActionFailed')}</strong>
           <span>{projectError}</span>
         </section>
       )}
@@ -449,8 +274,8 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
             <button
               type="button"
               className="scene-left-pane__open-btn"
-              title="Open a scene JSON as a new project"
-              aria-label="Open a scene JSON as a new project"
+              title={sceneT('leftPane.openProject')}
+              aria-label={sceneT('leftPane.openProject')}
               onClick={handleOpen}
             >
               <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
@@ -470,17 +295,17 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
       <div
         className="scene-left-pane__projects-resize"
         onMouseDown={handleResizeMouseDown}
-        aria-label="Drag to resize projects panel"
+        aria-label={sceneT('leftPane.resizeProjects')}
         role="separator"
         aria-orientation="horizontal"
       />
       {saveModal && (
-        <div className="scene-left-pane__save" role="dialog" aria-label="Save canvas JSON">
+        <div className="scene-left-pane__save" role="dialog" aria-label={sceneT('leftPane.saveDialog')}>
           <header className="proj-modal__head scene-left-pane__save-head">
-            <h2>Save scene</h2>
+            <h2>{sceneT('leftPane.saveScene')}</h2>
           </header>
           <p className="scene-left-pane__save-copy">
-            Copy this and save it as <code>{saveModal.name}</code>.
+            {sceneT('leftPane.saveCopy', { name: saveModal.name })}
           </p>
           <textarea
             className="scene-left-pane__save-json"
@@ -491,7 +316,7 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
           />
           <footer className="proj-modal__foot scene-left-pane__save-foot">
             <button type="button" className="proj-btn" onClick={() => setSaveModal(null)}>
-              Close
+              {sceneT('leftPane.close')}
             </button>
             <button
               type="button"
@@ -500,7 +325,7 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
                 void navigator.clipboard?.writeText(saveModal.json)
               }}
             >
-              Copy to clipboard
+              {sceneT('leftPane.copyClipboard')}
             </button>
           </footer>
         </div>
@@ -509,147 +334,3 @@ const WorkbenchProjectsSection = memo(function WorkbenchProjectsSection({
   )
 })
 
-// Detail view for the rule selected in the AssetStore pane — the "rule 规则信息"
-// surfaced under the left pane's AssetStore group. Renders from the cross-pane
-// `RuleListItem` summary alone (no extra fetch).
-function RuleDetail({ rule }: { rule: RuleListItem }): JSX.Element {
-  const faces = (['top', 'front'] as const).filter((f) => rule.faces[f])
-  return (
-    <div className="scene-left-pane__rule">
-      <div className="scene-left-pane__rule-head">
-        <h2>{rule.name ?? rule.alias}</h2>
-        <span className="scene-left-pane__rule-schema">v{rule.schemaVersion}</span>
-      </div>
-      <code className="scene-left-pane__rule-alias">{rule.alias}</code>
-      {rule.description && <p className="scene-left-pane__rule-desc">{rule.description}</p>}
-
-      <dl className="scene-left-pane__rule-meta">
-        <div><dt>PPU</dt><dd>{rule.ppu}</dd></div>
-        <div><dt>Sprites</dt><dd>{rule.spriteCount}</dd></div>
-        <div><dt>Regions</dt><dd>{rule.regions.length ? rule.regions.join(', ') : '—'}</dd></div>
-      </dl>
-
-      <div className="scene-left-pane__rule-faces">
-        {faces.length === 0 ? (
-          <p className="scene-left-pane__hint">No drawable faces declared.</p>
-        ) : (
-          faces.map((f) => <RuleFaceRow key={f} name={f} face={rule.faces[f]!} />)
-        )}
-      </div>
-    </div>
-  )
-}
-
-function RuleFaceRow({ name, face }: { name: string; face: RuleFaceSummary }): JSX.Element {
-  return (
-    <div className="scene-left-pane__rule-face">
-      <span className="scene-left-pane__rule-face-name">{name}</span>
-      <span className="scene-left-pane__rule-face-stats">
-        {face.basePieces} base · {face.mapEntries} map
-        {face.variants > 0 ? ` · ${face.variants} variants` : ''}
-        {face.hasRandom ? ' · random' : ''}
-      </span>
-    </div>
-  )
-}
-
-const PANE_TITLE_MIN_PX = 12
-const PANE_TITLE_MAX_PX = 34
-
-/** Single-line title scaled to the pane width (sidebar resize → refit). */
-function FluidPaneTitle({ children }: { children: string }): JSX.Element {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const titleRef = useRef<HTMLHeadingElement>(null)
-
-  useEffect(() => {
-    const container = containerRef.current
-    const title = titleRef.current
-    if (!container || !title) return
-
-    const fit = (): void => {
-      const maxWidth = container.clientWidth
-      if (maxWidth <= 0) return
-      let lo = PANE_TITLE_MIN_PX
-      let hi = PANE_TITLE_MAX_PX
-      let best = lo
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1
-        title.style.fontSize = `${mid}px`
-        if (title.scrollWidth <= maxWidth) {
-          best = mid
-          lo = mid + 1
-        } else {
-          hi = mid - 1
-        }
-      }
-      title.style.fontSize = `${best}px`
-    }
-
-    fit()
-    const ro = new ResizeObserver(() => requestAnimationFrame(fit))
-    ro.observe(container)
-    void document.fonts?.ready.then(() => requestAnimationFrame(fit))
-    return () => ro.disconnect()
-  }, [children])
-
-  return (
-    <div ref={containerRef} className="scene-left-pane__hero-title">
-      <h1 ref={titleRef}>{children}</h1>
-    </div>
-  )
-}
-
-type ControlGroup = 'scene' | 'assetstore' | 'preview'
-
-function GroupTab({
-  current,
-  value,
-  label,
-  onSelect,
-}: {
-  current: ControlGroup
-  value: ControlGroup
-  label: string
-  onSelect: (group: ControlGroup) => void
-}): JSX.Element {
-  const active = current === value
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      className={`scene-left-pane__group-tab${active ? ' is-active' : ''}`}
-      onClick={() => onSelect(value)}
-    >
-      {label}
-    </button>
-  )
-}
-
-// Relocated embed/window toggle. Writes the localStorage key the center pane
-// mirrors via its `storage` listener (cross-document), so flipping it here
-// shows/hides the corresponding embedded pane in the center workbench live.
-function EmbedToggle({ storageKey, label, fallback = true }: { storageKey: string; label: string; fallback?: boolean }): JSX.Element {
-  const [on, setOn] = useState(() => {
-    if (typeof localStorage === 'undefined') return fallback
-    const raw = localStorage.getItem(storageKey)
-    return raw === null ? fallback : raw === 'true'
-  })
-  const toggle = (): void => {
-    setOn((v) => {
-      const next = !v
-      if (typeof localStorage !== 'undefined') localStorage.setItem(storageKey, String(next))
-      return next
-    })
-  }
-  return (
-    <button
-      type="button"
-      className={`editor-controls__btn${on ? ' is-on' : ''}`}
-      aria-pressed={on}
-      onClick={toggle}
-    >
-      {label}
-    </button>
-  )
-}

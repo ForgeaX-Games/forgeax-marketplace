@@ -1,6 +1,6 @@
 # PoiPlace（精准POI分布 · 场景版）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1782200000003_poipl`，也可用 basename `PoiPlace`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1782200000003_poipl`，也可用 basename `PoiPlace`。
 
 把 `poi_place` 电池封装为 scene 流水线：输入 Scene（上游空地/Rest），在其底面区域内按坐标精准放置兴趣点（坐标不在目标格则 BFS 就近吸附），挂回场景树并产出标准五件套。
 

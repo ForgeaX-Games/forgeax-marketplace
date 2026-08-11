@@ -1,6 +1,6 @@
 # EdgeTreeClusters（边缘树簇）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_edge_tree_clusters`，也可用 basename `EdgeTreeClusters`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_edge_tree_clusters`，也可用 basename `EdgeTreeClusters`。
 > 内部 21 个节点、1 个嵌套子组（TileAssetName）。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明
@@ -45,7 +45,7 @@
 ## 使用示例（applyBatch ops，可照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"EdgeTreeClusters", "position":{"x":-500,"y":2600},
            "opts":{"actor":"ai:sino","label":"实例化 EdgeTreeClusters"} } }
 ```

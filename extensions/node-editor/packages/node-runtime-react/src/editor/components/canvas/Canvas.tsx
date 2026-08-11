@@ -312,12 +312,13 @@ function CanvasInner({ domainNodeTypes, domainPortTypes, onExternalDrop }: Canva
           if (node.type === 'group') {
             const groupId = (node.data as { groupId?: string }).groupId
             const groupName = (node.data as { groupName?: string }).groupName
+            const runtimeParams = (node.data as { runtimeParams?: Record<string, unknown> }).runtimeParams
             setSelectedNode({
               id: node.id,
               batteryId: '__group__',
               name: groupName || node.id,
               position: node.position,
-              params: { groupId: groupId ?? node.id },
+              params: { ...runtimeParams, groupId: groupId ?? node.id },
             })
           } else {
             setSelectedNode({

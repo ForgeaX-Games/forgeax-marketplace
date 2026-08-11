@@ -36,6 +36,17 @@ export interface ExecutionResult {
   status: 'completed' | 'error' | 'aborted'
   // nodeId -> portId -> wire value (DataTreeEntry[] form).
   outputs: Record<string, Record<string, unknown>>
+  /**
+   * Small, serializable origin records for every public output, including ports
+   * whose large value was omitted from `outputs`. Hosts may enrich these with
+   * authoring/SceneGraph lineage without touching the business value.
+   */
+  resultMetadata?: Record<string, Record<string, {
+    producerNodeId: string
+    producerPort: string
+    outputType: string
+    value: { inline: boolean; ref?: string }
+  }>>
   error?: { nodeId?: string; message: string }
   /** Present when `quietErrors: true`; mirrors Studio execute failure summary. */
   execFailures?: string[]
@@ -115,6 +126,7 @@ async function runWalk(
   // omitted so the response never rebuilds a multi-hundred-MB JSON string —
   // the client re-fetches those lazily from the output cache.
   const resultOutputs: Record<string, Record<string, unknown>> = {}
+  const resultMetadata: NonNullable<ExecutionResult['resultMetadata']> = {}
 
   // Reference counts for `produced` eviction: how many distinct in-closure
   // consumer nodes still need to read each producer's cached output. Boundary
@@ -179,6 +191,7 @@ async function runWalk(
     executionId,
     status,
     outputs: resultOutputs,
+    resultMetadata,
     ...(error ? { error } : {}),
     ...(ctx.execFailures && ctx.execFailures.length > 0 ? { execFailures: [...ctx.execFailures] } : {}),
     durationMs: Date.now() - startedAt,
@@ -212,6 +225,15 @@ async function runWalk(
         // Cached manualTrigger outputs are tiny refs (e.g. image ids), safe to
         // echo back for fast preview apply.
         resultOutputs[nodeId] = { ...cached }
+        resultMetadata[nodeId] = Object.fromEntries(Object.keys(cached).map((portId) => [
+          portId,
+          {
+            producerNodeId: nodeId,
+            producerPort: portId,
+            outputType: portTypeOf(runtime.registry, node.opId, portId),
+            value: { inline: true },
+          },
+        ]))
         bus.emit({ kind: 'exec:node:skipped', pipelineId, executionId, nodeId, reason: 'manualTrigger' })
         releaseProduced(nodeId)
         continue
@@ -307,6 +329,7 @@ async function runWalk(
 
       produced.set(nodeId, outputs)
       const resultPorts: Record<string, unknown> = {}
+      const metadataPorts: NonNullable<ExecutionResult['resultMetadata']>[string] = {}
       for (const [portId, value] of Object.entries(outputs)) {
         if (value === undefined) continue
         const outputType = groupOutputTypeByPort?.get(portId) ?? portTypeOf(runtime.registry, node.opId, portId)
@@ -322,9 +345,18 @@ async function runWalk(
         // re-fetches them from the output cache (the trailing exec:completed
         // fan-out already does this).
         if (!large) resultPorts[portId] = value
+        metadataPorts[portId] = {
+          producerNodeId: nodeId,
+          producerPort: portId,
+          outputType,
+          value: large
+            ? { inline: false, ref: `outputs/${encodeURIComponent(nodeId)}/${encodeURIComponent(portId)}` }
+            : { inline: true },
+        }
         bus.emit({ kind: 'exec:node:output', pipelineId, nodeId, portId, outputType })
       }
       resultOutputs[nodeId] = resultPorts
+      resultMetadata[nodeId] = metadataPorts
       releaseProduced(nodeId)
     }
 
@@ -372,6 +404,7 @@ export async function executeNode(
         executionId,
         status: 'error',
         outputs: {},
+        resultMetadata: {},
         error: { ...(request.nodeId ? { nodeId: request.nodeId } : {}), message },
         durationMs: 0,
       }),

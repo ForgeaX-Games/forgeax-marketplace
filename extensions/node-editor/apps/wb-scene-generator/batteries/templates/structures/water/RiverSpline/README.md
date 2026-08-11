@@ -1,6 +1,6 @@
 # RiverSpline（河流样条化）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_river_spline`，也可用 basename `RiverSpline`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_river_spline`，也可用 basename `RiverSpline`。
 
 把上游场景的足迹切片为基准网格，用 `river_spline` 电池把折线控制点平滑光栅化成自然河流（叠加进基准网格），按值拆分后逐张建为命名场景子节点；输出与其它结构模板一致的五个固定端口。
 
@@ -35,4 +35,4 @@
 
 `scene_passthrough → node_explode → rect_grid → voxel_slice`（取顶层切片做基准）→ `river_spline`（河流叠加网格）→ `grid_split_by_value` → `grid2node`（按 `AssetName` 命名，挂 `asset_type=tile`）→ `add_child`；同时 `alg_region_subtract` 求 Rest 子树。最后 `scene_merge_subtrees` 合并并 `scene_focus_path` 分别聚焦，导出五个固定端口。
 
-`in_0` 悬空会导致整组静默空跑（execute 仍 completed）；`Points` 为空则不生成河流。完整端口以 `scene:templates.get` 为准。
+`in_0` 悬空会导致整组静默空跑（execute 仍 completed）；`Points` 为空则不生成河流。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。

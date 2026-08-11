@@ -18,11 +18,18 @@ vi.mock('../../../surfaces/library/editToolbarBus', async (importOriginal) => {
   }
 })
 
-vi.mock('../bakedApi', () => ({
-  bakedApi: {
-    list: vi.fn(),
-  },
-}))
+vi.mock('../bakedApi', () => {
+  const list = vi.fn()
+  return {
+    bakedApi: {
+      list,
+      // Production refreshes consume the listResult envelope so truncation
+      // metadata is preserved. Keep the test's concise layer fixtures while
+      // faithfully exposing that protocol.
+      listResult: vi.fn(async (mode?: 'summary' | 'full') => ({ layers: await list(mode) })),
+    },
+  }
+})
 
 class FakeWebSocket {
   static last: FakeWebSocket | null = null

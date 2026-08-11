@@ -6,10 +6,12 @@ import { existsSync, readFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { getPipeline } from '@forgeax/node-runtime'
 import type { CallerIdentity, ImportGraphFormat, ImportGraphInput } from '@forgeax/node-runtime'
+import { stableEntityId } from '@forgeax/scene-authoring'
 import { getProjectRegistry, getProjectDir, resolveWorkspaceRoot } from '../runtime.js'
 import { reloadGameTexturesBinding } from '../library/gameSandboxStore.js'
 import { countLivePrivateAssets } from '../library/privateStore.js'
 import { broadcastToClients, rebindWsSubscriptions } from './ws.js'
+import { writeSceneModule } from '../scene-script/store.js'
 
 interface ProjectIdParams {
   id: string
@@ -147,6 +149,13 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     if (!body.name || !body.name.trim()) {
       return reply.code(400).send({ reason: 'project name is required' })
     }
+    if (body.fromTemplate) {
+      return reply.code(410).send({
+        status: 'rejected',
+        code: 'runtime-template-project-creation-removed',
+        reason: 'New projects must start from a canonical Scene Project, not a Runtime Graph template.',
+      })
+    }
     let fromTemplate: ImportGraphInput | undefined
     if (body.fromTemplate) {
       const resolved = await resolveTemplate(body.fromTemplate)
@@ -161,6 +170,15 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
         ...(body.gameSlug !== undefined ? { gameSlug: body.gameSlug } : {}),
         ...(fromTemplate ? { fromTemplate } : {}),
       })
+      const projectDir = await getProjectDir(meta.id)
+      if (!projectDir) throw new Error(`created project directory not found: ${meta.id}`)
+      const moduleId = stableEntityId('module', meta.id)
+      await writeSceneModule(
+        projectDir,
+        'main.scene.ts',
+        `// @scene-module-id ${moduleId}\n`,
+        [],
+      )
       broadcastToClients({
         event: 'runtime',
         payload: { kind: 'project:list-changed', reason: 'created' },

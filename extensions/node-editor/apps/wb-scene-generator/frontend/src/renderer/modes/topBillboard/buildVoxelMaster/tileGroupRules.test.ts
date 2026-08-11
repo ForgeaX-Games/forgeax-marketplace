@@ -40,7 +40,7 @@ async function loadRule(alias: string): Promise<NormalizedRule> {
   const body = readFileSync(join(RULES_DIR, `${alias}.json`), 'utf-8')
   const original = globalThis.fetch
   globalThis.fetch = (() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(JSON.parse(body)) } as Response)) as typeof fetch
+    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(JSON.parse(body)) } as Response)) as unknown as typeof fetch
   try {
     const ready = new Promise<void>((resolve) => {
       const unsub = subscribeToRuleReadiness(() => {

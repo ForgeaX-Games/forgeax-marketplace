@@ -17,6 +17,7 @@
 import { topMasterOrigin } from '../../framework/geometry/top'
 import type { VoxelBbox } from '../../framework/geometry/topBillboard'
 import { devicePixelRatio, type Surface2D } from '../../framework/canvas2d'
+import { drawOrthographicGuides2d } from '../../framework/guides2d'
 
 export interface ComposeArgs {
   canvas: HTMLCanvasElement
@@ -30,59 +31,8 @@ export interface ComposeArgs {
   offsetX: number
   offsetY: number
   scale: number
-  /** Draw the infinite alignment grid lines (edit aid). */
+  /** Draw the infinite alignment grid lines and origin axes (view aid). */
   showGrid?: boolean
-}
-
-// Draw cell-aligned grid lines across the whole visible viewport ("infinite"
-// grid). Called with the viewport transform already applied, so we work in world
-// coordinates and only need to enumerate the grid lines that fall in view. Lines
-// share the cell origin used by drawImage / screenToCell, so the grid, the
-// coordinate readout, and z=0 painting all agree. Skipped when cells get too
-// small on screen (would be a dense smear and costly).
-function drawInfiniteGrid(
-  ctx: CanvasRenderingContext2D,
-  o: { cssW: number; cssH: number; cellSize: number; offsetX: number; offsetY: number; scale: number; originX: number; originY: number },
-): void {
-  const { cssW, cssH, cellSize, offsetX, offsetY, scale, originX, originY } = o
-  if (cellSize * scale < 4) return // too dense to be useful
-  const cx = Math.round(cssW / 2)
-  const cy = Math.round(cssH / 2)
-  // Invert the viewport transform to get the world-space rect currently visible.
-  const toWorldX = (sx: number): number => (sx - cx - offsetX) / scale + cx
-  const toWorldY = (sy: number): number => (sy - cy - offsetY) / scale + cy
-  const left = toWorldX(0)
-  const right = toWorldX(cssW)
-  const top = toWorldY(0)
-  const bottom = toWorldY(cssH)
-  const cStart = Math.floor((left - originX) / cellSize)
-  const cEnd = Math.ceil((right - originX) / cellSize)
-  const rStart = Math.floor((top - originY) / cellSize)
-  const rEnd = Math.ceil((bottom - originY) / cellSize)
-
-  ctx.save()
-  ctx.lineWidth = 1 / scale // ~1 CSS px regardless of zoom
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)'
-  ctx.beginPath()
-  for (let c = cStart; c <= cEnd; c++) {
-    const x = originX + c * cellSize
-    ctx.moveTo(x, top)
-    ctx.lineTo(x, bottom)
-  }
-  for (let r = rStart; r <= rEnd; r++) {
-    const y = originY + r * cellSize
-    ctx.moveTo(left, y)
-    ctx.lineTo(right, y)
-  }
-  ctx.stroke()
-  // Emphasize the origin axes (col 0 / row 0) so the global frame is legible.
-  ctx.lineWidth = 1.5 / scale
-  ctx.strokeStyle = 'rgba(120,170,255,0.35)'
-  ctx.beginPath()
-  ctx.moveTo(originX, top); ctx.lineTo(originX, bottom)
-  ctx.moveTo(left, originY); ctx.lineTo(right, originY)
-  ctx.stroke()
-  ctx.restore()
 }
 
 /** 从 CSS background 读画布底色(与 mode-top compose 行为一致) */
@@ -154,7 +104,7 @@ export function composeFrame(args: ComposeArgs): void {
 
   // ⑤ grid lines — drawn LAST so they overlay every layer (alignment guide).
   if (showGrid) {
-    drawInfiniteGrid(ctx, { cssW, cssH, cellSize, offsetX: offX, offsetY: offY, scale, originX, originY })
+    drawOrthographicGuides2d(ctx, { cssW, cssH, cellSize, offsetX: offX, offsetY: offY, scale, originX, originY })
   }
 }
 
@@ -249,7 +199,7 @@ export function composeDirtyRect(
     destX, destY, destW, destH,
   )
   if (showGrid) {
-    drawInfiniteGrid(ctx, { cssW, cssH, cellSize, offsetX: offX, offsetY: offY, scale, originX, originY })
+    drawOrthographicGuides2d(ctx, { cssW, cssH, cellSize, offsetX: offX, offsetY: offY, scale, originX, originY })
   }
   ctx.restore()
   return true

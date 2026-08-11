@@ -163,6 +163,7 @@ function groupTemplateToBattery(template: GroupTemplateBattery): Battery {
     ...(template.tags !== undefined ? { tags: template.tags } : {}),
     ...(template.tagLabels !== undefined ? { tagLabels: template.tagLabels } : {}),
     ...(template.builtin !== undefined ? { builtin: template.builtin } : {}),
+    ...(template.nativeDefinition !== undefined ? { nativeDefinition: template.nativeDefinition } : {}),
   }
 }
 
@@ -583,6 +584,73 @@ export class EditorApiAdapter {
     if (!this.client.loadGroupTemplate) return null
     const template = await this.client.loadGroupTemplate(groupId, opts)
     return template ? this.hydrateNestedGroups(kernelGroupToEditorGroup(template)) : null
+  }
+
+  /**
+   * Instantiate a published native Definition through the canonical authoring
+   * surface. There is deliberately no raw createGroup fallback: doing so would
+   * make the runtime graph diverge from Scene Script.
+   */
+  async instantiateNativeDefinition(
+    functionName: string,
+    position: { x: number; y: number },
+  ): Promise<{ status: 'ok'; entityId: string; statementId: string; revision: string; graphHash?: string }> {
+    if (!this.client.instantiateNativeDefinition) {
+      throw new Error('[editor] transport does not support native Scene Definition instantiation')
+    }
+    return this.client.instantiateNativeDefinition(functionName, position)
+  }
+
+  async applySceneAuthoringCommands(
+    commands: unknown[],
+    label?: string,
+  ): Promise<{ status: 'ok'; projectRevision: string; graphHash?: string; transaction?: { applied: boolean; rolledBack: boolean; undoToken?: string } }> {
+    if (!this.client.getSceneAuthoringProjectInfo || !this.client.applySceneAuthoringCommands) {
+      throw new Error('[editor] transport does not support canonical Scene Authoring Commands')
+    }
+    const project = await this.client.getSceneAuthoringProjectInfo()
+    return this.client.applySceneAuthoringCommands({
+      expectedProjectRevision: project.projectRevision,
+      expectedModuleRevisions: Object.fromEntries(
+        Object.entries(project.moduleRevisions).map(([file, item]) => [file, item.revision]),
+      ),
+      commands,
+      ...(label ? { label } : {}),
+    })
+  }
+
+  async isCanonicalSceneProject(): Promise<boolean> {
+    if (!this.client.getSceneAuthoringProjectInfo) return false
+    return (await this.client.getSceneAuthoringProjectInfo()).canonical
+  }
+
+  supportsSceneAuthoringCommands(): boolean {
+    return Boolean(this.client.getSceneAuthoringProjectInfo && this.client.applySceneAuthoringCommands)
+  }
+
+  supportsCanonicalUndoRedo(): boolean {
+    return Boolean(
+      this.client.getSceneAuthoringProjectInfo
+      && this.client.undoSceneAuthoring
+      && this.client.redoSceneAuthoring,
+    )
+  }
+
+  async applyCanonicalUndoRedo(direction: 'undo' | 'redo'): Promise<{
+    status: 'ok'
+    projectRevision: string
+    graphHash?: string
+  }> {
+    if (!this.client.getSceneAuthoringProjectInfo) {
+      throw new Error('[editor] transport does not support canonical Scene Project revisions')
+    }
+    const project = await this.client.getSceneAuthoringProjectInfo()
+    if (direction === 'undo') {
+      if (!this.client.undoSceneAuthoring) throw new Error('[editor] transport does not support canonical undo')
+      return this.client.undoSceneAuthoring({ expectedProjectRevision: project.projectRevision })
+    }
+    if (!this.client.redoSceneAuthoring) throw new Error('[editor] transport does not support canonical redo')
+    return this.client.redoSceneAuthoring({ expectedProjectRevision: project.projectRevision })
   }
 
   /**

@@ -12,11 +12,9 @@
  * PlaceOneDecoration/PickOneBuilding 是"精准单点放置"模板：outputGrid 全 0 会一路
  * 静默传到 grid2node（0 体素但不报错）→ add_child（子节点非空数组，同样不报错）——
  * 整条链路"成功"落地一个看不见、没有体素的装饰/建筑节点，`execute` 摘要里查不到任何
- * error，Sino 无法察觉、也无法自纠正，只会看到"空产"。当时被误诊为
- * `scene_set_attribute` 白名单阻塞，但 sinoOpGate.ts 的顶层 opId 白名单只挂在
- * POST /api/v1/batch（applyBatch / 通道 B）上，`instantiateTemplate`（通道 A）落地
- * 模板内部实现根本不经过该网关——白名单本身工作正常（见 sinoOpGate.test.ts）。真正
- * 病灶就是这里"放不下就静默退化成全 0，而非报错"的历史约定。现在改为显式 error，
+ * error，调用方无法察觉、也无法自纠正，只会看到"空产"。当时曾被误诊为外层
+ * graph mutation 门控问题；真正病灶是这里"放不下就静默退化成全 0，而非报错"
+ * 的历史约定。现在改为显式 error，
  * 说明区域尺寸、采样点与失败原因，方便 Sino 定位是 Scene/Rest 端口悬空未接，还是目标
  * 位置已被占满。
  */

@@ -1,6 +1,6 @@
 # AdaptiveRoomFurniturePlacer（自适应逐房间家具放置）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_adaptive_room_furniture_placer`，也可用 basename `AdaptiveRoomFurniturePlacer`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_adaptive_room_furniture_placer`，也可用 basename `AdaptiveRoomFurniturePlacer`。
 
 把上游场景的足迹切片为房间掩码网格，用 `adaptive_room_furniture_placer` 电池按房间面积自适应放置家具（小房间只放 small 家具，大房间放全尺寸），输出折叠后的家具网格；按值拆分后逐张建为命名场景子节点；输出与其它结构模板一致的五个固定端口。
 
@@ -32,4 +32,4 @@
 
 > 说明：本电池输出的逐实例 `nameList`（chair/table…）受限于现有命名算子，模板内仍按 `AssetName` 统一命名子节点；如需逐实例语义名需另接命名算子。
 
-`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。
+`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。

@@ -182,6 +182,7 @@ interface NormGroup {
   nameEn?: string
   position: { x: number; y: number }
   memberNodeIds: string[]
+  shadowParams: Record<string, unknown>
   exposedInputs: NormExposedPort[]
   exposedOutputs: NormExposedPort[]
 }
@@ -210,10 +211,23 @@ function flattenGroups(
   topEdges: GraphEdge[],
   groups: NodeGroup[],
 ): { nodes: NormNode[]; edges: NormEdge[]; groups: NormGroup[] } {
+  // NodeGroup persists nested definitions under `_nestedGroups`, but applyBatch
+  // stores every group in a flat registry. Expand children first so replay can
+  // create each child shadow before its parent tries to include that shadow.
+  const flatGroups: NodeGroup[] = []
+  const visitedGroups = new Set<string>()
+  const collectGroup = (group: NodeGroup): void => {
+    if (visitedGroups.has(group.id)) return
+    visitedGroups.add(group.id)
+    for (const child of group._nestedGroups ?? []) collectGroup(child)
+    flatGroups.push(group)
+  }
+  for (const group of groups) collectGroup(group)
+
   // shadow group id → exposed-port maps (portName → inner endpoint).
   const exposedIn = new Map<string, Map<string, { nodeId: string; port: string }>>()
   const exposedOut = new Map<string, Map<string, { nodeId: string; port: string }>>()
-  for (const g of groups) {
+  for (const g of flatGroups) {
     exposedIn.set(
       g.id,
       new Map(g.exposedInputs.map((p) => [p.portName, { nodeId: p.sourceNodeId, port: p.sourcePortName }])),
@@ -225,47 +239,58 @@ function flattenGroups(
   }
 
   const nodes: NormNode[] = []
+  const shadowNodes = new Map<string, GraphNode>()
   // Every __group__ shadow in the input — INCLUDING orphans whose NodeGroup
   // definition is missing from `groups` (a malformed/partial save). Orphans are
   // skipped here (like real shadows) but cannot be recreated by createGroup, so
   // any edge that still points at one must be dropped rather than emitted as a
   // connect to a non-existent node (which aborts the whole import).
   const allShadowIds = new Set<string>()
-  for (const n of topNodes) {
+  const collectNode = (n: GraphNode): void => {
     if (n.opId === GROUP_OP_ID) {
       allShadowIds.add(n.id)
-      continue // shadow node — recreated by createGroup (if defined in `groups`)
+      shadowNodes.set(n.id, n)
+      return // shadow node — recreated by createGroup (if defined in `groups`)
     }
     nodes.push(toNormNode(n))
   }
-  for (const g of groups) for (const n of g.nodes) nodes.push(toNormNode(n))
+  for (const n of topNodes) collectNode(n)
+  for (const g of flatGroups) for (const n of g.nodes) collectNode(n)
+
+  const resolveEndpoint = (
+    endpoint: { nodeId: string; port: string },
+    direction: 'input' | 'output',
+    visiting = new Set<string>(),
+  ): { nodeId: string; port: string } | null => {
+    if (!allShadowIds.has(endpoint.nodeId)) return { ...endpoint }
+    const visitKey = `${direction}:${endpoint.nodeId}:${endpoint.port}`
+    if (visiting.has(visitKey)) return null
+    const inner =
+      direction === 'output'
+        ? exposedOut.get(endpoint.nodeId)?.get(endpoint.port)
+        : exposedIn.get(endpoint.nodeId)?.get(endpoint.port)
+    if (!inner) return null
+    return resolveEndpoint(inner, direction, new Set(visiting).add(visitKey))
+  }
 
   const edges: NormEdge[] = []
-  for (const e of topEdges) {
-    let source = { ...e.source }
-    let target = { ...e.target }
-    let resolvable = true
-    if (allShadowIds.has(e.source.nodeId)) {
-      const inner = exposedOut.get(e.source.nodeId)?.get(e.source.port)
-      if (inner) source = { ...inner }
-      else resolvable = false // orphan group, or a boundary port that was never exposed
-    }
-    if (allShadowIds.has(e.target.nodeId)) {
-      const inner = exposedIn.get(e.target.nodeId)?.get(e.target.port)
-      if (inner) target = { ...inner }
-      else resolvable = false
-    }
-    if (!resolvable) continue // drop the unresolvable boundary edge (graceful degradation)
+  const collectEdge = (e: GraphEdge): void => {
+    const source = resolveEndpoint(e.source, 'output')
+    const target = resolveEndpoint(e.target, 'input')
+    // Drop an orphan group boundary or a cyclic/malformed exposed-port chain.
+    if (!source || !target) return
     edges.push({ id: e.id, source, target })
   }
-  for (const g of groups) for (const e of g.edges) edges.push({ id: e.id, source: { ...e.source }, target: { ...e.target } })
+  for (const e of topEdges) collectEdge(e)
+  for (const g of flatGroups) for (const e of g.edges) collectEdge(e)
 
-  const normGroups: NormGroup[] = groups.map((g) => ({
+  const normGroups: NormGroup[] = flatGroups.map((g) => ({
     id: g.id,
     name: g.name,
     nameEn: g.nameEn,
     position: g.position ?? { x: 0, y: 0 },
     memberNodeIds: g.nodes.map((n) => n.id),
+    shadowParams: { ...(shadowNodes.get(g.id)?.params ?? {}) },
     exposedInputs: g.exposedInputs.map(toNormExposedPort),
     exposedOutputs: g.exposedOutputs.map(toNormExposedPort),
   }))
@@ -522,6 +547,13 @@ export async function importPipelineGraph(
       memberNodeIds: g.memberNodeIds.map(remapNode),
       ...(exposedPorts ? { exposedPorts } : {}),
     })
+    if (Object.keys(g.shadowParams).length) {
+      ops.push({
+        type: 'updateNode',
+        nodeId: remapNode(g.id),
+        params: { ...g.shadowParams, groupId: remapNode(g.id) },
+      })
+    }
   }
 
   // Metadata round-trip (viewport / annotations / frames). Replace mode swaps

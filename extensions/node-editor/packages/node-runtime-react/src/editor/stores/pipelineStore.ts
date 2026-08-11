@@ -97,6 +97,8 @@ function nodeNameEn(node: { name?: string; batteryId?: string }, batteries: Batt
 // finger) instead of being diluted into a few sparse ticks.
 let _execInFlight = false
 let _execThrottlePendingId: string | null = null
+let _groupParamExecInFlight = false
+let _groupParamExecPendingId: string | null = null
 
 // Group-view inner param-edit sink. While the canvas shows a group's INTERNAL
 // view, inner nodes live in the group-view hook's live refs (flushed back to the
@@ -132,6 +134,29 @@ async function runParamExec(get: () => PipelineState, nodeId: string): Promise<v
   }
 }
 
+/** Group-param counterpart to runParamExec: one full group diff/execute at a time. */
+async function runGroupParamExec(get: () => PipelineState, groupId: string): Promise<void> {
+  _groupParamExecInFlight = true
+  try {
+    await get().incrementalExecute(groupId, false, { localPreviewEdit: true })
+  } finally {
+    _groupParamExecInFlight = false
+    if (_groupParamExecPendingId !== null) {
+      const next = _groupParamExecPendingId
+      _groupParamExecPendingId = null
+      void runGroupParamExec(get, next)
+    }
+  }
+}
+
+export function enqueueGroupParamExecute(get: () => PipelineState, groupId: string): void {
+  if (_groupParamExecInFlight) {
+    _groupParamExecPendingId = groupId
+  } else {
+    void runGroupParamExec(get, groupId)
+  }
+}
+
 // Local graph writes are serialized so an older async persist cannot commit
 // after a newer delete and recreate nodes from its stale desired snapshot.
 let _localMutationSeq = 0
@@ -160,6 +185,8 @@ let _mountRefreshInFlight: Promise<void> | null = null
 let _autoExecInFlight: Promise<void> | null = null
 /** Sharded (multi-MB) ports skipped on mount — hydrated one-at-a-time when idle. */
 let _deferredLargePortTimer: ReturnType<typeof setTimeout> | null = null
+/** One trailing cache fan-out for the entire drag, never one timer per tick. */
+let _localParamFanOutTimer: ReturnType<typeof setTimeout> | null = null
 const _deferredLargePorts: Array<{ nodeId: string; port: string }> = []
 // Each worker fetches a node port's FULL output value. Scene outputs can be
 // hundreds of MB (voxel-mass data trees), and the backend reassembles + JSON-
@@ -275,8 +302,18 @@ function nextLocalParamEditBatchId(): string {
 // A settle (no new tick within the window) lets the normal refresh resume.
 let _localParamEditUntil = 0
 const LOCAL_PARAM_EDIT_QUIET_MS = 150
+const _localParamEditListeners = new Set<() => void>()
+export function subscribeLocalParamEdit(listener: () => void): () => void {
+  _localParamEditListeners.add(listener)
+  return () => _localParamEditListeners.delete(listener)
+}
 function markLocalParamEditActive(): void {
   _localParamEditUntil = Date.now() + LOCAL_PARAM_EDIT_QUIET_MS
+  if (_localParamFanOutTimer) {
+    clearTimeout(_localParamFanOutTimer)
+    _localParamFanOutTimer = null
+  }
+  for (const listener of _localParamEditListeners) listener()
 }
 function isLocalParamEditActive(): boolean {
   return Date.now() < _localParamEditUntil
@@ -342,7 +379,9 @@ async function hydrateExecutionResult(
   applyExecutionResultOutputs(get, result)
   const fanOut = (): Promise<void> => get().refreshConnectedOutputs('exec:completed')
   if (options.deferCacheFanOut) {
-    setTimeout(() => {
+    if (_localParamFanOutTimer) clearTimeout(_localParamFanOutTimer)
+    _localParamFanOutTimer = setTimeout(() => {
+      _localParamFanOutTimer = null
       void (async () => {
         try {
           getEditorTransport()
@@ -1155,7 +1194,11 @@ interface PipelineState {
   persistSession: () => Promise<void>
   /** Debounced best-effort session persist for high-frequency layout/UI changes. */
   schedulePersistSession: (reason?: string) => void
-  incrementalExecute: (nodeId: string, fullExec?: boolean, options?: { persist?: boolean; localParamEdit?: boolean }) => Promise<void>
+  incrementalExecute: (
+    nodeId: string,
+    fullExec?: boolean,
+    options?: { persist?: boolean; localParamEdit?: boolean; localPreviewEdit?: boolean },
+  ) => Promise<void>
   executePipeline: (opts?: { quietErrors?: boolean }) => Promise<void>
   /** Wipe server + in-memory output caches, then run the full pipeline. */
   clearCacheAndExecutePipeline: () => Promise<void>
@@ -1235,7 +1278,12 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     const { api } = getEditorTransport()
     const [batteries, categories] = await Promise.all([api.getBatteries(), api.getCategories()])
     set({ batteries, categories })
-    await get().fetchBatteryOrder()
+    try {
+      const order = await api.getBatteryOrder()
+      set({ batteryOrder: order })
+    } catch (error) {
+      console.error('Failed to fetch battery order:', error)
+    }
   },
 
   fetchBatteryOrder: async () => {
@@ -1761,8 +1809,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
         updatedAt: new Date().toISOString(),
       },
     })
-    // Re-execute the outer GroupNode (its node id equals groupId).
-    void get().incrementalExecute(groupId, false)
+    // Re-execute the outer GroupNode through the same latest-value-wins stream
+    // used by root sliders. A group persist is heavier than updateNode, so
+    // overlapping one per pointermove creates a backlog and preview flicker.
+    enqueueGroupParamExecute(get, groupId)
   },
 
   enterGroupView: (groupId) =>
@@ -1902,7 +1952,8 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   incrementalExecute: async (nodeId, fullExec = false, options = {}) => {
     const { currentPipeline, addLog } = get()
     if (!currentPipeline) return
-    syncTrace('exec:start', { nodeId, fullExec, localParamEdit: !!options.localParamEdit, persist: options.persist !== false })
+    const localPreviewEdit = !!(options.localParamEdit || options.localPreviewEdit)
+    syncTrace('exec:start', { nodeId, fullExec, localParamEdit: !!options.localParamEdit, localPreviewEdit, persist: options.persist !== false })
     const downstreamIds = getDownstreamIds(nodeId, currentPipeline.edges)
     const seq = _localMutationSeq
     try {
@@ -1931,6 +1982,15 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
           // Commit the settled value durably (records the single history entry).
           // Debounced: only fires once the drag stops churning.
           get().schedulePersistSession('param-edit-settle')
+        } else if (options.localPreviewEdit) {
+          // Group internals cannot use the targeted updateNode param op: their
+          // params live in the RawTemplateGroup. Persist one coalesced group
+          // snapshot, but tag it like a local drag so graph self-echo and
+          // renderer cache re-pulls do not compete with direct live output.
+          const localBatchId = nextLocalParamEditBatchId()
+          rememberLocalParamEditBatch(localBatchId)
+          markLocalParamEditActive()
+          await enqueuePipelinePersist(currentPipeline, seq, 'editor', localBatchId)
         } else {
           // A local param edit (slider drag / inspector) already wrote the new
           // value into currentPipeline above. Tag the persist with a client batchId
@@ -1945,7 +2005,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
       const result = fullExec
         ? await callPipelineExecute()
         : await callPipelineExecute({ startNodeId: nodeId })
-      await hydrateExecutionResult(get, result, { deferCacheFanOut: !!options.localParamEdit })
+      await hydrateExecutionResult(get, result, { deferCacheFanOut: localPreviewEdit })
       syncTrace('exec:done', {
         nodeId,
         status: result?.status,
@@ -2286,6 +2346,7 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
     // Fresh sync session: forget any hash de-duped under a prior subscription.
     _lastSyncedHash = null
     _mountRefreshInFlight = null
+    _handledGraphBatchIds.clear()
 
     // Refetch the snapshot and record its content hash so the reconciler poll
     // below knows the canvas is up to date. Shared by the WS push path and the

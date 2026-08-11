@@ -1,6 +1,6 @@
 # IslandRegions（指定锚点岛屿区域）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1783100010000_isld1`，也可用 basename `IslandRegions`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1783100010000_isld1`，也可用 basename `IslandRegions`。
 > 内部 19 个节点 + 1 个嵌套子组（TileAssetName）。核心算法节点为 **`new_island_region_gen`**（位于 `scene30/aw_mountain/`）。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明
@@ -56,7 +56,7 @@ IslandSizes ─────────────────┐              
 先实例化本组拿回 `<G_ISLAND>`：
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"IslandRegions", "position":{"x":0,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 IslandRegions"} } }
 ```

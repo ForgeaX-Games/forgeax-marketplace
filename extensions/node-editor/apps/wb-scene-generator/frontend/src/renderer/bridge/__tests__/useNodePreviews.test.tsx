@@ -10,8 +10,12 @@ import type { HttpApiClient } from '../../../api/HttpApiClient'
 // exercises BOTH buckets: the intermediate grid preview AND the voxel sink.
 // Port TYPES come from listOps; output VALUES from getNodeOutput (wire form).
 function makeFakeClient(opts?: { sinkPreviewOff?: boolean }) {
-  let execCb: ((e: { kind: string }) => void) | null = null
-  let graphCb: ((e: { kind: string }) => void) | null = null
+  let execCb: ((e: { kind: string; executionId?: string }) => void) | null = null
+  let graphCb: ((e: { kind: string; batchId?: string }) => void) | null = null
+  let outputReads = 0
+  let completedOutputReads = 0
+  let outputReadGate: Promise<void> | null = null
+  let releaseOutputReads: (() => void) | null = null
   // `wire(value)` = the kernel `DataTree.fromItem(value)` serialization
   // (`[{path:[0], items:[value]}]`), matching the LIVE backend exactly:
   //   * grid       → value is the grid → items:[grid]              (single-wrap)
@@ -38,7 +42,7 @@ function makeFakeClient(opts?: { sinkPreviewOff?: boolean }) {
     },
   ]
   const client = {
-    subscribe(channel: string, cb: (e: { kind: string }) => void) {
+    subscribe(channel: string, cb: (e: { kind: string; executionId?: string; batchId?: string }) => void) {
       if (channel === 'execution') execCb = cb
       else if (channel === 'graph') graphCb = cb
       return () => {
@@ -63,13 +67,31 @@ function makeFakeClient(opts?: { sinkPreviewOff?: boolean }) {
     },
     async ensureViewingProject() {},
     async getNodeOutput(nodeId: string, port: string) {
-      return outputs[`${nodeId}:${port}`]
+      outputReads += 1
+      const value = outputs[`${nodeId}:${port}`]
+      const gate = outputReadGate
+      if (gate) await gate
+      completedOutputReads += 1
+      return value
     },
   }
   return {
     client: client as unknown as HttpApiClient,
-    completeExecution: () => execCb?.({ kind: 'exec:completed' }),
-    applyGraph: () => graphCb?.({ kind: 'graph:applied' }),
+    completeExecution: () => execCb?.({ kind: 'exec:completed', executionId: 'exec-test' }),
+    applyGraph: (batchId = 'graph-test') => graphCb?.({ kind: 'graph:applied', batchId }),
+    setOutput: (nodeId: string, port: string, value: unknown) => {
+      outputs[`${nodeId}:${port}`] = value
+    },
+    getOutputReads: () => outputReads,
+    getCompletedOutputReads: () => completedOutputReads,
+    delayOutputReads: () => {
+      outputReadGate = new Promise<void>((resolve) => { releaseOutputReads = resolve })
+      return () => {
+        releaseOutputReads?.()
+        releaseOutputReads = null
+        outputReadGate = null
+      }
+    },
     deleteNodes: (ids: string[]) => {
       nodes = nodes.filter((n) => !ids.includes(n.id as string))
     },
@@ -130,6 +152,47 @@ describe('useNodePreviews', () => {
 
     completeExecution()
     await waitFor(() => expect(useRenderStore.getState().previewLayers['noise:grid']).toBeDefined())
+  })
+
+  it('keeps the last grid frame when a refresh sees an empty declared-grid output', async () => {
+    const { client, completeExecution, setOutput, getOutputReads } = makeFakeClient()
+    renderHook(() => useNodePreviews(client))
+    await waitFor(() => expect(useRenderStore.getState().previewLayers['noise:grid']).toBeDefined())
+    const previous = useRenderStore.getState().previewLayers['noise:grid']
+    const readsBeforeRefresh = getOutputReads()
+
+    // graph:applied invalidates output caches before execute repopulates them.
+    // The transient empty fetch must not make an unrelated grid disappear.
+    setOutput('noise', 'grid', undefined)
+    completeExecution()
+    await waitFor(() => expect(getOutputReads()).toBeGreaterThan(readsBeforeRefresh))
+
+    expect(useRenderStore.getState().previewLayers['noise:grid']).toBe(previous)
+  })
+
+  it('does not let an in-flight refresh overwrite a newer live grid push', async () => {
+    const {
+      client, completeExecution, setOutput, getOutputReads,
+      getCompletedOutputReads, delayOutputReads,
+    } = makeFakeClient()
+    renderHook(() => useNodePreviews(client))
+    await waitFor(() => expect(useRenderStore.getState().previewLayers['noise:grid']).toBeDefined())
+
+    const wire = (v: unknown) => [{ path: [0], items: [v] }]
+    setOutput('noise', 'grid', wire([[1]]))
+    const readsBeforeRefresh = getOutputReads()
+    const completedBeforeRefresh = getCompletedOutputReads()
+    const release = delayOutputReads()
+    completeExecution()
+    await waitFor(() => expect(getOutputReads()).toBeGreaterThan(readsBeforeRefresh))
+
+    const { projectLiveOutputs } = await import('../useNodePreviews')
+    projectLiveOutputs({ noise: { grid: wire([[9]]) } })
+    expect(useRenderStore.getState().previewLayers['noise:grid']?.data).toEqual([[9]])
+
+    release()
+    await waitFor(() => expect(getCompletedOutputReads()).toBeGreaterThan(completedBeforeRefresh))
+    expect(useRenderStore.getState().previewLayers['noise:grid']?.data).toEqual([[9]])
   })
 
   it('evicts a deleted node\'s grid preview AND voxel layer on graph:applied (no execution needed)', async () => {
@@ -242,11 +305,30 @@ describe('useNodePreviews', () => {
 
     // Cache invalidated mid-drag: empty payload must NOT wipe the preview.
     sinkCells = []
-    execCb?.({ kind: 'exec:completed' })
+    ;(execCb as ((event: { kind: string }) => void) | null)?.({ kind: 'exec:completed' })
     await waitFor(() => expect(useRenderStore.getState().layers['sink:/A']?.cells).toHaveLength(1))
 
     sinkCells = [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }]
-    execCb?.({ kind: 'exec:completed' })
+    ;(execCb as ((event: { kind: string }) => void) | null)?.({ kind: 'exec:completed' })
     await waitFor(() => expect(useRenderStore.getState().layers['sink:/A']?.cells).toHaveLength(2))
+  })
+
+  it('lets direct live frames own a local drag and performs one settled cache refresh', async () => {
+    const { client, completeExecution, getOutputReads } = makeFakeClient()
+    renderHook(() => useNodePreviews(client))
+    await waitFor(() => expect(useRenderStore.getState().layers['sink:/A']).toBeDefined())
+    const baseline = getOutputReads()
+    const { notifyLocalParamEdit } = await import('../useNodePreviews')
+
+    notifyLocalParamEdit()
+    completeExecution()
+    notifyLocalParamEdit()
+    completeExecution()
+
+    // No network pull may race the invalidated cache while the drag is active.
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(getOutputReads()).toBe(baseline)
+    // One trailing refresh reconciles cache + GC after the quiet window.
+    await waitFor(() => expect(getOutputReads()).toBeGreaterThan(baseline), { timeout: 1200 })
   })
 })

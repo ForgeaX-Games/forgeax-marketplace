@@ -45,8 +45,22 @@ export async function restoreSnapshot(snapshot: Pipeline, actor: 'undo' | 'redo'
   }
 }
 
+export async function performUndoRedo(direction: 'undo' | 'redo'): Promise<void> {
+  const api = getEditorTransport().api
+  if (api.supportsCanonicalUndoRedo() && await api.isCanonicalSceneProject()) {
+    await api.applyCanonicalUndoRedo(direction)
+    return
+  }
+  const { undo, redo } = useHistoryStore.getState()
+  const { currentPipeline } = usePipelineStore.getState()
+  if (!currentPipeline) return
+  const snapshot = direction === 'undo' ? undo(currentPipeline) : redo()
+  if (snapshot) await restoreSnapshot(snapshot, direction)
+}
+
 export function useCanvasUndoRedo(): void {
   useEffect(() => {
+    let operationPending = false
     const onKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.platform.toUpperCase().includes('MAC')
       const metaOrCtrl = isMac ? e.metaKey : e.ctrlKey
@@ -64,14 +78,11 @@ export function useCanvasUndoRedo(): void {
       e.preventDefault()
       e.stopPropagation()
 
-      const { undo, redo } = useHistoryStore.getState()
-      const { currentPipeline } = usePipelineStore.getState()
-      if (!currentPipeline) return
-
-      // undo() needs the live pipeline to cache the redo tip when leaving the
-      // latest state; redo() reads its own cached tip / entry snapshot.
-      const snapshot = isUndo ? undo(currentPipeline) : redo()
-      if (snapshot) void restoreSnapshot(snapshot, isUndo ? 'undo' : 'redo')
+      if (operationPending) return
+      operationPending = true
+      void performUndoRedo(isUndo ? 'undo' : 'redo')
+        .catch((error) => console.error(`[undo-redo] canonical ${isUndo ? 'undo' : 'redo'} failed:`, error))
+        .finally(() => { operationPending = false })
     }
 
     // Capture phase + stopPropagation so ReactFlow's own key handlers (and the

@@ -295,13 +295,12 @@ function collectSceneNodeNamesFromSummary(summarizedOutputs: Record<string, Reco
 
 /**
  * Project a full ExecutionResult into a KB-scale summary for the AI tool layer.
- * status / error / executionId / durationMs are preserved verbatim — sino judges
- * success/failure on them. `outputs` is projected node-by-node, port-by-port into
- * child names + cell counts, never the raw cells.
+ * status / error / executionId / durationMs are preserved verbatim. `outputs`
+ * is projected node-by-node, port-by-port into child names + cell counts, never
+ * the raw cells.
  *
- * `expectedLocationNames` (optional): the upstream narrative/location-tree entity
- * names (硬门控 stage3.location_names — see compose-sino-scene/SKILL.md 与
- * compose-sino-scene/SKILL.md「命名对齐 + 结构展开」). When supplied and non-empty,
+ * `expectedLocationNames` (optional): external location-contract entity names.
+ * When supplied and non-empty,
  * this runs `checkLocationNameAlignment` against every node name collected from
  * `outputs` and reports the result under `verification.locationNameAlignment`
  * (plus a hint line when it fails) — never a silent no-op, and a failing check
@@ -408,8 +407,8 @@ export function summarizeExecutionResult(
   const locationHints: string[] = []
 
   // stage3.location_names 硬门控（2026-07-01 新增，见 lib/locationNameGate.ts）：
-  // 仅当调用方提供了非空的上游叙事/契约地点名单才跑（DEFAULT-OFF，同
-  // isSinoBatch/checkSinoOpAllowlist 的哲学——没传名单就是没有上游契约可比对，
+  // 仅当调用方提供了非空的上游叙事/契约地点名单才跑（DEFAULT-OFF：
+  // 没传名单就是没有上游契约可比对，
   // 不能瞎报缺失，也不影响未传该参数的既有调用方）。结果永远是结构化对象
   // （{ok, missing:[{name,reason}]}），从不是裸布尔，未命中同时并入上面的
   // `hints` 数组，让 Sino 在同一份摘要里看到全部需要修的问题。

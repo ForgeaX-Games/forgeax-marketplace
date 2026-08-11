@@ -282,7 +282,7 @@ type_string.value    ← 运行时 path 字符串（如 /architecture_0/...）
 1. **`in_N` / `out_N` 编号不透明**：语义看 `customLabelEn`，不看数字顺序  
 2. **visible vs hidden**：日常只接 visible；hidden 为密度/步长/zRange 等高级项  
 3. **access 类型**：scene 口多为 `item` 或 `tree`；资产名多为 `tree`（DataTree 包 string）  
-4. **实例化稳定性**：`portName` 在 `instantiateTemplate` 后不变；仅内部 nodeId 重映射  
+4. **实例化稳定性**：`portName` 在实例化后不变；仅内部 nodeId 重映射
 5. **嵌套组必须在 `_nestedGroups` 自包含**：缺一则 instantiate 失败或 inner view 空白  
 
 ---

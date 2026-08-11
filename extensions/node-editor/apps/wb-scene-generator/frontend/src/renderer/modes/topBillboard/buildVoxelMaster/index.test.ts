@@ -131,6 +131,7 @@ function objectInputWithCells(
 function tileAlias(name: string) {
   return {
     alias: `[0][1][${name}][3][4][5][6][floor][16][10][11][v]`,
+    tileType: 'floor',
   }
 }
 
@@ -223,7 +224,7 @@ describe('buildVoxelMaster object sprite ordering and bounds', () => {
       { drawMode: 'asset', aliases: [objectAlias('Tree'), tileAlias('Grass')] },
     )
 
-    expect(drawImageOps.map(op => op.image.alias)).toEqual(['Grass', 'Tree'])
+    expect(drawImageOps.map(op => op.image.alias)).toEqual(['Grass', 'Grass', 'Tree'])
   })
 
   it('draws one sprite for grouped object instance cells on the same layer', () => {

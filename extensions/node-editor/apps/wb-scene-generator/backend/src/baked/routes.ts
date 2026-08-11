@@ -29,6 +29,8 @@ import { buildBakeLayersFromExecutionResult, collectTerminalPorts } from './snap
 import { getProjectDir, getActiveProjectDir, getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from '../routes/projects.js'
 import { syncTrace } from '../debug/syncTrace.js'
+import { attachBakedLayers, buildExecutionLineage } from '../scene-script/lineage.js'
+import { readAuthoringState, writeResultLineage } from '../scene-script/store.js'
 
 /** Fastify default bodyLimit is 1MB — large voxel bake/paint payloads exceed it (HTTP 413). */
 const BAKED_VOXEL_BODY_LIMIT = 64 * 1024 * 1024
@@ -39,6 +41,20 @@ function notifyChanged(msg: string, projectId?: string): void {
   syncTrace('backend:baked-mutation', { msg, projectId })
   console.log(`[baked] ${msg}`)
   broadcastToClients({ event: 'baked:changed', payload: projectId ? { projectId } : {} })
+}
+
+async function persistBakedLineage(
+  projectDir: string,
+  layers: ReadonlyArray<{ nodePath?: string }>,
+  paths: readonly string[],
+): Promise<void> {
+  const state = await readAuthoringState(projectDir)
+  if (!state?.resultLineage) return
+  const mappings = paths.flatMap((bakedPath, index) => {
+    const sourcePath = layers[index]?.nodePath
+    return sourcePath ? [{ sourcePath, bakedPath }] : []
+  })
+  await writeResultLineage(projectDir, attachBakedLayers(state.resultLineage, mappings))
 }
 
 export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
@@ -169,6 +185,7 @@ export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
       layers?: Array<{ nodePath?: string; nodeName?: string; cells?: BakedCell[]; assetName?: string; assetAlias?: string; assetType?: string; schema?: string }>
     }
     const paths = await bakeLayers((b.layers ?? []).map((l) => ({ ...l, cells: l.cells ?? [] })))
+    await persistBakedLineage(await getActiveProjectDir(), b.layers ?? [], paths)
     notifyChanged(`bake ${paths.length} → [${paths.join(', ')}]`)
     return { paths }
   })
@@ -182,6 +199,8 @@ export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
       }
       try {
         const paths = await bakeLayersForProject(req.params.id, (b.layers ?? []).map((l) => ({ ...l, cells: l.cells ?? [] })))
+        const projectDir = await getProjectDir(req.params.id)
+        if (projectDir) await persistBakedLineage(projectDir, b.layers ?? [], paths)
         notifyChanged(`bake ${paths.length} → [${paths.join(', ')}] (project ${req.params.id})`)
         return { paths }
       } catch (e) {
@@ -240,6 +259,22 @@ export async function registerBakedRoutes(app: FastifyInstance): Promise<void> {
       }
       try {
         const paths = await bakeLayersForProject(projectId, layers, { replace, recordHistory: !replace })
+        const projectDir = await getProjectDir(projectId)
+        if (projectDir) {
+          const state = await readAuthoringState(projectDir)
+          if (state) {
+            const executionLineage = buildExecutionLineage(
+              full,
+              state.sourceMap,
+              (nodeId, port) => runtime.outputs.read(nodeId, port)?.data,
+            )
+            const mappings = paths.flatMap((bakedPath, index) => {
+              const sourcePath = layers[index]?.nodePath
+              return sourcePath ? [{ sourcePath, bakedPath }] : []
+            })
+            await writeResultLineage(projectDir, attachBakedLayers(executionLineage, mappings))
+          }
+        }
         notifyChanged(
           `bake-from-execute${replace ? ' (replace)' : ''} ${paths.length} → [${paths.slice(0, 8).join(', ')}${paths.length > 8 ? ', …' : ''}] (project ${projectId})`,
           projectId,

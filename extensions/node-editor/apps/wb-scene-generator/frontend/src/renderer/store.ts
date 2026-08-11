@@ -10,6 +10,51 @@ import { DEFAULT_VIEWPORT_2D, panViewport } from './framework/viewport2d'
 // graph-refresh GC (retainVoxelNodes) — which only touches `layers` — ignores it.
 export const BAKED_NODE_ID = '__baked__'
 
+export type ViewGuideVisibility = Record<ViewMode, boolean>
+
+const VIEW_GUIDES_STORAGE_KEY = 'wb-scene-generator.preview.viewGuides'
+const LEGACY_SHOW_GRID_KEY = 'wb-scene-generator.preview.showGrid'
+const DEFAULT_VIEW_GUIDES: ViewGuideVisibility = {
+  top: false,
+  topBillboard: false,
+  iso: false,
+  free3d: false,
+  '3DMesh': false,
+}
+
+function loadViewGuides(): ViewGuideVisibility {
+  if (typeof localStorage === 'undefined') return { ...DEFAULT_VIEW_GUIDES }
+  try {
+    const raw = localStorage.getItem(VIEW_GUIDES_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<Record<ViewMode, unknown>>
+      return {
+        top: parsed.top === true,
+        topBillboard: parsed.topBillboard === true,
+        iso: parsed.iso === true,
+        free3d: parsed.free3d === true,
+        '3DMesh': parsed['3DMesh'] === true,
+      }
+    }
+    // One-time compatibility with the old edit-toolbar preference.
+    if (localStorage.getItem(LEGACY_SHOW_GRID_KEY) === '1') {
+      return { ...DEFAULT_VIEW_GUIDES, topBillboard: true }
+    }
+  } catch {
+    // Storage can be unavailable in sandboxed embeds.
+  }
+  return { ...DEFAULT_VIEW_GUIDES }
+}
+
+function saveViewGuides(value: ViewGuideVisibility): void {
+  if (typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(VIEW_GUIDES_STORAGE_KEY, JSON.stringify(value))
+  } catch {
+    // View preferences are best-effort only.
+  }
+}
+
 /**
  * SELECT-tool resolved selection: the layer it maps to (drives the layer-list +
  * left-panel highlight via `selectedLayerKey` → `selectedLayerBus`) plus the
@@ -107,6 +152,9 @@ interface RenderState {
   setPreviewLayerVisible: (key: string, visible: boolean) => void
   setViewMode: (m: ViewMode) => void
   setDrawMode: (d: DrawMode) => void
+  /** Per-render-plugin visibility for grids/origin axes shown as view guides. */
+  viewGuides: ViewGuideVisibility
+  setViewGuideVisible: (mode: ViewMode, visible: boolean) => void
   setAliasMetas: (metas: AliasMeta[]) => void
   /** Overwrite viewport fields (zoom-at-cursor writes scale+offset atomically). */
   setViewport2d: (v: Partial<RenderState['viewport2d']>) => void
@@ -127,8 +175,6 @@ interface RenderState {
   bakedLayers: Record<string, RendererVoxelLayer>
   /** Whether the canvas is in paint/edit mode (billboard + asset only). */
   editMode: boolean
-  /** Whether to draw the (infinite) alignment grid lines on the canvas. */
-  showGrid: boolean
   /** The baked layer the user selected as the paint container (`baked:${nodePath}`), or null. */
   activeBakedLayerKey: string | null
   /** Brush mode in edit mode: free paint per cell, or box (rectangle) fill. */
@@ -148,7 +194,6 @@ interface RenderState {
   /** Clear project-scoped baked layer state before loading a different project. */
   clearBakedLayers: () => void
   setEditMode: (on: boolean) => void
-  setShowGrid: (on: boolean) => void
   setBrushMode: (mode: 'free' | 'box') => void
   setEditTool: (tool: PreviewEditTool) => void
   setEditZ: (z: number) => void
@@ -330,8 +375,9 @@ function unionVisibleCells(
 export const useRenderStore = create<RenderState>((set) => ({
   layers: {},
   previewLayers: {},
-  viewMode: 'topBillboard',
+  viewMode: 'top',
   drawMode: 'color',
+  viewGuides: loadViewGuides(),
   aliasMetas: [],
   viewport2d: { ...initialViewport },
   selectedEditorNodeIds: [],
@@ -341,7 +387,6 @@ export const useRenderStore = create<RenderState>((set) => ({
   voxelSelection: null,
   bakedLayers: {},
   editMode: false,
-  showGrid: false,
   brushMode: 'free',
   editTool: 'paint',
   editZ: 0,
@@ -637,7 +682,13 @@ export const useRenderStore = create<RenderState>((set) => ({
     })
   },
   setEditMode: (on) => set((s) => (s.editMode === on ? s : { editMode: on })),
-  setShowGrid: (on) => set((s) => (s.showGrid === on ? s : { showGrid: on })),
+  setViewGuideVisible: (mode, visible) =>
+    set((state) => {
+      if (state.viewGuides[mode] === visible) return state
+      const viewGuides = { ...state.viewGuides, [mode]: visible }
+      saveViewGuides(viewGuides)
+      return { viewGuides }
+    }),
   setBrushMode: (mode) => set((s) => (s.brushMode === mode ? s : { brushMode: mode })),
   setEditTool: (tool) => set((s) => (s.editTool === tool ? s : { editTool: tool })),
   setEditZ: (z) => set((s) => {
@@ -744,6 +795,6 @@ export const useRenderStore = create<RenderState>((set) => ({
     bakedRefreshDeferred = false
     lastPaintDelta = null
     lastVersionStamp = 0
-    set({ layers: {}, previewLayers: {}, viewMode: 'topBillboard', drawMode: 'color', aliasMetas: [], viewport2d: { ...initialViewport }, selectedEditorNodeIds: [], previewOverrides: {}, selectedLayerKey: null, selectedSubValue: null, voxelSelection: null, bakedLayers: {}, editMode: false, showGrid: false, brushMode: 'free', editTool: 'paint', editZ: 0, editHoverCell: null, editBox: null, activePaintTargetKey: null, activeBakedLayerKey: null })
+    set({ layers: {}, previewLayers: {}, viewMode: 'top', drawMode: 'color', aliasMetas: [], viewport2d: { ...initialViewport }, selectedEditorNodeIds: [], previewOverrides: {}, selectedLayerKey: null, selectedSubValue: null, voxelSelection: null, bakedLayers: {}, editMode: false, brushMode: 'free', editTool: 'paint', editZ: 0, editHoverCell: null, editBox: null, activePaintTargetKey: null, activeBakedLayerKey: null })
   },
 }))

@@ -1,6 +1,6 @@
 # AddBaseGrid（基础网格区域）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781266146700_dm7xl`，也可用 basename `AddBaseGrid`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1781266146700_dm7xl`，也可用 basename `AddBaseGrid`。
 > 内部 6 个节点（grid2node + rect_grid + add_child + scene_focus_path + scene_passthrough + type_string）、1 个嵌套子组（TileAssetName）。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明
@@ -52,7 +52,7 @@
 **标准起手式：空场景 → AddBaseGrid。** 先实例化本组拿回 `<G_BASE>`：
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AddBaseGrid", "position":{"x":-900,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid"} } }
 ```

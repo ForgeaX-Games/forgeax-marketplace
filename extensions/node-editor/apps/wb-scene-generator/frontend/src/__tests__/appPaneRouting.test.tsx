@@ -10,10 +10,6 @@ vi.mock('../surfaces/RendererSurface.js', () => ({
   RendererSurface: () => <div>Renderer Surface</div>,
 }))
 
-vi.mock('../surfaces/AssetStoreSurface.js', () => ({
-  AssetStoreSurface: () => <div>Asset Store Surface</div>,
-}))
-
 // The left pane now mounts the kernel <ProjectPanel> from the editor barrel,
 // which transitively loads the canvas (touches `document` at import). This
 // pane-routing test runs in a node env, so stub the barrel — its intent is
@@ -39,7 +35,8 @@ describe('App pane routing', () => {
   it('renders a dedicated scene left pane for pane=left', () => {
     const html = renderToStaticMarkup(<App pane="left" />)
 
-    expect(html).toContain('Scene Workbench Navigation')
+    expect(html).toContain('aria-label="Scene Workbench Navigation"')
+    expect(html).not.toContain('scene-left-pane__hero')
     expect(html).not.toContain('Center Workbench')
   })
 
@@ -47,5 +44,12 @@ describe('App pane routing', () => {
     const html = renderToStaticMarkup(<App pane="center" />)
 
     expect(html).toContain('Center Workbench')
+  })
+
+  it('does not expose AssetStore as a standalone pane', () => {
+    const html = renderToStaticMarkup(<App pane="assetstore" />)
+
+    expect(html).toContain('Center Workbench')
+    expect(html).not.toContain('Asset Store Surface')
   })
 })

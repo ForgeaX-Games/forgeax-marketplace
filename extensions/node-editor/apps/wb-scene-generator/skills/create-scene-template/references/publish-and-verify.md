@@ -15,17 +15,17 @@ batteries/templates/<cat>/<Name>/<Name>.json    ← 发布镜像（初始内容�
 
 1. 在 `groups/` 完成编辑与自测。
 2. **覆盖同步**到 `templates/`（json + README + icon）。
-3. 更新 `TEMPLATES_INDEX.md`；若 Sino 使用则更新 compose-sino-scene pipelines。
-4. 重启或等待扫描后 `scene:templates.list` 可见。
+3. 更新 `TEMPLATES_INDEX.md`。
+4. 重启或等待扫描后 `GET /api/v1/group-templates?scope=templates` 可见。
 
 **禁止**只维护单侧目录（见 SKILL.md §双副本铁律）。
 
 | API / 工具 | scope | 用途 |
 |------------|-------|------|
 | `GET /api/v1/group-templates?scope=groups` | groups | 开发草稿 |
-| `GET /api/v1/group-templates?scope=templates` | templates | Sino 发现 |
-| `scene:templates.get` | templates | 读 exposed 契约 |
-| `scene:pipeline.instantiateTemplate` | templates | 落图 |
+| `GET /api/v1/group-templates?scope=templates` | templates | Workbench 只读目录 |
+| `GET /api/v1/group-templates/:id?scope=templates` | templates | 读 exposed 契约 |
+| `POST /api/v1/group-templates/:projectId/instantiate` | templates | 落图 |
 
 **instantiate 只扫 `templates/`**（含 `.forgeax/user-content/templates/`），不读 `groups/`。
 
@@ -43,8 +43,8 @@ pnpm test groupTemplates         # 路由扫描 / list / get
 
 ## 编辑器内验证
 
-1. Templates 面板拖入或 `instantiateTemplate`
-2. 用 **返回值 `groupId`** 接线（不是库 `id`）
+1. 从 Templates 面板拖入
+2. 用运行时 **`groupId`** 接线（不是库 `id`）
 3. 必接 IN 全部连上 → `pipeline.execute`
 4. jq 投影单端口（**禁止**打印整图 outputs）：
 
@@ -61,12 +61,13 @@ scene 端口摘要：
 
 5. Preview 面板 Output 层应出现主产物名；Rest 可接下一组验证链式
 
-## instantiateTemplate 工具示例
+## 人类/Workbench HTTP 示例
 
 ```json
 {
-  "tool": "scene:pipeline.instantiateTemplate",
-  "arguments": {
+  "method": "POST",
+  "path": "/api/v1/group-templates/<projectId>/instantiate",
+  "body": {
     "templateId": "PickOneBuilding",
     "x": 400,
     "y": 200
@@ -82,7 +83,7 @@ scene 端口摘要：
 |------|------|
 | instantiate 后 inner view 空白 | `_nestedGroups` 缺子组或与 groupId 不一致 |
 | execute completed 但无图层 | 必接 Scene/POI 悬空（静默空跑） |
-| Sino 找不到模板 | 只在 groups/ 未 promote 到 templates/ |
+| Templates 面板找不到模板 | 只在 groups/ 未 promote 到 templates/ |
 | 连线 port 不存在 | 用了库 templateId 而非 instantiate 返回 groupId |
 | Rest 链断裂 | 未暴露 Rest out 或 grid2node 名不是 `rest` |
 

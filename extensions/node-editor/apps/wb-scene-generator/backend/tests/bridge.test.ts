@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { buildApp } from '../src/main.js'
+import { applyBatch } from '@forgeax/node-runtime'
+import { getRuntimeForProject } from '../src/runtime.js'
 
 let app: Awaited<ReturnType<typeof buildApp>>
 let projectRoot: string
@@ -62,22 +64,57 @@ describe('bridge REST', () => {
     })
   })
 
-  it('POST project-scoped batch creates a node, GET /nodes returns it', async () => {
+  it('rejects direct Runtime Graph authoring for a noncanonical project', async () => {
     const base = await projectBase()
     const ops = [{ type: 'createNode', nodeId: 'n1', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 5 } }]
     const post = await app.inject({ method: 'POST', url: `${base}/batch`, payload: { ops } })
-    expect(post.json().status).toBe('ok')
-    const nodes = await app.inject({ method: 'GET', url: `${base}/nodes` })
-    expect(nodes.json().some((n: { id: string }) => n.id === 'n1')).toBe(true)
+    expect(post.statusCode).toBe(409)
+    expect(post.json()).toEqual(expect.objectContaining({ code: 'scene-lift-required' }))
+  })
+
+  it('rejects direct Runtime Graph mutation by AI for a canonical Scene Project', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/projects',
+      payload: { type: 'scene', name: 'Canonical AI batch rejection' },
+    })
+    expect(created.statusCode).toBeLessThan(300)
+    const projectId = created.json().id as string
+    const source = 'const value = numberValue({ value: 1 })\n'
+    const committed = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/projects/${projectId}/scene-script`,
+      payload: { source },
+    })
+    expect(committed.statusCode).toBe(200)
+    const canonicalSource = committed.json().canonicalSource as string
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/projects/${projectId}/batch`,
+      headers: {
+        'x-forgeax-caller-kind': 'ai',
+        'x-forgeax-caller-agent-id': 'canonical-batch-test',
+        'x-forgeax-caller-session-id': 'canonical-batch-session',
+      },
+      payload: {
+        ops: [{ type: 'updateNode', nodeId: 'forbidden', params: { value: 2 } }],
+      },
+    })
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toEqual(expect.objectContaining({ code: 'scene-script-is-canonical' }))
+
+    const after = await app.inject({ method: 'GET', url: `/api/v1/projects/${projectId}/scene-script` })
+    expect(after.json().source).toBe(canonicalSource)
   })
 })
 
 describe('execute', () => {
   it('POST project-scoped execute runs the pipeline and reports completed', async () => {
     const base = await projectBase()
-    await app.inject({ method: 'POST', url: `${base}/batch`, payload: { ops: [
+    await applyBatch(await getRuntimeForProject(await mainProjectId()), [
       { type: 'createNode', nodeId: 'e1', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 7 } },
-    ] } })
+    ], { actor: 'test-runtime-fixture' })
     const r = await app.inject({ method: 'POST', url: `${base}/execute`, payload: {} })
     expect(r.statusCode).toBe(200)
     expect(r.json()).toMatchObject({ status: 'completed' })
@@ -120,9 +157,9 @@ describe('ws', () => {
     // applyBatch emits no event to subscribers, but executeNode emits exec:* on
     // the execution channel — so trigger a run and observe a real forwarded event.
     const base = await projectBase()
-    await app.inject({ method: 'POST', url: `${base}/batch`, payload: { ops: [
+    await applyBatch(await getRuntimeForProject(await mainProjectId()), [
       { type: 'createNode', nodeId: 'wsN', opId: 'relu', position: { x: 0, y: 0 }, params: { value: 1 } },
-    ] } })
+    ], { actor: 'test-runtime-fixture' })
     await app.inject({ method: 'POST', url: `${base}/execute`, payload: {} })
     await delay(100)
     sock.close()

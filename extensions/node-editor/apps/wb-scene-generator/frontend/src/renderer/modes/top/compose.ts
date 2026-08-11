@@ -15,6 +15,7 @@
 
 import { topLayerOrigin, topMasterOrigin, type TopGeometryParams } from '../../framework/geometry/top'
 import { devicePixelRatio, type Surface2D } from '../../framework/canvas2d'
+import { drawOrthographicGuides2d } from '../../framework/guides2d'
 
 export interface ComposeLayer {
   layerKey: string
@@ -49,6 +50,8 @@ export interface ComposeArgs {
   offsetX: number
   offsetY: number
   scale: number
+  /** Draw viewport-spanning grid lines and emphasized origin axes. */
+  showGrid?: boolean
 }
 
 /** 从 CSS background 读画布底色(与 mode-iso compose 行为一致) */
@@ -60,7 +63,7 @@ function readCanvasBg(el: HTMLElement): string {
 }
 
 export function composeFrame(args: ComposeArgs): void {
-  const { canvas, layers, maxRows, maxCols, cellSize, offsetX, offsetY, scale } = args
+  const { canvas, layers, maxRows, maxCols, cellSize, offsetX, offsetY, scale, showGrid } = args
   // jsdom (no `canvas` pkg) throws on getContext rather than returning null;
   // treat any failure as "no 2D context" so the plugin still mounts cleanly.
   let ctx: CanvasRenderingContext2D | null = null
@@ -92,7 +95,7 @@ export function composeFrame(args: ComposeArgs): void {
   ctx.fillStyle = readCanvasBg(canvas)
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  if (layers.length === 0 || maxRows <= 0 || maxCols <= 0) return
+  if ((layers.length === 0 && !showGrid) || maxRows <= 0 || maxCols <= 0) return
 
   // ② DPR
   ctx.scale(dpr, dpr)
@@ -164,5 +167,18 @@ export function composeFrame(args: ComposeArgs): void {
     )
     ctx.setLineDash([])
     ctx.restore()
+  }
+
+  if (showGrid) {
+    drawOrthographicGuides2d(ctx, {
+      cssW,
+      cssH,
+      cellSize,
+      offsetX: offX,
+      offsetY: offY,
+      scale,
+      originX,
+      originY,
+    })
   }
 }

@@ -65,7 +65,13 @@ export function opSpecToBattery(spec: OpSpec): Battery {
     nodeType?: string
     hideOutputs?: boolean
     iconSvg?: string
+    sourcePath?: string
+    sourceFiles?: string[]
     manualTrigger?: boolean
+    sceneScriptStatus?: Battery['sceneScriptStatus']
+    sceneScriptFunctionName?: string
+    sceneScriptPassedGates?: string[]
+    sceneScriptMissingGates?: string[]
   }
   const category = ui.category ?? (spec.id.includes('.') ? spec.id.split('.')[0] : 'general')
   const displayGroup = ui.displayGroup ?? category
@@ -106,6 +112,12 @@ export function opSpecToBattery(spec: OpSpec): Battery {
     ...(ui.nodeType ? { nodeType: ui.nodeType } : {}),
     ...(ui.hideOutputs !== undefined ? { hideOutputs: ui.hideOutputs } : {}),
     ...(ui.iconSvg !== undefined ? { iconSvg: ui.iconSvg } : {}),
+    ...(ui.sourcePath !== undefined ? { sourcePath: ui.sourcePath } : {}),
+    ...(ui.sourceFiles !== undefined ? { sourceFiles: ui.sourceFiles } : {}),
+    ...(ui.sceneScriptStatus !== undefined ? { sceneScriptStatus: ui.sceneScriptStatus } : {}),
+    ...(ui.sceneScriptFunctionName !== undefined ? { sceneScriptFunctionName: ui.sceneScriptFunctionName } : {}),
+    ...(ui.sceneScriptPassedGates !== undefined ? { sceneScriptPassedGates: ui.sceneScriptPassedGates } : {}),
+    ...(ui.sceneScriptMissingGates !== undefined ? { sceneScriptMissingGates: ui.sceneScriptMissingGates } : {}),
     // The shared prompt-substitution op is execution-only: nodes reference it
     // (so it must stay in the catalog for reload resolution), but it must NOT
     // appear as a draggable palette entry — saved prompts surface it instead.

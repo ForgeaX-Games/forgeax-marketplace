@@ -1,6 +1,6 @@
 # RoomLayoutPlacer（室内布局放置）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_room_layout_placer`，也可用 basename `RoomLayoutPlacer`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_room_layout_placer`，也可用 basename `RoomLayoutPlacer`。
 
 把上游场景的足迹切片为房间掩码网格，用 `room_layout_placer` 电池以四种布局模式（grid / nested / symmetric / one_open）放置家具，输出家具实体网格；按值拆分后逐张建为命名场景子节点；输出与其它结构模板一致的五个固定端口。
 
@@ -34,4 +34,4 @@
 
 > 说明：本电池输出的去重 `nameList` 受限于现有命名算子，模板内仍按 `AssetName` 统一命名子节点。
 
-`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。
+`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。

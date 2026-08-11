@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { useRenderStore } from '../store'
 
 describe('render store', () => {
-  beforeEach(() => useRenderStore.getState().reset())
+  beforeEach(() => {
+    useRenderStore.getState().reset()
+    for (const mode of ['top', 'topBillboard', 'iso', 'free3d', '3DMesh'] as const) {
+      useRenderStore.getState().setViewGuideVisible(mode, false)
+    }
+  })
   it('setLayers builds RendererVoxelLayers keyed nodeId:nodePath with resolved names', () => {
     useRenderStore.getState().setLayers('node1', 'scene_output',
       [{ nodePath: '/A', nodeName: 'A', value: 1, cells: [{ x: 0, y: 0, z: 0 }] }],
@@ -13,10 +18,24 @@ describe('render store', () => {
     expect(layers[0].assetName).toBe('wall')
     expect(layers[0].cells).toHaveLength(1)
   })
-  it('default viewMode is topBillboard, drawMode is color', () => {
+  it('default viewMode is top, drawMode is color', () => {
     const s = useRenderStore.getState()
-    expect(s.viewMode).toBe('topBillboard')
+    expect(s.viewMode).toBe('top')
     expect(s.drawMode).toBe('color')
+  })
+  it('stores view-guide visibility independently per render mode', () => {
+    const s = useRenderStore.getState()
+    s.setViewGuideVisible('topBillboard', true)
+    s.setViewGuideVisible('3DMesh', true)
+    expect(useRenderStore.getState().viewGuides).toMatchObject({
+      top: false,
+      topBillboard: true,
+      iso: false,
+      free3d: false,
+      '3DMesh': true,
+    })
+    s.setViewGuideVisible('topBillboard', false)
+    expect(useRenderStore.getState().viewGuides['3DMesh']).toBe(true)
   })
   it('setAliasMetas stores the asset alias pool; reset clears it', () => {
     expect(useRenderStore.getState().aliasMetas).toEqual([])

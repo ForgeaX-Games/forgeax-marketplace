@@ -105,6 +105,12 @@ describe('executeNode (Layer 2)', () => {
     expect(result.status).toBe('completed')
     expect(entries(result.outputs.d!.out)[0]!.items).toEqual([42])
     expect(result.outputs.s).toBeDefined()
+    expect(result.resultMetadata?.d?.out).toEqual({
+      producerNodeId: 'd',
+      producerPort: 'out',
+      outputType: 'number',
+      value: { inline: true },
+    })
   })
 
   it('op returning error:"" (success sentinel) still publishes its outputs', async () => {

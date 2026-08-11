@@ -6,43 +6,30 @@ displayName:
   zh: 场景生成器 作者指引
 ---
 
-# Scene Generator · AI guide
+# Scene Generator · Sino author guide
 
-This plugin extends `@forgeax/node-runtime` with domain ops and surfaces
-specific to **Scene Generator** workflows. AI agents drive editor actions
-through Studio ToolRegistry (`/api/tools/call`) tools declared in
-`forgeax-plugin.json`; nothing in this plugin requires a human-only path.
+Scene Script is the canonical authoring surface. The existing node graph is its
+live visual projection and remains the runtime execution surface.
 
-## Workflow shape
+Sino is the preferred Agent for this Workbench. Its task is scene design:
+spatial hierarchy, circulation, functional anchors, density, rhythm, and visual
+focus. It does not orchestrate other Agents or generate assets.
 
-1. `scene:projects.open` — args `{ "id": "<projectId>" }` (acquires the agent
-   lock; **required before any graph mutation**).
-2. `scene:batteries.list` / `scene:batteries.get` — inspect op IDs and ports.
-3. `scene:pipeline.get` — args `{ "projectId": "<same id>" }` (may omit
-   `projectId` after step 1 if this agent holds the lock).
-4. `scene:pipeline.applyBatch` — args `{ "projectId", "ops", "opts" }`; AI
-   batches must include `opts.actor` starting with `ai:` (e.g. `ai:sino`).
-5. `scene:pipeline.execute` — args `{ "projectId", "nodeId?" }`; default
-   returns a lightweight summary (pass `raw: true` only when you truly need full
-   voxel cells).
-6. `scene:renderer.*` / `scene:assets.list` — verify execute summary (no
-   errors, expected layer/asset names).
+## Workflow
 
-> **Field naming:** `projects.open` uses **`id`**; all `pipeline.*` tools use
-> **`projectId`** — same string value, different key. Do not guess REST paths
-> like `/pipeline/batch`; use the tools (`applyBatch` → `/batch`).
+1. Open the requested project with `scene:projects.open`.
+2. Resume bounded work state with `scene:agent.resumeSceneWork`.
+3. Read `scene:script.contracts` once for the versioned semantic function API.
+4. Read or create source with `scene:script.get` / `scene:script.put`.
+5. For local edits, use the `scene:agent.*` target, Lens, transaction, Semantic
+   Diff, verify, and accept/revert workflow.
+6. Execute through `scene:pipeline.execute` and verify both the compact result
+   and Renderer evidence.
 
-## Domain op catalogue
+Do not manipulate runtime nodes, template internals, port numbers, or graph
+storage for a Scene Script-managed project. Template/group function calls are
+sealed Authoring Entities; only their public arguments and outputs are visible
+to an agent.
 
-Use `scene:batteries.list`; the catalog is dynamic and includes plugin domain
-ops plus shared node-runtime ops.
-
-## Domain surfaces
-
-- `wb-scene-generator.projects` — project list/create/open/remove actions.
-- `wb-scene-generator.pipeline` — graph get/apply/execute/import/export actions.
-- `wb-scene-generator.preview` — renderer control and asset inspection actions.
-
-## Path slots
-
-(empty — populated when path slots are declared)
+The full design and self-review workflow is defined by the
+`compose-scene-script` skill.

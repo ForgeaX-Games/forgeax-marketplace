@@ -1,6 +1,6 @@
 # PickOneBuilding（单点建筑）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1781806910509_ac8a1`，也可用 basename `PickOneBuilding`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1781806910509_ac8a1`，也可用 basename `PickOneBuilding`。
 
 在指定坐标放置**一栋**建筑区域（点位 + 宽高 + 资产名）。与 `PickMultiBuildings`（多点批量）互补。
 
@@ -20,18 +20,18 @@
 | OUT | `out_3` | BuildingPath 路径句柄 |
 | OUT | `out_2` | Rest 剩余空地 |
 
-其余 `in_*` 为 hidden 高级参数，默认即可。完整端口以 `scene:templates.get` 为准。
+其余 `in_*` 为 hidden 高级参数，默认即可。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。
 
 ---
 
 ## 如何用命令调用（输入侧）
 
-> 文档标准见 [`../_DOC_STANDARD.md`](../_DOC_STANDARD.md)。Sino：**通道 A** `instantiateTemplate`；**通道 B** `applyBatch`（白名单 op + `connect`）。
+> 文档标准见 [`../_DOC_STANDARD.md`](../_DOC_STANDARD.md)。人类/Workbench 可从 Templates 面板拖入，再通过编辑器接线。
 
 ### 通道 A · 实例化
 
 ```json
-{ "toolId": "scene:pipeline.instantiateTemplate", "caller": { "kind": "ai" },
+{ "method": "POST", "path": "/api/v1/group-templates/<projectId>/instantiate", "caller": { "kind": "workbench" },
   "args": { "projectId": "<pid>", "templateId": "PickOneBuilding", "groupId": "verify_pk1",
             "position": { "x": -400, "y": 600 },
             "opts": { "actor": "ai:sino", "label": "实例化 PickOneBuilding" } } }
@@ -77,7 +77,7 @@
 ```bash
 PID=p_mr4b9s3j_dycp8k
 curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute" \
-  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: ai' \
+  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: workbench' \
   -d '{"narrativeLocationNames":["父区域","望江客栈"]}' \
   | jq '.outputs.verify_pk1.out_1[0].items[0].tree.children[].name'
 # 预期含：望江客栈
@@ -94,7 +94,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute" \
 ### 前置：造一个独立 Demo Scene（可跨模板复用的固定写法）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AddBaseGrid", "groupId":"demo_abg", "position":{"x":-800,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid（独立 demo scene）"} } }
 ```
@@ -129,7 +129,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute" \
 ### applyBatch 片段（可直接照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"PickOneBuilding", "groupId":"demo_pk", "position":{"x":-400,"y":600},
            "opts":{"actor":"ai:sino","label":"实例化 PickOneBuilding"} } }
 ```

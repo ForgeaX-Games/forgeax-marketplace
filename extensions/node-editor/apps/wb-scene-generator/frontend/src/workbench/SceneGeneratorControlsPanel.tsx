@@ -1,24 +1,27 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DragTitle, SectionTitle } from './controlSections.js'
 import { applySectionDragDelta, usePanelDragMinHeight } from './sectionDragResize.js'
+import { useEditorMirror } from './useEditorMirror.js'
 import {
   SettingsDataTypesPanel,
   SettingsHistoryPanel,
-  createEditorBridge,
   getPortTypeColor,
-  useUIStore,
+  useProjectStore,
 } from '@forgeax/node-runtime-react/editor'
+import { sceneT, useSceneLocale } from '../sceneI18n.js'
 import type {
-  EditorBridge,
   EditorMirrorSnapshot,
   SelectedNodeView,
   SelectedPortView,
 } from '@forgeax/node-runtime-react/editor'
 import type { DomainPortTypes } from '@forgeax/node-runtime-react/editor'
+import type { HttpApiClient } from '../api/HttpApiClient.js'
+import { useSceneScriptDiagnosticCodes } from './sceneScriptDiagnosticBridge.js'
 
 interface Props {
   syncKey: string
   domainPortTypes?: DomainPortTypes
+  client?: HttpApiClient
 }
 
 const LS_KEY = 'wb-scene-generator.controls-heights'
@@ -84,24 +87,15 @@ function save(h: Heights): void {
 }
 
 export function SceneGeneratorControlsPanel({ syncKey, domainPortTypes }: Props): JSX.Element {
-  const langMode = useUIStore((s) => s.langMode)
-  const en = langMode === 'en'
+  const locale = useSceneLocale()
+  const en = locale === 'en'
 
-  const [mirror, setMirror] = useState<EditorMirrorSnapshot | null>(null)
-  const bridgeRef = useRef<EditorBridge | null>(null)
+  const { mirror, bridgeRef } = useEditorMirror(syncKey)
   const [heights, setHeights] = useState<Heights>(load)
   const [collapsed, setCollapsed] = useState<Collapsed>(loadCollapsed)
 
   const panelRef = useRef<HTMLDivElement>(null)
   const { panelStyle, onDragStart } = usePanelDragMinHeight(panelRef)
-
-  useEffect(() => {
-    const bridge = createEditorBridge(syncKey)
-    bridgeRef.current = bridge
-    const off = bridge.onState(setMirror)
-    bridge.sendCommand({ type: 'request-state' })
-    return () => { off(); bridge.close(); bridgeRef.current = null }
-  }, [syncKey])
 
   const toggleCollapsed = useCallback((key: SectionKey) => {
     setCollapsed((prev) => {
@@ -144,7 +138,7 @@ export function SceneGeneratorControlsPanel({ syncKey, domainPortTypes }: Props)
         style={collapsed.nodeInfo ? undefined : { height: heights.nodeInfo }}
       >
         <SectionTitle
-          label={en ? 'Node Info' : '节点信息'}
+          label={sceneT('controls.nodeInfo')}
           collapsed={collapsed.nodeInfo}
           onToggle={() => toggleCollapsed('nodeInfo')}
         />
@@ -161,7 +155,7 @@ export function SceneGeneratorControlsPanel({ syncKey, domainPortTypes }: Props)
         style={collapsed.history ? undefined : { height: heights.history }}
       >
         <DragTitle
-          label={en ? 'History' : '操作历史'}
+          label={sceneT('controls.history')}
           collapsed={collapsed.history}
           onToggle={() => toggleCollapsed('history')}
           onDrag={onDragHistory}
@@ -183,7 +177,7 @@ export function SceneGeneratorControlsPanel({ syncKey, domainPortTypes }: Props)
         style={collapsed.dataTypes ? undefined : { height: heights.dataTypes }}
       >
         <DragTitle
-          label={en ? 'Data Types' : '数据类型'}
+          label={sceneT('controls.dataTypes')}
           collapsed={collapsed.dataTypes}
           onToggle={() => toggleCollapsed('dataTypes')}
           onDrag={onDragDataTypes}
@@ -202,7 +196,7 @@ export function SceneGeneratorControlsPanel({ syncKey, domainPortTypes }: Props)
         style={collapsed.help ? undefined : { height: heights.help }}
       >
         <DragTitle
-          label={en ? 'Help' : '帮助'}
+          label={sceneT('controls.help')}
           collapsed={collapsed.help}
           onToggle={() => toggleCollapsed('help')}
           onDrag={onDragHelp}
@@ -211,82 +205,177 @@ export function SceneGeneratorControlsPanel({ syncKey, domainPortTypes }: Props)
         {!collapsed.help && (
           <div className="editor-controls__section-content">
             <div className="scene-left-pane__help">
-              {en ? (
-                <>
-                  <div className="scene-left-pane__help-group">
-                    <div className="scene-left-pane__help-title">Build a scene</div>
-                    <ol>
-                      <li>Drag a battery from the left catalog onto the canvas.</li>
-                      <li>Drag from an output port to an input port to wire nodes.</li>
-                      <li>Run the pipeline to generate the scene output.</li>
-                    </ol>
-                  </div>
+              <div className="scene-left-pane__help-group">
+                <div className="scene-left-pane__help-title">{sceneT('controls.help.buildTitle')}</div>
+                <ol>
+                  <li>{sceneT('controls.help.build1')}</li>
+                  <li>{sceneT('controls.help.build2')}</li>
+                  <li>{sceneT('controls.help.build3')}</li>
+                </ol>
+              </div>
 
-                  <div className="scene-left-pane__help-group">
-                    <div className="scene-left-pane__help-title">Inspect &amp; edit</div>
-                    <ul>
-                      <li>Click a battery to see its ports and links in <b>Node Info</b>.</li>
-                      <li>Use <b>History</b> to review or undo recent edits.</li>
-                      <li><b>Data Types</b> lists every port colour and its aliases.</li>
-                    </ul>
-                  </div>
+              <div className="scene-left-pane__help-group">
+                <div className="scene-left-pane__help-title">{sceneT('controls.help.inspectTitle')}</div>
+                <ul>
+                  <li>{sceneT('controls.help.inspect1')}</li>
+                  <li>{sceneT('controls.help.inspect2')}</li>
+                  <li>{sceneT('controls.help.inspect3')}</li>
+                </ul>
+              </div>
 
-                  <div className="scene-left-pane__help-group">
-                    <div className="scene-left-pane__help-title">Preview &amp; assets</div>
-                    <ul>
-                      <li><b>Preview</b> embeds the live rendered scene output.</li>
-                      <li><b>AssetStore</b> looks up materials and reusable assets.</li>
-                    </ul>
-                  </div>
+              <div className="scene-left-pane__help-group">
+                <div className="scene-left-pane__help-title">{sceneT('controls.help.previewTitle')}</div>
+                <ul>
+                  <li>{sceneT('controls.help.preview1')}</li>
+                  <li>{sceneT('controls.help.preview2')}</li>
+                </ul>
+              </div>
 
-                  <div className="scene-left-pane__help-group">
-                    <div className="scene-left-pane__help-title">Projects</div>
-                    <ul>
-                      <li>Use <b>+</b> to start a project; the folder icon opens one.</li>
-                      <li><b>Save</b> on a card exports that project as JSON.</li>
-                    </ul>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="scene-left-pane__help-group">
-                    <div className="scene-left-pane__help-title">搭建场景</div>
-                    <ol>
-                      <li>从左侧电池库把节点拖到画布上。</li>
-                      <li>从输出端口拖到输入端口即可连线。</li>
-                      <li>运行管线以生成场景输出。</li>
-                    </ol>
-                  </div>
-
-                  <div className="scene-left-pane__help-group">
-                    <div className="scene-left-pane__help-title">查看与编辑</div>
-                    <ul>
-                      <li>点击节点，在 <b>节点信息</b> 中查看其端口与连线。</li>
-                      <li>在 <b>操作历史</b> 中回顾或撤销最近的改动。</li>
-                      <li><b>数据类型</b> 列出每种端口颜色及其别名。</li>
-                    </ul>
-                  </div>
-
-                  <div className="scene-left-pane__help-group">
-                    <div className="scene-left-pane__help-title">预览与资产</div>
-                    <ul>
-                      <li><b>预览</b> 标签内嵌实时渲染的场景输出。</li>
-                      <li><b>资产库</b> 用于查找材质与可复用资产。</li>
-                    </ul>
-                  </div>
-
-                  <div className="scene-left-pane__help-group">
-                    <div className="scene-left-pane__help-title">项目管理</div>
-                    <ul>
-                      <li>用 <b>+</b> 新建项目，文件夹图标用于打开项目。</li>
-                      <li>卡片上的 <b>Save</b> 把该项目导出为 JSON。</li>
-                    </ul>
-                  </div>
-                </>
-              )}
+              <div className="scene-left-pane__help-group">
+                <div className="scene-left-pane__help-title">{sceneT('controls.help.projectsTitle')}</div>
+                <ul>
+                  <li>{sceneT('controls.help.projects1')}</li>
+                  <li>{sceneT('controls.help.projects2')}</li>
+                </ul>
+              </div>
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Page-sidebar Node Info surface. Kept separate from the legacy controls stack
+ * so the sidebar can present current graph context without exposing History,
+ * Data Types, and Help as always-on panes.
+ */
+export function NodeInfoDashboard({ syncKey, domainPortTypes, client }: Props): JSX.Element {
+  const locale = useSceneLocale()
+  const { mirror, bridgeRef } = useEditorMirror(syncKey)
+  const viewingProjectId = useProjectStore((state) => state.viewingProjectId)
+  const [tab, setTab] = useState<'nodeInfo' | 'project' | 'history' | 'dataTypes' | 'help'>('nodeInfo')
+  const tabs = [
+    ['nodeInfo', sceneT('controls.nodeInfo')],
+    ['project', locale === 'en' ? 'Project' : '项目'],
+    ['history', sceneT('controls.history')],
+    ['dataTypes', sceneT('controls.dataTypes')],
+    ['help', sceneT('controls.help')],
+  ] as const
+  return (
+    <section className="scene-node-dashboard" aria-label={sceneT('controls.nodeInfo')}>
+      <div className="scene-node-dashboard__tabs" role="tablist" aria-label={sceneT('leftPane.controlGroup')}>
+        {tabs.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={`scene-node-dashboard__tab${tab === id ? ' is-active' : ''}`}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="scene-node-dashboard__content" role="tabpanel">
+        {tab === 'nodeInfo' && (
+          <NodeInfoPanel
+            mirror={mirror}
+            domainPortTypes={domainPortTypes}
+            en={locale === 'en'}
+            projectId={viewingProjectId}
+          />
+        )}
+        {tab === 'project' && <ProjectDetailsPanel client={client} projectId={viewingProjectId} />}
+        {tab === 'history' && (
+          <SettingsHistoryPanel
+            mirror={mirror?.history}
+            onClear={() => bridgeRef.current?.sendCommand({ type: 'clear-history' })}
+          />
+        )}
+        {tab === 'dataTypes' && <SettingsDataTypesPanel domainPortTypes={domainPortTypes} />}
+        {tab === 'help' && <DashboardHelp />}
+      </div>
+    </section>
+  )
+}
+
+function ProjectDetailsPanel({ client, projectId }: { client?: HttpApiClient; projectId: string | null }): JSX.Element {
+  const [info, setInfo] = useState<Awaited<ReturnType<HttpApiClient['getSceneScriptProjectInfo']>> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!client) return
+    let disposed = false
+    void client.getSceneScriptProjectInfo(projectId)
+      .then((next) => { if (!disposed) { setInfo(next); setError(null) } })
+      .catch((reason: unknown) => { if (!disposed) setError(reason instanceof Error ? reason.message : String(reason)) })
+    return () => { disposed = true }
+  }, [client, projectId])
+
+  if (error) return <div className="scene-project-info__empty">Project details unavailable: {error}</div>
+  if (!info) return <div className="scene-project-info__empty">Loading project details…</div>
+  return (
+    <div className="scene-project-info">
+      <header>
+        <div>
+          <small>Active Scene Script project</small>
+          <strong>{info.projectId}</strong>
+        </div>
+        <span>{info.moduleCount} modules</span>
+      </header>
+      <div className="scene-project-info__metrics">
+        <span><b>{info.sourceMapEntries}</b> mapped entities</span>
+        <span><b>{info.canonicalModule}</b> canonical entry</span>
+      </div>
+      <div className="scene-project-info__tree">
+        <small>Project file structure</small>
+        {info.files.map((file) => (
+          <div key={file.path} className={`scene-project-info__file scene-project-info__file--${file.kind}`}>
+            <span>{file.kind === 'module' ? 'TS' : '{}'}</span>
+            <code>{file.path}</code>
+            <small>{file.bytes} B</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DashboardHelp(): JSX.Element {
+  return (
+    <div className="scene-left-pane__help">
+      <div className="scene-left-pane__help-group">
+        <div className="scene-left-pane__help-title">{sceneT('controls.help.buildTitle')}</div>
+        <ol>
+          <li>{sceneT('controls.help.build1')}</li>
+          <li>{sceneT('controls.help.build2')}</li>
+          <li>{sceneT('controls.help.build3')}</li>
+        </ol>
+      </div>
+      <div className="scene-left-pane__help-group">
+        <div className="scene-left-pane__help-title">{sceneT('controls.help.inspectTitle')}</div>
+        <ul>
+          <li>{sceneT('controls.help.inspect1')}</li>
+          <li>{sceneT('controls.help.inspect2')}</li>
+          <li>{sceneT('controls.help.inspect3')}</li>
+        </ul>
+      </div>
+      <div className="scene-left-pane__help-group">
+        <div className="scene-left-pane__help-title">{sceneT('controls.help.previewTitle')}</div>
+        <ul>
+          <li>{sceneT('controls.help.preview1')}</li>
+          <li>{sceneT('controls.help.preview2')}</li>
+        </ul>
+      </div>
+      <div className="scene-left-pane__help-group">
+        <div className="scene-left-pane__help-title">{sceneT('controls.help.projectsTitle')}</div>
+        <ul>
+          <li>{sceneT('controls.help.projects1')}</li>
+          <li>{sceneT('controls.help.projects2')}</li>
+        </ul>
       </div>
     </div>
   )
@@ -299,30 +388,39 @@ function NodeInfoPanel({
   mirror,
   domainPortTypes,
   en,
+  projectId = null,
 }: {
   mirror: EditorMirrorSnapshot | null
   domainPortTypes?: DomainPortTypes
   en: boolean
+  projectId?: string | null
 }): JSX.Element {
   const stats = mirror?.stats
   const node = mirror?.selectedNode ?? null
+  const diagnosticCodes = useSceneScriptDiagnosticCodes(projectId, node?.id ?? null)
   return (
     <div className="scene-node-info">
       <div className="scene-node-info__stats">
-        <NodeInfoStat label={en ? 'Batteries' : '电池'} value={stats?.batteryCount ?? 0} />
-        <NodeInfoStat label={en ? 'Links' : '连接'} value={stats?.edgeCount ?? 0} />
-        <NodeInfoStat label={en ? 'Notes' : '注释'} value={stats?.annotationCount ?? 0} />
-        <NodeInfoStat label={en ? 'Groups' : '组合'} value={stats?.groupCount ?? 0} />
-        <NodeInfoStat label={en ? 'Frames' : '包围盒'} value={stats?.frameCount ?? 0} />
-        <NodeInfoStat label={en ? 'Selected' : '选中'} value={stats?.selectedCount ?? 0} />
+        <NodeInfoStat label={sceneT('controls.stats.batteries')} value={stats?.batteryCount ?? 0} />
+        <NodeInfoStat label={sceneT('controls.stats.links')} value={stats?.edgeCount ?? 0} />
+        <NodeInfoStat label={sceneT('controls.stats.notes')} value={stats?.annotationCount ?? 0} />
+        <NodeInfoStat label={sceneT('controls.stats.groups')} value={stats?.groupCount ?? 0} />
+        <NodeInfoStat label={sceneT('controls.stats.frames')} value={stats?.frameCount ?? 0} />
+        <NodeInfoStat label={sceneT('controls.stats.selected')} value={stats?.selectedCount ?? 0} />
       </div>
       {node ? (
-        <SelectedBatteryDiagram node={node} domainPortTypes={domainPortTypes} en={en} />
+        <>
+          <SelectedBatteryDiagram node={node} domainPortTypes={domainPortTypes} en={en} />
+          {diagnosticCodes.length > 0 && (
+            <div className="scene-node-info__diagnostics" aria-label="Selected node Scene Script diagnostics">
+              <small>Scene Script</small>
+              {diagnosticCodes.map((code) => <code key={code}>{code}</code>)}
+            </div>
+          )}
+        </>
       ) : (
         <div className="scene-node-info__empty">
-          {en
-            ? 'Click a battery on the canvas to inspect its connections.'
-            : '单击画布上的电池查看其连线情况。'}
+          {sceneT('controls.noSelection')}
         </div>
       )}
     </div>
@@ -401,7 +499,7 @@ function SelectedBatteryDiagram({
         <div className="ni-node__ports" ref={portsRef}>
           <div className="ni-node__col ni-node__col--in">
             {node.inputs.length === 0 ? (
-              <div className="ni-node__empty">{en ? 'no inputs' : '无输入'}</div>
+              <div className="ni-node__empty">{sceneT('controls.noInputs')}</div>
             ) : (
               node.inputs.map((port) => (
                 <PortRow key={`in:${port.name}`} port={port} side="in" en={en} domainPortTypes={domainPortTypes} />
@@ -410,7 +508,7 @@ function SelectedBatteryDiagram({
           </div>
           <div className="ni-node__col ni-node__col--out">
             {node.outputs.length === 0 ? (
-              <div className="ni-node__empty">{en ? 'no outputs' : '无输出'}</div>
+              <div className="ni-node__empty">{sceneT('controls.noOutputs')}</div>
             ) : (
               node.outputs.map((port) => (
                 <PortRow key={`out:${port.name}`} port={port} side="out" en={en} domainPortTypes={domainPortTypes} />
@@ -419,6 +517,42 @@ function SelectedBatteryDiagram({
           </div>
         </div>
       </div>
+      <section className="scene-node-info__details" aria-label="Selected node details">
+        <header className="scene-node-info__details-heading">
+          <span>Node details</span>
+          {node.sceneScriptStatus && node.sceneScriptStatus !== 'legacy' && (
+            <strong className={`scene-node-info__status-chip scene-node-info__status-chip--${node.sceneScriptStatus}`}>
+              {node.sceneScriptStatus === 'equivalence-verified' ? 'Equivalent' : 'Scene Script'}
+            </strong>
+          )}
+        </header>
+        <div className="scene-node-info__provenance">
+          <div><small>Identity</small><span title={node.id}>{node.id}</span></div>
+          <div><small>Runtime</small><span title={node.batteryId}>{node.batteryId}</span></div>
+          {node.sceneScriptFunctionName && <div><small>Contract</small><span>{node.sceneScriptFunctionName}()</span></div>}
+          {node.sourcePath && <div><small>Source</small><span title={node.sourcePath}>{node.sourcePath}</span></div>}
+        </div>
+        {node.sceneScriptStatus && node.sceneScriptStatus !== 'legacy' && (
+          <div className="scene-node-info__scene-status">
+            {node.sceneScriptMissingGates?.length ? (
+              <small>Pending acceptance: {node.sceneScriptMissingGates.join(', ')}</small>
+            ) : (
+              <small>All acceptance gates passed</small>
+            )}
+          </div>
+        )}
+        {node.sourceFiles?.length ? (
+          <div className="scene-node-info__source-tree" aria-label="Local source files">
+            <small>Local file structure</small>
+            <div className="scene-node-info__source-files">
+              {node.sourceFiles.map((entry) => {
+                const [kind, ...name] = entry.split(':')
+                return <span key={entry}>{kind === 'dir' ? '▸ ' : '· '}{name.join(':')}</span>
+              })}
+            </div>
+          </div>
+        ) : null}
+      </section>
     </div>
   )
 }
@@ -437,9 +571,9 @@ function valueParts(port: SelectedPortView): { label: string; detail: string } {
   const text = port.valueText ?? ''
   if (port.type === 'grid') {
     const m = text.match(/^grid\s+(.+)$/i)
-    return { label: 'grid', detail: m ? m[1] : text }
+    return { label: sceneT('controls.gridLabel'), detail: m ? m[1] : text }
   }
-  return { label: 'Value', detail: text }
+  return { label: sceneT('controls.valueLabel'), detail: text }
 }
 
 function PortRow({

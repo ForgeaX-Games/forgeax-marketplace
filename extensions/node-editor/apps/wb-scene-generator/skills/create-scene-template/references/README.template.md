@@ -1,6 +1,6 @@
 # {{NameEn}}（{{中文名}}）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`{{group_id}}`，也可用 basename `{{NameEn}}`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`{{group_id}}`，也可用 basename `{{NameEn}}`。
 
 {{一句话功能}}。与 `{{ClosestTemplate}}`（{{差异说明}}）互补。
 
@@ -16,7 +16,7 @@
 | OUT | `out_2` | Rest | 剩余空地 → 下一组 Scene |
 | OUT | `out_3` | {{MainProduct}}Path | 路径句柄 |
 
-其余 `in_*` 为 `[hidden]` 高级参数，默认即可。完整端口以 `scene:templates.get` 为准。
+其余 `in_*` 为 `[hidden]` 高级参数，默认即可。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。
 
 ## 链式接法
 

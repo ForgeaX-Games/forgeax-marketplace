@@ -1,6 +1,6 @@
 # PoiScatter（随机POI分布 · 场景版）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1782200000002_poisc`，也可用 basename `PoiScatter`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1782200000002_poisc`，也可用 basename `PoiScatter`。
 
 把 `poi_scatter` 电池封装为 scene 流水线：输入 Scene（上游空地/Rest），在其底面区域内按规则随机散布兴趣点（POI），挂回场景树并产出标准五件套。
 

@@ -20,10 +20,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
-  emptyTree,
+  ROOT_ID,
+  addChildren,
+  emptyScene,
+  getNode,
+  iterCells,
   makeScenePort,
-  readNode,
+  pathOf,
   projectSceneToVoxelLayers,
+  resolvePath,
+  volumeFromCells,
   DataTree as VendorDataTree,
   type ScenePortValue,
 } from '../../vendor/dist/shared/types/index.js'
@@ -43,10 +49,28 @@ import {
 import { grid2Node } from '../../batteries/scene/bridge/grid2node/index.js'
 import { addChild } from '../../batteries/scene/manage/add_child/index.js'
 import { nodeExplode } from '../../batteries/scene/query/node_explode/index.js'
-import { treeMerge } from '../../../forgeax-wb-node-core/packages/batteries-common/batteries/common/datatree/tree_merge/index.js'
+import { treeMerge } from '../../../../packages/batteries-common/batteries/common/datatree/tree_merge/index.js'
 
-function port(tree = emptyTree(), focus = '/'): ScenePortValue {
-  return makeScenePort(tree, focus)
+function port(): ScenePortValue {
+  const scene = emptyScene()
+  return makeScenePort(scene.graph, scene.focus)
+}
+
+function idAt(scene: ScenePortValue, path: string): string {
+  const id = resolvePath(scene.graph, ROOT_ID, path)
+  if (!id) throw new Error(`missing scene path: ${path}`)
+  return id
+}
+
+function cellCountAt(scene: ScenePortValue, path: string): number {
+  const node = getNode(scene.graph, idAt(scene, path))
+  return node?.content ? [...iterCells(node.content)].length : 0
+}
+
+function sceneWithLayer(name: string, cells: Array<{ x: number; y: number; z: number; token: string }>): ScenePortValue {
+  const scene = emptyScene()
+  const added = addChildren(scene.graph, ROOT_ID, [{ name, content: volumeFromCells(cells) }])
+  return makeScenePort(added.graph, ROOT_ID)
 }
 
 function addChildMeta(): {
@@ -75,17 +99,17 @@ describe('add_child — faithful multi-layer scene assembly', () => {
     const a = grid2Node({ name: 'A', grid: [[1]] }).scene!
     const b = grid2Node({ name: 'B', grid: [[1, 1]] }).scene!
 
-    const out = addChild({ scene: port(emptyTree(), '/'), nodes: [a, b] })
+    const out = addChild({ scene: port(), nodes: [a, b] })
     expect(out.error).toBeUndefined()
-    expect(out.scene?.focus).toBe('/')
+    expect(out.scene?.focus).toBe(ROOT_ID)
 
     // node_explode childPaths == sorted parent paths (matches add_child childPaths).
-    const expl = nodeExplode({ scene: makeScenePort(out.scene!.tree, '/') })
+    const expl = nodeExplode({ scene: out.scene })
     expect((expl.childPaths as string[]).slice().sort()).toEqual(['/A', '/B'])
     expect((out.childPaths as string[]).slice().sort()).toEqual(['/A', '/B'])
 
     // projection yields one non-empty layer per voxel-bearing node → 2 layers.
-    const { layers } = projectSceneToVoxelLayers(out.scene!.tree, '/')
+    const { layers } = projectSceneToVoxelLayers(out.scene!.graph, ROOT_ID)
     const nonEmpty = layers.filter((l) => l.cells.length > 0)
     expect(nonEmpty.length).toBe(2)
     expect(nonEmpty.map((l) => l.nodePath).sort()).toEqual(['/A', '/B'])
@@ -96,20 +120,21 @@ describe('add_child — faithful multi-layer scene assembly', () => {
     const child = grid2Node({ name: 'Leaf', grid: [[1]] }).scene!
 
     // Step 1: graft A under root.
-    const s1 = addChild({ scene: port(emptyTree(), '/'), nodes: [a] })
+    const s1 = addChild({ scene: port(), nodes: [a] })
     expect(s1.error).toBeUndefined()
 
     // Step 2: graft Leaf under /A (deeper level).
-    const s2 = addChild({ scene: makeScenePort(s1.scene!.tree, '/A'), nodes: [child] })
+    const aId = idAt(s1.scene!, '/A')
+    const s2 = addChild({ scene: makeScenePort(s1.scene!.graph, aId), nodes: [child] })
     expect(s2.error).toBeUndefined()
-    expect(s2.scene?.focus).toBe('/A')
+    expect(pathOf(s2.scene!.graph, s2.scene!.focus)).toBe('/A')
 
     // Deeper child path present.
-    expect(readNode(s2.scene!.tree, '/A/Leaf')?.cells?.length).toBe(1)
-    expect(nodeExplode({ scene: makeScenePort(s2.scene!.tree, '/A') }).childPaths).toEqual(['/A/Leaf'])
+    expect(cellCountAt(s2.scene!, '/A/Leaf')).toBe(1)
+    expect(nodeExplode({ scene: makeScenePort(s2.scene!.graph, aId) }).childPaths).toEqual(['/A/Leaf'])
 
     // Whole-tree projection still has both voxel nodes.
-    const { layers } = projectSceneToVoxelLayers(s2.scene!.tree, '/')
+    const { layers } = projectSceneToVoxelLayers(s2.scene!.graph, ROOT_ID)
     expect(layers.filter((l) => l.cells.length > 0).map((l) => l.nodePath).sort()).toEqual(['/A', '/A/Leaf'])
   })
 
@@ -125,11 +150,11 @@ describe('add_child — faithful multi-layer scene assembly', () => {
 
     const out = addChild({ scene: root, nodes: (merged.tree as InstanceType<typeof VendorDataTree>).toJSON()[0]!.items })
     expect(out.error).toBeUndefined()
-    expect(out.scene?.focus).toBe('/Root')
+    expect(pathOf(out.scene!.graph, out.scene!.focus)).toBe('/Root')
     expect(out.childPaths).toEqual(['/Root/Branch'])
-    expect(readNode(out.scene!.tree, '/Root/Branch/Leaf')?.cells?.length).toBe(2)
+    expect(cellCountAt(out.scene!, '/Root/Branch/Leaf')).toBe(2)
 
-    const { layers } = projectSceneToVoxelLayers(out.scene!.tree, '/Root')
+    const { layers } = projectSceneToVoxelLayers(out.scene!.graph, out.scene!.focus)
     expect(layers.map((l) => l.nodePath)).toEqual(['/Root/Branch', '/Root/Branch/Leaf'])
   })
 })
@@ -138,19 +163,11 @@ describe('scene_output projection — multi-value (per-token) sub-layers', () =>
   // A node whose voxels carry a single token stays a single-value layer
   // (no tokens/cellsByToken fields → renderer shows one flat row).
   it('single-token node yields a single-value layer (no sub-layers)', () => {
-    const tree = {
-      name: '', path: '/', version: 1, children: [
-        {
-          name: 'Solid', path: '/Solid', version: 1, children: [],
-          cells: [
-            { x: 0, y: 0, z: 0, token: 'wall' },
-            { x: 1, y: 0, z: 0, token: 'wall' },
-          ],
-        },
-      ],
-    } as unknown as Parameters<typeof projectSceneToVoxelLayers>[0]
-
-    const { layers } = projectSceneToVoxelLayers(tree, '/')
+    const scene = sceneWithLayer('Solid', [
+      { x: 0, y: 0, z: 0, token: 'wall' },
+      { x: 1, y: 0, z: 0, token: 'wall' },
+    ])
+    const { layers } = projectSceneToVoxelLayers(scene.graph, scene.focus)
     expect(layers).toHaveLength(1)
     expect(layers[0]!.cells).toHaveLength(2)
     expect(layers[0]!.tokens).toBeUndefined()
@@ -161,21 +178,13 @@ describe('scene_output projection — multi-value (per-token) sub-layers', () =>
   // full union, and tokens/cellsByToken expose the per-token split that the
   // renderer turns into collapsible sub-layer rows with their own visibility.
   it('multi-token node emits tokens + cellsByToken (sub-layer split)', () => {
-    const tree = {
-      name: '', path: '/', version: 1, children: [
-        {
-          name: 'House', path: '/House', version: 1, children: [],
-          cells: [
-            { x: 0, y: 0, z: 0, token: 'wall' },
-            { x: 1, y: 0, z: 0, token: 'wall' },
-            { x: 0, y: 0, z: 1, token: 'roof' },
-            { x: 2, y: 0, z: 0, token: 'ground' },
-          ],
-        },
-      ],
-    } as unknown as Parameters<typeof projectSceneToVoxelLayers>[0]
-
-    const { layers } = projectSceneToVoxelLayers(tree, '/')
+    const scene = sceneWithLayer('House', [
+      { x: 0, y: 0, z: 0, token: 'wall' },
+      { x: 1, y: 0, z: 0, token: 'wall' },
+      { x: 0, y: 0, z: 1, token: 'roof' },
+      { x: 2, y: 0, z: 0, token: 'ground' },
+    ])
+    const { layers } = projectSceneToVoxelLayers(scene.graph, scene.focus)
     expect(layers).toHaveLength(1)
     const layer = layers[0]!
     // Full union preserved for back-compat single-surface rendering.
@@ -243,10 +252,10 @@ describe('tree_merge — DataTree wire-algebra (not scene assembly)', () => {
 
     // This mirrors the dispatcher boundary for add_child.nodes (access:list):
     // a merged branch's scene items are collected into the child list.
-    const out = addChild({ scene: port(emptyTree(), '/'), nodes: (merged.tree as InstanceType<typeof VendorDataTree>).toJSON()[0]!.items })
+    const out = addChild({ scene: port(), nodes: (merged.tree as InstanceType<typeof VendorDataTree>).toJSON()[0]!.items })
     expect(out.error).toBeUndefined()
-    expect(readNode(out.scene!.tree, '/A')).not.toBeNull()
-    expect(readNode(out.scene!.tree, '/B')).not.toBeNull()
+    expect(getNode(out.scene!.graph, idAt(out.scene!, '/A'))).not.toBeNull()
+    expect(getNode(out.scene!.graph, idAt(out.scene!, '/B'))).not.toBeNull()
   })
 
   it('item band tree_merge output flows through add_child.nodes list access at the dispatcher boundary', async () => {
@@ -283,8 +292,8 @@ describe('tree_merge — DataTree wire-algebra (not scene assembly)', () => {
       { path: [0, 1], items: ['/Root/B'] },
     ])
     const sceneOut = entries(dispatched.scene)[0]!.items[0] as ScenePortValue
-    expect(readNode(sceneOut.tree, '/Root/A')).not.toBeNull()
-    expect(readNode(sceneOut.tree, '/Root/B')).not.toBeNull()
+    expect(getNode(sceneOut.graph, idAt(sceneOut, '/Root/A'))).not.toBeNull()
+    expect(getNode(sceneOut.graph, idAt(sceneOut, '/Root/B'))).not.toBeNull()
   })
 
   it('infers tree_merge item band at execution time for old graphs missing inferredAccess', async () => {
@@ -354,8 +363,8 @@ describe('tree_merge — DataTree wire-algebra (not scene assembly)', () => {
       const sceneEntries = entries(result.outputs.add!.scene)
       expect(sceneEntries).toHaveLength(1)
       const sceneOut = sceneEntries[0]!.items[0] as ScenePortValue
-      expect(readNode(sceneOut.tree, '/Root/A')).not.toBeNull()
-      expect(readNode(sceneOut.tree, '/Root/B')).not.toBeNull()
+      expect(getNode(sceneOut.graph, idAt(sceneOut, '/Root/A'))).not.toBeNull()
+      expect(getNode(sceneOut.graph, idAt(sceneOut, '/Root/B'))).not.toBeNull()
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }

@@ -309,6 +309,9 @@ importers:
       '@forgeax/node-runtime':
         specifier: workspace:*
         version: link:../../../packages/node-runtime
+      '@forgeax/scene-authoring':
+        specifier: workspace:*
+        version: link:../../../packages/scene-authoring
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.10.0
@@ -334,6 +337,9 @@ importers:
 
   apps/wb-scene-generator/frontend:
     dependencies:
+      '@forgeax/i18n':
+        specifier: workspace:*
+        version: link:../../../packages/i18n
       '@forgeax/node-runtime':
         specifier: workspace:*
         version: link:../../../packages/node-runtime
@@ -520,6 +526,22 @@ importers:
       zustand:
         specifier: ^4.0.0
         version: 4.5.7(@types/react@18.3.30)(react@18.3.1)
+
+  packages/scene-authoring:
+    dependencies:
+      '@forgeax/node-runtime':
+        specifier: workspace:*
+        version: link:../node-runtime
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.41
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.6(@types/node@20.19.41)(jsdom@25.0.1)
 
 packages:
 

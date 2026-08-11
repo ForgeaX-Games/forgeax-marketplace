@@ -11,9 +11,6 @@ import {
   readEditMode,
   writeEditMode,
   subscribeEditMode,
-  readShowGrid,
-  writeShowGrid,
-  subscribeShowGrid,
   readBrushMode,
   writeBrushMode,
   subscribeBrushMode,
@@ -105,19 +102,6 @@ describe('editToolbar bus', () => {
     writeEditMode(true)
     writeEditMode(false)
     expect(seen).toEqual([true, false])
-    unsub()
-  })
-
-  it('showGrid defaults to false, round-trips, and notifies its key only', () => {
-    expect(readShowGrid()).toBe(false)
-    writeShowGrid(true)
-    expect(readShowGrid()).toBe(true)
-    const seen: boolean[] = []
-    const unsub = subscribeShowGrid((v) => seen.push(v))
-    writeShowGrid(false)
-    window.dispatchEvent(new StorageEvent('storage', { key: 'wb-scene-generator.preview.showGrid' }))
-    window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated' }))
-    expect(seen).toEqual([false])
     unsub()
   })
 

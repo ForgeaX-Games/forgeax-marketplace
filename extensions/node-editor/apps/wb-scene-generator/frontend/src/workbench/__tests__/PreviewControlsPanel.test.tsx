@@ -24,14 +24,12 @@ function renderPanel(overrides?: Partial<Parameters<typeof PreviewControlsPanel>
       editMode
       editTool="paint"
       brushMode="free"
-      showGrid={false}
       editZ={0}
       previewContext={{ editMode: true, viewMode: 'topBillboard', drawMode: 'asset', editAvailable: true }}
       bakedHistory={history}
       selectedLayers={[]}
       onPickTool={vi.fn()}
       onPickBrush={vi.fn()}
-      onToggleGrid={vi.fn()}
       onUpdateEditZ={vi.fn()}
       onUndoBakedEdit={vi.fn()}
       onRedoBakedEdit={vi.fn()}

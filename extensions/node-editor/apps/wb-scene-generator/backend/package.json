@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@forgeax/node-runtime": "workspace:*",
+    "@forgeax/scene-authoring": "workspace:*",
     "@forgeax/batteries-common": "workspace:*",
     "@forgeax/editor-host": "workspace:*",
     "better-sqlite3": "^12.8.0",

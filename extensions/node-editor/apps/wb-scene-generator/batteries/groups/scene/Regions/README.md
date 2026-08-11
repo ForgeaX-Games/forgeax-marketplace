@@ -1,6 +1,6 @@
 # RegionZoneGenerator（区域分区地块）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_regionzone_district`，也可用 basename `RegionZoneGenerator`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_regionzone_district`，也可用 basename `RegionZoneGenerator`。
 > 内部 1 个嵌套子组（TileAssetName）。实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 功能说明

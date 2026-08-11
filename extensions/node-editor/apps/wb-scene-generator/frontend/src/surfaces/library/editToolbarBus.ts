@@ -1,17 +1,15 @@
-// Cross-pane channel for the preview's edit toolbar. Two facts cross between the
-// renderer pane (?pane=renderer) and the left pane (?pane=left), in opposite
-// directions, so each gets its own localStorage key (sibling same-origin iframes
-// → `storage` events, same pattern as selectedLayerBus.ts / paintAssetBus.ts):
+// Cross-pane channel for paint/edit controls shared by the renderer pane
+// (?pane=renderer) and left pane (?pane=left). Each gets its own localStorage
+// key (sibling same-origin iframes → `storage` events, same pattern as
+// selectedLayerBus.ts / paintAssetBus.ts). View guides deliberately do not live
+// here: they are renderer-owned View preferences in the render store.
 //
 //   editMode  — renderer publishes (it owns the Pencil toggle); the left pane
 //               subscribes so its edit toolbar only expands while editing.
-//   showGrid  — the left pane's toolbar publishes; the renderer subscribes and
-//               mirrors it into the render store so compose draws the grid.
 //   editZ     — the left pane publishes the active integer z layer; the renderer
 //               uses it when mapping the selected top-face cell into a voxel.
 
 const LS_EDIT_MODE = 'wb-scene-generator.preview.editMode'
-const LS_SHOW_GRID = 'wb-scene-generator.preview.showGrid'
 const LS_BRUSH_MODE = 'wb-scene-generator.preview.brushMode'
 const LS_EDIT_TOOL = 'wb-scene-generator.preview.editTool'
 const LS_EDIT_Z = 'wb-scene-generator.preview.editZ'
@@ -72,12 +70,6 @@ export const subscribeEditMode = (cb: (on: boolean) => void): (() => void) => {
     unsubStorage()
   }
 }
-
-// show grid (left → renderer)
-export const writeShowGrid = (on: boolean): void => writeBool(LS_SHOW_GRID, on)
-export const readShowGrid = (): boolean => readBool(LS_SHOW_GRID, false)
-export const subscribeShowGrid = (cb: (on: boolean) => void): (() => void) =>
-  subscribeBool(LS_SHOW_GRID, cb, false)
 
 // brush mode (left → renderer)
 export function writeBrushMode(mode: BrushMode): void {
@@ -150,14 +142,14 @@ export function writePreviewEditContext(ctx: PreviewEditContextBus): void {
 
 export function readPreviewEditContext(): PreviewEditContextBus {
   if (typeof localStorage === 'undefined') {
-    return { editMode: false, viewMode: 'topBillboard', drawMode: 'asset', editAvailable: false }
+    return { editMode: false, viewMode: 'top', drawMode: 'asset', editAvailable: false }
   }
   const raw = localStorage.getItem(LS_PREVIEW_CONTEXT)
-  if (!raw) return { editMode: false, viewMode: 'topBillboard', drawMode: 'asset', editAvailable: false }
+  if (!raw) return { editMode: false, viewMode: 'top', drawMode: 'asset', editAvailable: false }
   try {
     return JSON.parse(raw) as PreviewEditContextBus
   } catch {
-    return { editMode: false, viewMode: 'topBillboard', drawMode: 'asset', editAvailable: false }
+    return { editMode: false, viewMode: 'top', drawMode: 'asset', editAvailable: false }
   }
 }
 

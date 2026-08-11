@@ -45,46 +45,9 @@ body[data-pane='left'] #root {
   height: 0;
 }
 
-.scene-left-pane__hero {
-  position: relative;
-  z-index: 2;
-  width: 100%;
-  margin-bottom: 0;
-  padding-top: 2px;
-  padding-bottom: 12px;
-  container-type: inline-size;
-}
-
 .scene-left-pane h2,
 .scene-left-pane p {
   margin: 0;
-}
-
-.scene-left-pane__hero-title {
-  width: 100%;
-  /* Clip horizontally only — vertical clipping ate the descender on "g". */
-  overflow-x: hidden;
-  overflow-y: visible;
-}
-
-.scene-left-pane__hero-title h1 {
-  margin: 0;
-  width: max-content;
-  max-width: 100%;
-  display: inline-block;
-  white-space: nowrap;
-  overflow-x: hidden;
-  overflow-y: visible;
-  text-overflow: clip;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-weight: 400;
-  /* Roomy line box + small bottom padding so descenders (g/y) are never cut. */
-  line-height: 1.3;
-  padding-bottom: 2px;
-  letter-spacing: 0.03em;
-  transform-origin: left center;
-  text-transform: none;
-  color: var(--color-accent, #d4ff48);
 }
 
 .scene-left-pane__empty,
@@ -566,6 +529,133 @@ body[data-pane='left'] #root {
   background: rgba(255, 255, 255, 0.06);
 }
 
+/* Bundle-derived floating-column cards, mapped into the Page-owned left panel. */
+.scene-left-pane__section--projects {
+  box-sizing: border-box;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-primary, #e6e8ec);
+  font-size: 12px;
+}
+
+.scene-left-pane__section--projects > .proj-panel {
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px;
+  border: 1px solid rgba(var(--color-accent-rgb, 212, 255, 72), 0.18);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(16, 25, 18, 0.98), rgba(9, 14, 11, 0.98));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.scene-left-pane__section--projects .proj-panel__list {
+  flex: 1;
+  min-height: 0;
+  padding-top: 8px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 255, 72, 0.38) transparent;
+}
+
+.scene-left-pane__section--projects .proj-panel__list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scene-left-pane__section--projects .proj-panel__list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(212, 255, 72, 0.38);
+}
+
+.scene-left-pane__section--projects .proj-panel__list .proj-card {
+  flex: 0 0 auto;
+  min-height: 64px;
+}
+
+.scene-left-pane__section--projects .proj-card__open {
+  gap: 2px;
+  padding: 7px 6px 7px 10px;
+}
+
+.scene-left-pane__section--projects .proj-card__name {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-left-pane__section--projects .proj-card__meta {
+  line-height: 1.25;
+}
+
+.scene-node-dashboard {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid rgba(var(--color-accent-rgb, 212, 255, 72), 0.18);
+  border-radius: 10px;
+  color: var(--color-text-primary, #e6e8ec);
+  background: linear-gradient(180deg, rgba(16, 25, 18, 0.98), rgba(9, 14, 11, 0.98));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.scene-node-dashboard__tabs {
+  flex: 0 0 auto;
+  display: grid;
+  /* Keep the compact dashboard navigation on one deliberate row. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(var(--color-accent-rgb, 212, 255, 72), 0.28);
+}
+
+.scene-node-dashboard__tab {
+  min-width: 0;
+  padding: 5px 3px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--color-text-secondary, #9ca3af);
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.scene-node-dashboard__tab:hover {
+  color: var(--color-text-primary, #e6e8ec);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.scene-node-dashboard__tab.is-active {
+  border-color: rgba(var(--color-accent-rgb, 212, 255, 72), 0.28);
+  color: var(--color-accent, #d4ff48);
+  font-weight: 600;
+  background: rgba(var(--color-accent-rgb, 212, 255, 72), 0.1);
+}
+
+.scene-node-dashboard__content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.scene-node-dashboard .scene-node-info {
+  min-height: 100%;
+}
+
 /* Open — a compact icon button immediately to the right of the Projects "+"
    glyph (NOT right-aligned). Accent-green to match the "+" / wizard action.
    (It deliberately does NOT use .proj-btn, whose in-header variant is restyled
@@ -1006,10 +1096,35 @@ body[data-pane='left'] #root {
   opacity: 0.85;
 }
 
+.scene-node-info__diagnostics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 107, 107, 0.25);
+  border-radius: 6px;
+  background: rgba(255, 107, 107, 0.07);
+}
+
+.scene-node-info__diagnostics small {
+  margin-right: 2px;
+  color: var(--color-text-secondary, #8b90a0);
+}
+
+.scene-node-info__diagnostics code {
+  color: #ffaaaa;
+  font-size: 10px;
+}
+
 /* The selected battery, drawn like its real canvas node, centred so the
    lead-out wires + peer text have room in the side gutters. */
 .scene-node-info__diagram {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   justify-content: center;
   padding: 8px 0;
 }
@@ -1040,6 +1155,217 @@ body[data-pane='left'] #root {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.scene-node-info__scene-status {
+  padding: 6px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.scene-node-info__scene-status strong {
+  color: rgba(212, 255, 72, 0.95);
+}
+
+.scene-node-info__scene-status small {
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.scene-node-info__provenance {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px;
+  font-size: 10px;
+}
+
+.scene-node-info__provenance div {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.scene-node-info__provenance small {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.scene-node-info__provenance span {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.78);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-node-info__source-tree {
+  display: grid;
+  gap: 5px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
+
+.scene-node-info__source-tree small {
+  margin-bottom: 2px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: inherit;
+}
+
+.scene-node-info__source-tree span {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.72);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-node-info__details {
+  width: min(100%, 360px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.scene-node-info__details-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.scene-node-info__status-chip {
+  padding: 2px 5px;
+  border: 1px solid rgba(212, 255, 72, 0.4);
+  border-radius: 999px;
+  color: rgba(212, 255, 72, 0.95);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.scene-node-info__status-chip--equivalence-verified {
+  border-color: rgba(120, 215, 170, 0.5);
+  color: rgba(150, 235, 190, 0.96);
+}
+
+.scene-node-info__source-files {
+  display: grid;
+  gap: 2px;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.scene-project-info {
+  display: grid;
+  gap: 10px;
+  padding: 4px 2px;
+}
+
+.scene-project-info > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(212, 255, 72, 0.22);
+  border-radius: 8px;
+  background: rgba(212, 255, 72, 0.05);
+}
+
+.scene-project-info header div {
+  display: grid;
+  gap: 3px;
+}
+
+.scene-project-info header small,
+.scene-project-info__tree > small {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+}
+
+.scene-project-info header strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.scene-project-info > header > span {
+  color: rgba(212, 255, 72, 0.9);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.scene-project-info__metrics {
+  display: grid;
+  gap: 5px;
+  padding: 0 4px;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 10px;
+}
+
+.scene-project-info__metrics b {
+  color: rgba(255, 255, 255, 0.92);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 500;
+}
+
+.scene-project-info__tree {
+  display: grid;
+  gap: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.scene-project-info__file {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 4px;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 10px;
+}
+
+.scene-project-info__file--module {
+  background: rgba(91, 174, 255, 0.08);
+}
+
+.scene-project-info__file > span {
+  color: rgba(134, 194, 255, 0.95);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.scene-project-info__file--state > span {
+  color: rgba(212, 255, 72, 0.8);
+}
+
+.scene-project-info__file code {
+  overflow: hidden;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-project-info__file small {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 9px;
+}
+
+.scene-project-info__empty {
+  padding: 12px 6px;
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .ni-node__ports {

@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
   "id": "@forgeax-plugin/wb-scene-generator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "displayName": {
     "zh": "场景生成器",
     "en": "Scene Generator"
   },
   "description": {
-    "zh": "场景生成器（基于 @forgeax/node-runtime 的节点式插件）",
-    "en": "Scene Generator (node-programming plugin built on @forgeax/node-runtime)"
+    "zh": "以 Scene Script 为创作真值、节点图为同步可视化投影的场景设计工作台",
+    "en": "A scene-design workbench with Scene Script as authoring truth and the node graph as its synchronized visual projection"
   },
   "icon": "🌍",
   "compatibleWith": {
@@ -109,8 +109,11 @@
           }
         ],
         "matchProduces": [
+          "**/scene/**/*.scene.ts",
+          "**/scene-model.json",
           "**/scenes/**.scene.json"
-        ]
+        ],
+        "preferredAgent": "@forgeax-extension/agent-sino"
       }
     ],
     "activities": [
@@ -135,24 +138,9 @@
         "trigger": "/wb-scene-generator"
       },
       {
-        "id": "compose-scene-pipeline",
-        "entry": "./skills/compose-scene-pipeline/SKILL.md",
-        "trigger": "/compose-scene-pipeline"
-      },
-      {
-        "id": "compose-sino-scene",
-        "entry": "./skills/compose-sino-scene/SKILL.md",
-        "trigger": "/compose-sino-scene"
-      },
-      {
-        "id": "design-scene-brief",
-        "entry": "./skills/design-scene-brief/SKILL.md",
-        "trigger": "/design-scene-brief"
-      },
-      {
-        "id": "review-scene",
-        "entry": "./skills/review-scene/SKILL.md",
-        "trigger": "/review-scene"
+        "id": "compose-scene-script",
+        "entry": "./skills/compose-scene-script/SKILL.md",
+        "trigger": "/compose-scene-script"
       }
     ],
     "tools": [
@@ -222,8 +210,8 @@
         },
         "exposedToAI": true,
         "description": {
-          "zh": "打开指定 Scene Generator 项目（共享会话，用于分析）。多个 agent 可同时 open 同一项目并调用 pipeline.get 等只读工具；open 不会因别人在写而排队。独占写锁只在 applyBatch/execute/instantiateTemplate 时获取（那些调用会阻塞等待）。一个 agent 同一时刻只能 soft-open 一个项目。",
-          "en": "Soft-open a Scene Generator project for shared analysis. Many agents may open the same project and use read tools concurrently — open does not wait on writers. Exclusive write lock is claimed only by mutation tools (those block/wait). One agent soft-opens at most one project at a time."
+          "zh": "打开指定 Scene Project 并建立当前 Sino 会话上下文；实际写入由 Scene Script 事务获取独占锁。",
+          "en": "Open a Scene Project for the current Sino session; Scene Script transactions acquire the exclusive write lock when needed."
         }
       },
       {
@@ -266,10 +254,10 @@
         "returns": {
           "type": "object"
         },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": {
-          "zh": "续期你在指定项目上持有的独占锁租约。每次成功的 applyBatch/execute 等写入调用都会自动续期——只有在写入调用之间会有很长一段不写入的等待/推理时，才需要手动调用本工具，防止锁因超时被判定为『已放弃』而移交给排队中的下一个 agent。",
-          "en": "Renew the lease on your exclusive lock for a project. Every successful applyBatch/execute (etc.) call already renews it automatically — call this explicitly only when you expect a long non-mutating stretch between writes, so idle time alone never causes your lock to be treated as abandoned and handed to the next queued agent."
+          "zh": "续期当前会话已持有的 Scene Project 写入锁；正常 Scene Script 事务会自动续期。",
+          "en": "Renew the current session's Scene Project write lease; normal Scene Script transactions renew it automatically."
         }
       },
       {
@@ -289,7 +277,7 @@
         "returns": {
           "type": "object"
         },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": {
           "zh": "查询指定项目当前的排队情况（FIFO，position=1 表示下一个轮到）。只读，不会把你加入队列——加入队列要调用 scene:projects.open。",
           "en": "Inspect a project's current FIFO wait queue (position 1 = next in line). Read-only — does NOT join the queue; call scene:projects.open to do that."
@@ -312,7 +300,7 @@
         "returns": {
           "type": "object"
         },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": {
           "zh": "主动退出指定项目的排队队列（例如你决定改去处理别的项目）。幂等；未排队时调用无副作用。",
           "en": "Voluntarily leave a project's wait queue (e.g. you decided to work on a different project instead). Idempotent; a no-op if you weren't queued."
@@ -342,7 +330,7 @@
         "returns": {
           "type": "object"
         },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "requireConfirm": "destructive",
         "confirmMessage": {
           "zh": "删除 Scene Generator 项目需要确认",
@@ -351,6 +339,285 @@
         "description": {
           "zh": "删除指定 Scene Generator 项目",
           "en": "Remove a Scene Generator project"
+        }
+      },
+      {
+        "id": "scene:script.contracts",
+        "args": {
+          "type": "object",
+          "properties": {
+            "projectId": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "返回版本化 Scene Script 函数目录；模板与组只暴露公共端口和能力，不返回内部拓扑。",
+          "en": "Return the versioned Scene Script function catalog without sealed group internals."
+        }
+      },
+      {
+        "id": "scene:script.get",
+        "args": {
+          "type": "object",
+          "properties": {
+            "projectId": { "type": "string" },
+            "file": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取场景源码、源码修订号和 Source Map 状态。",
+          "en": "Read Scene Script source, its revision, and source-map state."
+        }
+      },
+      {
+        "id": "scene:script.validate",
+        "args": {
+          "type": "object",
+          "required": ["source"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "file": { "type": "string" },
+            "source": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "只解析、类型检查和编译 Scene Script，不修改项目。",
+          "en": "Parse, type-check, and compile Scene Script without mutating the project."
+        }
+      },
+      {
+        "id": "scene:script.put",
+        "args": {
+          "type": "object",
+          "required": ["source"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "file": { "type": "string" },
+            "source": { "type": "string" },
+            "expectedRevision": { "type": "string" },
+            "canonicalize": { "type": "boolean" },
+            "label": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "以单次源码事务更新场景；成功后节点图、预览和 Source Map 同步刷新。",
+          "en": "Commit one Scene Script transaction and refresh the projected graph, preview, and source map."
+        }
+      },
+      {
+        "id": "scene:authoring.lens",
+        "args": {
+          "type": "object",
+          "properties": {
+            "projectId": { "type": "string" },
+            "file": { "type": "string" },
+            "statementId": { "type": "string" },
+            "entityId": { "type": "string" }
+          },
+          "anyOf": [
+            { "required": ["statementId"] },
+            { "required": ["entityId"] }
+          ],
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": false,
+        "description": {
+          "zh": "获取一个 Authoring Entity 及其一跳上下游、公共契约、允许动作和源码修订号。",
+          "en": "Get a scoped edit lens with one-hop context, public contract, capabilities, and source revision."
+        }
+      },
+      {
+        "id": "scene:authoring.applyCommands",
+        "args": {
+          "type": "object",
+          "required": ["expectedRevision", "commands"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "file": { "type": "string" },
+            "expectedRevision": { "type": "string" },
+            "label": { "type": "string" },
+            "commands": {
+              "type": "array",
+              "items": { "type": "object" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": false,
+        "description": {
+          "zh": "对 Edit Lens 范围内的 Authoring Entity 应用结构化命令；Agent 无法修改密封模板/组内部拓扑。",
+          "en": "Apply scoped Authoring Entity commands; sealed template/group internals are capability-protected."
+        }
+      },
+      {
+        "id": "scene:agent.resumeSceneWork",
+        "args": {
+          "type": "object",
+          "properties": {
+            "projectId": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "恢复当前 Scene Project 的有界工作上下文、checkpoint 和未完成事务。",
+          "en": "Resume the bounded work context, checkpoint, and unfinished transaction for the current Scene Project."
+        }
+      },
+      {
+        "id": "scene:agent.locateSceneTarget",
+        "args": {
+          "type": "object",
+          "properties": {
+            "projectId": { "type": "string" },
+            "query": { "type": "string" },
+            "selection": { "type": "object" },
+            "authoringId": { "type": "string" },
+            "sceneNodeId": { "type": "string" },
+            "path": { "type": "string" },
+            "semanticAddress": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "按 UI 选择、稳定语义地址、Scene 节点/路径与查询证据排序定位目标；歧义时要求澄清。",
+          "en": "Resolve scene targets from ranked selection, semantic-address, lineage, and query evidence; ambiguity requires clarification."
+        }
+      },
+      {
+        "id": "scene:agent.openEditLens",
+        "args": {
+          "type": "object",
+          "required": ["targetIds"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "targetIds": { "type": "array", "items": { "type": "string" } },
+            "radius": { "type": "number" },
+            "concerns": { "type": "array", "items": { "type": "string" } },
+            "expansionReason": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "打开有界 Edit Lens；只含目标源码、一跳依赖/消费者、空间摘要、不变量和写范围，不返回完整 Runtime/DataTree。",
+          "en": "Open a bounded edit lens without full Runtime Graph or DataTree payloads."
+        }
+      },
+      {
+        "id": "scene:agent.proposeSceneEdit",
+        "args": {
+          "type": "object",
+          "required": ["intent", "targetIds", "commands"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "intent": { "type": "string" },
+            "targetIds": { "type": "array", "items": { "type": "string" } },
+            "writableModuleIds": { "type": "array", "items": { "type": "string" } },
+            "preconditions": { "type": "array", "items": { "type": "object" } },
+            "commands": { "type": "array", "items": { "type": "object" } },
+            "expectedSemanticDelta": { "type": "array", "items": { "type": "object" } },
+            "verificationProfile": { "type": "string", "enum": ["local", "global"] }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "创建持久、可回滚、带修订和写范围的 Scene Edit Transaction。",
+          "en": "Create a persistent rollback-safe scoped Scene Edit Transaction."
+        }
+      },
+      {
+        "id": "scene:agent.applySceneEdit",
+        "args": {
+          "type": "object",
+          "required": ["transactionId"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "transactionId": { "type": "string" },
+            "humanApproved": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "校验修订、scope、前置条件与 Human Gate 后应用事务；实际语义差异不符则回滚。",
+          "en": "Apply after revision, scope, precondition, and human-gate checks; mismatched semantic delta rolls back."
+        }
+      },
+      {
+        "id": "scene:agent.previewSemanticDiff",
+        "args": {
+          "type": "object",
+          "required": ["transactionId"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "transactionId": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "预览有界 Semantic Diff 与直接修改、重编译、重执行、重验证、未变化影响分类。",
+          "en": "Preview bounded semantic diff and impact classifications."
+        }
+      },
+      {
+        "id": "scene:agent.verifySceneEdit",
+        "args": {
+          "type": "object",
+          "required": ["transactionId", "profile"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "transactionId": { "type": "string" },
+            "profile": { "type": "string", "enum": ["local", "global"] }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "运行 local/global Verifier 与只读 Critic；冻结标准不可降低。",
+          "en": "Run local/global verification and a read-only Critic without weakening frozen standards."
+        }
+      },
+      {
+        "id": "scene:agent.acceptOrRevertSceneEdit",
+        "args": {
+          "type": "object",
+          "required": ["transactionId", "decision"],
+          "properties": {
+            "projectId": { "type": "string" },
+            "transactionId": { "type": "string" },
+            "decision": { "type": "string", "enum": ["accept", "revert"] }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "接受已验证预览，或原子回滚预览事务。",
+          "en": "Accept a verified preview or atomically revert it."
         }
       },
       {
@@ -364,8 +631,8 @@
         },
         "exposedToAI": false,
         "description": {
-          "zh": "【人类/Workbench】列出全部 scene 电池（~300 ops）。Sino 禁止调用 — 用 scene:composerUtilities.list。",
-          "en": "Human/workbench: full scene battery catalog (~300 ops). Not for Sino — use scene:composerUtilities.list."
+          "zh": "【人类/Workbench】列出全部 scene 电池（~300 ops）。不向 AI 暴露。",
+          "en": "Human/workbench: full scene battery catalog (~300 ops). Not exposed to AI."
         }
       },
       {
@@ -387,171 +654,8 @@
         },
         "exposedToAI": false,
         "description": {
-          "zh": "【人类/Workbench】读取任意 scene 电池定义。Sino 禁止调用。",
-          "en": "Human/workbench: any scene battery spec. Not for Sino."
-        }
-      },
-      {
-        "id": "scene:composerUtilities.list",
-        "args": {
-          "type": "object",
-          "additionalProperties": false
-        },
-        "returns": {
-          "type": "array"
-        },
-        "exposedToAI": true,
-        "description": {
-          "zh": "Sino 专用：列出 applyBatch 顶层可 createNode 的 composer 工具电池（empty_scene / text_panel / manual_points / tree_merge …）。模板组不在此表 — 用 instantiateTemplate。",
-          "en": "Sino-only: composer utility batteries allowed at applyBatch top level. Template groups are NOT listed — use instantiateTemplate."
-        }
-      },
-      {
-        "id": "scene:composerUtilities.get",
-        "args": {
-          "type": "object",
-          "required": [
-            "id"
-          ],
-          "properties": {
-            "id": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        "returns": {
-          "type": "object"
-        },
-        "exposedToAI": true,
-        "description": {
-          "zh": "Sino 专用：读取单个 composer 工具电池端口定义（仅限白名单 opId）。",
-          "en": "Sino-only: one composer utility battery spec (allowlisted opId only)."
-        }
-      },
-      {
-        "id": "scene:templates.list",
-        "args": {
-          "type": "object",
-          "additionalProperties": false
-        },
-        "returns": {
-          "type": "array"
-        },
-        "exposedToAI": true,
-        "description": {
-          "zh": "列出可实例化的模板组（6 个预制场景模板组 + 已保存的成组电池），含 id / name / category。用它发现模板组——batteries.get 查不到模板组（那查的是静态 op）。",
-          "en": "List instantiable group templates (the 6 prebuilt scene template groups + saved group batteries) with id / name / category. Use this to discover template groups — batteries.get cannot find them (it lists static ops only)."
-        }
-      },
-      {
-        "id": "scene:templates.get",
-        "args": {
-          "type": "object",
-          "required": [
-            "id"
-          ],
-          "properties": {
-            "id": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        "returns": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "description": "完整 NodeGroup 定义（nodes/edges/exposedInputs/exposedOutputs/_nestedGroups）；exposedInputs/exposedOutputs 的 portName 即对外 in_N/out_N 端口 / Full NodeGroup definition; exposedInputs/exposedOutputs portName are the outward in_N/out_N ports"
-        },
-        "exposedToAI": false,
-        "description": {
-          "zh": "【调试/人类】读取模板组完整 NodeGroup 定义。Sino 构图禁止调用 — 黑盒用 instantiateTemplate，端口看其返回的 exposedInputs。",
-          "en": "Debug/human: full NodeGroup definition. Sino must not call — use instantiateTemplate black-box; ports from its exposedInputs."
-        }
-      },
-      {
-        "id": "scene:pipeline.instantiateTemplate",
-        "args": {
-          "type": "object",
-          "required": [
-            "templateId"
-          ],
-          "properties": {
-            "projectId": {
-              "type": "string",
-              "description": "目标 scene 项目 id；省略时使用 agent 已 open 的项目或 UI 当前 viewing 项目 / target scene project id; when omitted uses the agent's open project or the UI viewing project"
-            },
-            "templateId": {
-              "type": "string",
-              "description": "模板组 id 或文件 basename（如 LakeRegions） / template group id or file basename (e.g. LakeRegions)"
-            },
-            "position": {
-              "type": "object",
-              "properties": {
-                "x": {
-                  "type": "number"
-                },
-                "y": {
-                  "type": "number"
-                }
-              },
-              "additionalProperties": false,
-              "description": "顶层组影子节点的画布坐标 / canvas position of the top-level group shadow node"
-            },
-            "groupId": {
-              "type": "string",
-              "description": "可选：给顶层组一个稳定句柄（= 顶层影子节点 id）；省略则自动生成且不冲突 / optional stable handle for the top-level group (= its shadow node id); omitted → auto-generated, collision-free"
-            },
-            "opts": {
-              "type": "object",
-              "properties": {
-                "actor": {
-                  "type": "string"
-                },
-                "label": {
-                  "type": "string"
-                }
-              },
-              "description": "actor 透传到历史记录（如 ai:sino）；label 为历史面板可读标签 / actor forwarded to history (e.g. ai:sino); label is a human-readable history row"
-            }
-          },
-          "additionalProperties": false
-        },
-        "returns": {
-          "type": "object",
-          "properties": {
-            "status": {
-              "type": "string"
-            },
-            "newHash": {
-              "type": "string"
-            },
-            "groupId": {
-              "type": "string",
-              "description": "新建顶层组的影子节点 id（接线时作为 nodeId 用）/ shadow node id of the new top-level group (use as nodeId when wiring)"
-            },
-            "name": {
-              "type": "string"
-            },
-            "exposedInputs": {
-              "type": "array",
-              "description": "对外输入端口清单 [{portName:in_N, portType, label?}]；label 是模板作者标注的语义名（如 IslandName），是判断某个 in_N 该接什么的第一来源，缺省时才需要去查 pipelines 文档 / outward input ports; label is the template author's semantic name (e.g. IslandName) — the primary source for what an in_N is for; consult the pipelines doc only when label is absent"
-            },
-            "exposedOutputs": {
-              "type": "array",
-              "description": "对外输出端口清单 [{portName:out_N, portType, label?}]；label 含义同上 / outward output ports; label meaning same as above"
-            },
-            "opCount": {
-              "type": "number"
-            }
-          }
-        },
-        "exposedToAI": true,
-        "description": {
-          "zh": "一步把模板组实例化进当前活动项目的图：自动重映射内部 id，落地为一个 __group__ 顶层组节点，并返回 groupId + exposedInputs/exposedOutputs（含语义 label）供接线。**黑盒**：接线只连组壳暴露口；禁止再查组内 scene_focus_path/manual_points/核心算子。Point/名字/宽高在组外 createNode 再 connect 到暴露 in_*。",
-          "en": "Instantiate a template group: remaps inner ids, returns groupId + exposedInputs/exposedOutputs (with labels) for wiring. Black box — wire only exposed ports; do not inspect inner scene_focus_path/manual_points. Create param batteries outside the group and connect to exposed in_*."
+          "zh": "【Workbench】读取任意 scene 电池定义。",
+          "en": "Workbench access to an individual scene battery specification."
         }
       },
       {
@@ -606,41 +710,10 @@
             "null"
           ]
         },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": {
-          "zh": "AI 未传筛选条件时只返回 hash/计数状态；检查接线必须传 groupId、nodeIds、nameContains 或 opIdIn，取得局部拓扑。nameContains/opIdIn 用于找**组壳/组外电池**（如 p1d_、aw_m0_merge），不是模板组内部节点。",
-          "en": "Unscoped AI reads return only hash/count status. Use groupId, nodeIds, nameContains, or opIdIn for local topology."
-        }
-      },
-      {
-        "id": "scene:pipeline.applyBatch",
-        "args": {
-          "type": "object",
-          "required": [
-            "ops"
-          ],
-          "properties": {
-            "projectId": {
-              "type": "string",
-              "description": "目标 scene 项目 id；AI 须先 scene:projects.open；省略时回退 agent lock / viewing 项目 / target project id; AI must scene:projects.open first; when omitted falls back to agent lock or viewing project"
-            },
-            "ops": {
-              "type": "array",
-              "description": "支持的 op type：createNode / updateNode / deleteNode / connect / disconnect（删边；`deleteEdge` 是完全等价的别名，两个名字都可以用）/ setMetadata / createGroup / updateGroup / deleteGroup / ungroup / appendMergeItem（见下）。节点标识符字段名严格区分，不是别名，写错字段名会被当场拒绝（不会静默造出僵尸节点）：createNode/updateNode/deleteNode 用 `nodeId`（不是 `id`）；connect 的两端是 `source:{nodeId,port}` / `target:{nodeId,port}`（同样是 `nodeId`，不是 `id`），可选 `edgeId`（不是 `id`）；disconnect/deleteEdge 用 `edgeId`（不是 `id`）；createGroup/updateGroup/deleteGroup/ungroup 用 `groupId`（不是 `id`）。例：{\"type\":\"createNode\",\"nodeId\":\"seed\",\"opId\":\"seed_control\",\"params\":{}}；删边例：{\"type\":\"disconnect\",\"edgeId\":\"e_xxx\"}。任何不在上述 type 列表里的值都会被显式拒绝（带 opIndex 的校验错误），不会被静默跳过——不要因为某个 op type 没试过就假设它不存在或改用变通方案（如给同一端口接双输入、删组重建），先看这份类型列表。2026-07-01 复盘：此前用错字段名会被静默忽略/静默造出 id 为 undefined 的僵尸节点，现在会返回带 opIndex 的显式校验错误。\n\n2026-07-15 新增两项能力：\n(1) connect 的 source.port / target.port 除了字符串 `in_N`/`out_N` 外，还可以写 `{\"label\":\"IslandName\"}` 或带约束的 `{\"label\":\"Island\",\"portName\":\"out_1\"}` —— 用 instantiateTemplate 返回的 exposedInputs/exposedOutputs 里那个语义 label（如 \"Scene\"/\"Rest\"/\"Island\"），由后端查该组当前的 exposedInputs/exposedOutputs 解出真实 portName 再真正连线；当同时提供 portName 时，必须与 label 解析结果一致，否则整批拒绝（防 out_0/out_1 接反）。优先用 label+portName 联合引用，不用在 in_N/out_N 和语义名之间自己心算映射；label 找不到或匹配到多个端口会显式报错并列出该组全部可用 label，不会静默连错。例：{\"type\":\"connect\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Island\",\"portName\":\"out_1\"}},\"target\":{\"nodeId\":\"g2\",\"port\":{\"label\":\"Scene\"}}}。\n(2) appendMergeItem：往一个 tree_merge（典型是根节点 aw_m0_merge）追加一路内容，不用自己先读 portCount、算 item_N、再分两步 updateNode+connect——一次 op 搞定：{\"type\":\"appendMergeItem\",\"mergeNodeId\":\"aw_m0_merge\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Scene\",\"portName\":\"out_0\"}}}`（source.port 同样可以用 label/portName 联合引用）。AI 自动施工时，若模板暴露 Scene 输出，appendMergeItem 必须使用 Scene 口汇总，不能用 Island/Rest 等领域口直接 merge；人工/旧调用仍兼容。同一批 ops 里连续写多个 appendMergeItem（哪怕都指向同一个 mergeNodeId）会正确地依次递增 item 号，不会重复用同一个槎位。mergeNodeId 必须已经存在且 opId 是 tree_merge，否则显式报错。 / Supported op types: createNode / updateNode / deleteNode / connect / disconnect (delete an edge; `deleteEdge` is a fully equivalent alias, both spellings work) / setMetadata / createGroup / updateGroup / deleteGroup / ungroup / appendMergeItem (see below). Node/edge/group identifier field names are STRICT, not aliases — using the wrong one is now rejected outright (never silently produces a zombie node). createNode/updateNode/deleteNode use `nodeId` (not `id`); connect's endpoints are `source:{nodeId,port}` / `target:{nodeId,port}` (also `nodeId`, not `id`), with an optional `edgeId` (not `id`); disconnect/deleteEdge use `edgeId` (not `id`); createGroup/updateGroup/deleteGroup/ungroup use `groupId` (not `id`). Example: {\"type\":\"createNode\",\"nodeId\":\"seed\",\"opId\":\"seed_control\",\"params\":{}}; delete-edge example: {\"type\":\"disconnect\",\"edgeId\":\"e_xxx\"}. Any type not in this list is rejected explicitly (opIndex-addressed validation error), never silently skipped — do not assume an op type doesn't exist just because you haven't tried it, or fall back to workarounds (dual-input on one port, delete+re-instantiate groups) before checking this type list. 2026-07-01 postmortem: using the wrong field name used to be silently ignored / silently created an undefined-id zombie node — it now returns an explicit, opIndex-addressed validation error instead.\n\nTwo new capabilities added 2026-07-15:\n(1) connect's source.port/target.port can now be `{\"label\":\"IslandName\"}` or a constrained `{\"label\":\"Island\",\"portName\":\"out_1\"}` instead of a raw `in_N`/`out_N` string — the semantic label from instantiateTemplate's exposedInputs/exposedOutputs (e.g. \"Scene\"/\"Rest\"/\"Island\"); the backend resolves it against that group's CURRENT exposedInputs/exposedOutputs into the real portName before wiring. When portName is also provided it MUST match the label resolution or the whole batch is rejected (prevents out_0/out_1 swaps). Prefer label+portName joint refs over mentally mapping in_N/out_N yourself; an unknown or ambiguous label is rejected explicitly with the full list of that group's available labels, never silently mis-wired. Example: {\"type\":\"connect\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Island\",\"portName\":\"out_1\"}},\"target\":{\"nodeId\":\"g2\",\"port\":{\"label\":\"Scene\"}}}.\n(2) appendMergeItem: append one more content source into a tree_merge (typically the root aw_m0_merge) without first reading its portCount, computing the next item_N, and issuing updateNode+connect yourself — one op does it all: {\"type\":\"appendMergeItem\",\"mergeNodeId\":\"aw_m0_merge\",\"source\":{\"nodeId\":\"g1\",\"port\":{\"label\":\"Scene\",\"portName\":\"out_0\"}}} (source.port also accepts label/portName joint refs). For AI auto-construction, when a template exposes a Scene output, appendMergeItem MUST use the Scene port for aggregation — domain ports like Island/Rest must not feed merge directly; human/legacy callers remain compatible. Multiple appendMergeItem ops in the same batch (even targeting the same mergeNodeId) correctly increment sequentially, never reusing an item slot. mergeNodeId must already exist and be opId tree_merge, or it's rejected explicitly."
-            },
-            "opts": {
-              "type": "object"
-            }
-          },
-          "additionalProperties": false
-        },
-        "returns": {
-          "type": "object"
-        },
-        "exposedToAI": true,
-        "description": {
-          "zh": "批量修改 scene pipeline graph",
-          "en": "Apply a batch of scene pipeline graph edits"
+          "zh": "【Workbench/调试】读取 Runtime Graph 摘要或局部投影；Scene Script Agent 不使用。",
+          "en": "Workbench/debug access to Runtime Graph summaries or local projections; not used by the Scene Script Agent."
         }
       },
       {
@@ -655,23 +728,12 @@
             "nodeId": {
               "type": "string"
             },
-            "raw": {
-              "type": "boolean",
-              "description": "默认 false：AI 只返回验证结果；raw:true 返回全量 voxel cells，仅供调试。"
-            },
             "mode": {
               "type": "string",
               "enum": [
                 "summary"
               ],
               "description": "AI 默认只返回 verification；summary 返回已有的详细轻量执行摘要，仅在验证失败后用于诊断。"
-            },
-            "narrativeLocationNames": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "description": "2026-07-01 新增：硬门控 stage3.location_names。传入上游叙事节点树/契约里每一个地点的原样 name（如「望江客栈」「市集」「清水镇」），本次 execute 会核对最终场景节点名是否逐个包含这些名字，结果写进返回值 verification.locationNameAlignment（{ok, missing:[{name,reason}]}），未命中会连同 verification.hints 一起给出可直接照做的缺项清单。仅 raw:false 时生效；不传该字段则完全不跑这项校验（默认关闭，不影响非 Sino/无上游契约的调用方）。"
             }
           },
           "additionalProperties": false
@@ -681,53 +743,8 @@
         },
         "exposedToAI": true,
         "description": {
-          "zh": "AI 默认返回 executionId、状态、时长和 verification；验证失败后才传 mode:\"summary\" 获取端口级诊断。传 narrativeLocationNames 可核对场景节点名与上游叙事地点名。",
-          "en": "AI defaults to execution ID, status, duration, and verification. Request mode:\"summary\" only after a verification failure for port-level diagnostics."
-        }
-      },
-      {
-        "id": "scene:pipeline.import",
-        "args": {
-          "type": "object",
-          "properties": {
-            "projectId": {
-              "type": "string",
-              "description": "目标 scene 项目 id / target scene project id"
-            },
-            "format": {
-              "type": "string"
-            },
-            "graph": {},
-            "file": {
-              "type": "object",
-              "description": "Import from a template file under <projectRoot>/templates/ (NOT state/graph.json). Use { \"path\": \"filename.json\" } — path is basename only.",
-              "properties": {
-                "path": {
-                  "type": "string",
-                  "description": "Template filename under templates/ (e.g. export from pipeline.export)"
-                },
-                "source": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path"
-              ],
-              "additionalProperties": false
-            },
-            "options": {
-              "type": "object"
-            }
-          },
-          "additionalProperties": false
-        },
-        "returns": {
-          "type": "object"
-        },
-        "exposedToAI": true,
-        "description": {
-          "zh": "导入/替换 scene pipeline graph",
-          "en": "Import or replace a scene pipeline graph"
+          "zh": "执行 canonical Scene Project，默认返回有界验证结果；验证失败时可请求轻量摘要。",
+          "en": "Execute the canonical Scene Project and return bounded verification; request a compact summary after verification failure."
         }
       },
       {
@@ -751,7 +768,7 @@
         "returns": {
           "type": "object"
         },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": {
           "zh": "导出当前 scene pipeline 模板",
           "en": "Export the current scene pipeline template"
@@ -778,8 +795,8 @@
         },
         "exposedToAI": false,
         "description": {
-          "zh": "【编排/UI/CLI】execute → 投影体素 → baked 快照。Sino 禁止调用 — aw-support pipeline bake 阶段统一执行。",
-          "en": "Orchestration/UI/CLI: execute → voxel projection → baked snapshot. Sino must not call — aw-support pipeline bake stage runs this."
+          "zh": "【UI/CLI】执行场景并生成 baked 快照。",
+          "en": "UI/CLI: execute the scene and produce a baked snapshot."
         }
       },
       {
@@ -807,8 +824,8 @@
         },
         "exposedToAI": false,
         "description": {
-          "zh": "【编排/UI/CLI】baked 图层打包 scene.zip。Sino 禁止调用 — aw-support pipeline package 阶段统一执行。",
-          "en": "Orchestration/UI/CLI: package baked layers into scene.zip. Sino must not call — aw-support pipeline package stage runs this."
+          "zh": "【UI/CLI】将 baked 图层打包为 scene.zip。",
+          "en": "UI/CLI: package baked layers into scene.zip."
         }
       },
       {
@@ -897,8 +914,8 @@
         },
         "exposedToAI": true,
         "description": {
-          "zh": "列出资产库（内置 ∪ 当前项目私有，分页，私有优先）。默认 zone=raw。这是 agent 唯一能看到/核对 publishExternal 发布结果的途径（scene:assets.list 查的是文件系统素材、看不到私有库）。",
-          "en": "List the asset library (base ∪ active-project private, paginated, private first). Defaults to zone=raw. This is the ONLY way an agent can see/verify what scene:library.publishExternal landed (scene:assets.list lists filesystem assets, not the private library)."
+          "zh": "列出可用于当前 Scene Project 的内置与项目私有资产。",
+          "en": "List built-in and project-private assets available to the current Scene Project."
         }
       },
       {
@@ -923,10 +940,10 @@
         "returns": {
           "type": "object"
         },
-        "exposedToAI": true,
+        "exposedToAI": false,
         "description": {
-          "zh": "把共享游戏沙箱 <projectRoot>/.forgeax/games/<gameSlug>/textures/ 绑定为资产源。跨 workbench 发布时**先调本工具**（返回 dir），从 dir 反推 projectRoot 再传给 asset2d:publishToGame——两 workbench 默认 cwd 不同，顺序反了会落错目录、library.list 搜不到。绑定后广播 library:changed。",
-          "en": "Bind the shared game sandbox <projectRoot>/.forgeax/games/<gameSlug>/textures/ as an asset source. When publishing across workbenches, call this FIRST (returns dir), derive projectRoot from dir, then pass the same projectRoot to asset2d:publishToGame — the two workbench default cwds differ; reversing the order lands bytes where the scene can't read them. Broadcasts library:changed on bind."
+          "zh": "【Workbench】将指定游戏纹理目录绑定为当前场景的资产源。",
+          "en": "Workbench: bind a game texture directory as an asset source for the current scene."
         }
       },
       {
@@ -996,10 +1013,43 @@
         "returns": {
           "type": "object"
         },
+        "exposedToAI": false,
+        "description": {
+          "zh": "【兼容工具，不向 Agent 开放】将外部纹理写入项目私有资产库。",
+          "en": "Compatibility tool, not exposed to Agents: write an external texture to the project's private asset library."
+        }
+      },
+      {
+        "id": "scene:screenshot.capture",
+        "args": {
+          "type": "object",
+          "properties": {
+            "timeout": {
+              "type": "number",
+              "minimum": 1000,
+              "maximum": 15000
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
         "exposedToAI": true,
         "description": {
-          "zh": "【已退役为兼容回退，新任务请用 asset2d:publishToGame + scene:library.useGameTextures 走共享沙箱】贴图发布桥：把 2D 生成的 PNG 发布进当前场景项目私有 raw 库（合成 renderer alias、tile 绑定 autotile 规则、记录 provenance、幂等）。如仍用：只传 from2dAlias（+tile 的 autotileKind）让桥 server-to-server 自取字节；别把 base64 塞进上下文（会被压缩丢失→死循环）。",
-          "en": "[LEGACY fallback — new work should use asset2d:publishToGame + scene:library.useGameTextures (shared sandbox)] Texture publish bridge: publish a 2D-generated PNG into the active scene project's private raw library. If still used: pass from2dAlias (+autotileKind for tiles) so the bridge fetches bytes server-to-server; NEVER push base64 through the agent context (it gets compacted away → publish loops)."
+          "zh": "请求 Renderer 截图并返回有界的本地图片引用，用于场景视觉验收。",
+          "en": "Request a Renderer capture and return a bounded local image reference for visual scene acceptance."
+        }
+      },
+      {
+        "id": "scene:screenshot.latest",
+        "args": {
+          "type": "object",
+          "additionalProperties": false
+        },
+        "returns": { "type": "object" },
+        "exposedToAI": true,
+        "description": {
+          "zh": "读取最近一次 Renderer 截图的有界本地图片引用。",
+          "en": "Read the bounded local image reference for the latest Renderer capture."
         }
       },
       {
@@ -1158,27 +1208,7 @@
         "id": "wb-scene-generator.pipeline",
         "actions": [
           {
-            "id": "get",
-            "exposedToAI": true
-          },
-          {
-            "id": "applyBatch",
-            "exposedToAI": true
-          },
-          {
             "id": "execute",
-            "exposedToAI": true
-          },
-          {
-            "id": "import",
-            "exposedToAI": true
-          },
-          {
-            "id": "export",
-            "exposedToAI": true
-          },
-          {
-            "id": "instantiateTemplate",
             "exposedToAI": true
           }
         ]
@@ -1204,15 +1234,6 @@
           },
           {
             "id": "assets.list",
-            "exposedToAI": true
-          }
-        ]
-      },
-      {
-        "id": "wb-scene-generator.library",
-        "actions": [
-          {
-            "id": "library.publishExternal",
             "exposedToAI": true
           }
         ]

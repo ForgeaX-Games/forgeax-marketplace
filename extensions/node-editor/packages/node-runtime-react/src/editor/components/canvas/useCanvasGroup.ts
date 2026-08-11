@@ -17,6 +17,7 @@ import type { Node, Edge } from '../../xyflow.js'
 import { deriveGroupPorts } from '@forgeax/node-runtime/derive-group-ports'
 import { usePipelineStore } from '../../stores/index.js'
 import { useHistoryStore } from '../../stores/index.js'
+import { getEditorTransport } from '../../transport/index.js'
 import type { NodeGroup, ExposedPort, PipelineNode, PipelineEdge } from '../../types.js'
 import { buildGroupNodeData } from './GroupNode.js'
 import { getPortTypeColor, type DomainPortTypes } from '../../utils/portTypes.js'
@@ -93,7 +94,7 @@ export function useCanvasGroup({ nodes, edges, setNodes, setEdges, domainPortTyp
 
   // Collapse the nodes in selectedNodeIds into one GroupNode.
   const groupSelectedNodes = useCallback(
-    (selectedNodeIds: string[], onUngroup: (groupId: string) => void, onEnterGroup?: (groupId: string) => void) => {
+    async (selectedNodeIds: string[], onUngroup: (groupId: string) => void, onEnterGroup?: (groupId: string) => void) => {
       if (selectedNodeIds.length < 2) return
 
       const { currentPipeline } = usePipelineStore.getState()
@@ -105,6 +106,28 @@ export function useCanvasGroup({ nodes, edges, setNodes, setEdges, domainPortTyp
       const validIds = selectedNodeIds.filter((id) => currentPipeline.nodes.some((n) => n.id === id))
       if (validIds.length < 2) return
       const cleanIds = validIds
+
+      const transport = getEditorTransport()
+      if (transport.api.supportsSceneAuthoringCommands() && await transport.api.isCanonicalSceneProject()) {
+        const requested = globalThis.window?.prompt('Definition name', 'ExtractedGroup')
+        if (!requested) return
+        const name = requested.replace(/[^A-Za-z0-9_$]/g, '')
+        if (!name) return
+        const defaultFile = `groups/${name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()}.scene.ts`
+        const file = globalThis.window?.prompt('Definition file', defaultFile)
+        if (!file) return
+        const seal = globalThis.window?.confirm('Seal this definition after grouping?') ?? true
+        try {
+          await transport.api.applySceneAuthoringCommands([{
+            type: 'wrapInGroup',
+            statementIds: cleanIds,
+            meta: { name, file, seal, confirmed: true },
+          }], `Extract ${name} Definition`)
+        } catch (error) {
+          console.error('[Group] canonical Extract Definition failed:', error)
+        }
+        return
+      }
 
       const selectedSet = new Set(cleanIds)
       const allEdges = currentPipeline.edges
@@ -513,9 +536,22 @@ export function useCanvasGroup({ nodes, edges, setNodes, setEdges, domainPortTyp
 
   // Expand a GroupNode back into its inner sub-nodes and edges.
   const ungroupNode = useCallback(
-    (groupId: string, onUngroup: (gid: string) => void) => {
+    async (groupId: string, onUngroup: (gid: string) => void) => {
       const { currentPipeline } = usePipelineStore.getState()
       if (!currentPipeline) return
+
+      const transport = getEditorTransport()
+      if (transport.api.supportsSceneAuthoringCommands() && await transport.api.isCanonicalSceneProject()) {
+        try {
+          // Canvas group ids are runtime entity ids, not Authoring statement ids.
+          // Route through the semantic adapter so it resolves the source-map
+          // entry before issuing the canonical `ungroup` command.
+          await transport.api.ungroup(groupId)
+        } catch (error) {
+          console.error('[Group] canonical Inline Definition failed:', error)
+        }
+        return
+      }
 
       const group = (currentPipeline.groups ?? []).find((g) => g.id === groupId)
       if (!group) {

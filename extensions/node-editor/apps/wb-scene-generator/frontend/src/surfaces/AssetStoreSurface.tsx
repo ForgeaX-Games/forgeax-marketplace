@@ -9,7 +9,6 @@ import { useAssetStoreStore, type AssetViewMode, RULES_ZONE } from './library/as
 import { readControl, subscribeControl, subscribeRefresh, subscribeReveal, writeSelection } from './library/assetControlBus.js'
 import type { RuleListItem } from './library/rulesApi.js'
 import { pageItems } from './library/pagination.js'
-import { useWorkbenchChild } from '../workbench/useWorkbenchChild.js'
 import {
   ChevronDown,
   ChevronLeft,
@@ -314,7 +313,10 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
   // cards, false = the asset list. `index`'s dynamic depth needs this runtime
   // decision instead of a fixed leaf depth.
   const showFolders = !isRules && folderView
-  const { isFocused, requestFocus, reportStatus } = useWorkbenchChild('assetstore')
+  // This legacy component stays available for library-focused unit coverage and
+  // data-client maintenance, but App no longer exposes it as a workbench pane.
+  // It therefore has no host focus or status-report protocol participation.
+  const isFocused = false
 
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const titlebarRef = useRef<HTMLDivElement>(null)
@@ -495,10 +497,6 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
 
   const totalPages = Math.max(1, Math.ceil(total / Math.max(1, pageSize)))
 
-  useEffect(() => {
-    reportStatus({ activeLibrary: activeZone, total, loading })
-  }, [activeZone, total, loading, reportStatus])
-
   const copyAlias = (alias: string) => {
     void navigator.clipboard?.writeText(alias)
     setSelected(assets.find((a) => a.alias === alias) ?? null)
@@ -650,7 +648,7 @@ export function AssetStoreSurface({ client }: { client: HttpApiClient }): JSX.El
             type="button"
             className={`assetstore-ctrl-btn${isFocused ? ' is-active' : ''}`}
             title={isFocused ? 'Exit fullscreen' : 'Fullscreen'}
-            onClick={requestFocus}
+            disabled
           >
             {isFocused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>

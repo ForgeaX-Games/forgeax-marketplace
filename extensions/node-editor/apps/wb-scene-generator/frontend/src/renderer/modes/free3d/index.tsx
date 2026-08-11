@@ -22,6 +22,7 @@ import { useLayerSurface } from '../../framework/useLayerSurface'
 import { useRenderStore } from '../../store'
 import { registerRenderPlugin, type PluginHandle } from '../../framework/plugin'
 import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
+import { createViewGuides3d, disposeViewGuides3d } from '../../framework/guides3d'
 import { mergeRenderableVoxelLayerKeys } from '../../framework/layerKeys'
 import { buildVoxelMesh, disposeMesh } from './voxelMesh'
 import './ModeFree3d.css'
@@ -31,6 +32,7 @@ import './ModeFree3d.css'
 const ModeFree3dPlugin = forwardRef<PluginHandle, object>(function ModeFree3dPlugin(_, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const drawMode = useRenderStore(s => s.drawMode)
+  const viewGuidesVisible = useRenderStore(s => s.viewGuides.free3d)
 
   // Three.js resources (set up on mount, disposed on unmount).
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
@@ -38,6 +40,7 @@ const ModeFree3dPlugin = forwardRef<PluginHandle, object>(function ModeFree3dPlu
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
   const layersGroupRef = useRef<THREE.Group | null>(null)
+  const viewGuidesRef = useRef<THREE.Group | null>(null)
   // Whether the user has actively moved the camera (orbit / pan / zoom).
   //   * false: re-fit content on every voxel mesh change (matters when layers
   //     load async — only the last layer gives the full bbox).
@@ -86,6 +89,9 @@ const ModeFree3dPlugin = forwardRef<PluginHandle, object>(function ModeFree3dPlu
     renderer.domElement.style.touchAction = 'none'
 
     const scene = new THREE.Scene()
+    const viewGuides = createViewGuides3d()
+    viewGuides.visible = viewGuidesVisible
+    scene.add(viewGuides)
 
     // PerspectiveCamera + Z-up (matches buildVoxelMesh world coords).
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1 * BASE_CELL_SIZE, 10000 * BASE_CELL_SIZE)
@@ -124,6 +130,7 @@ const ModeFree3dPlugin = forwardRef<PluginHandle, object>(function ModeFree3dPlu
     cameraRef.current = camera
     controlsRef.current = controls
     layersGroupRef.current = layersGroup
+    viewGuidesRef.current = viewGuides
 
     // Configure renderer size + camera.aspect from the real container size BEFORE
     // draining meshes / auto-fit, else the fit distance is computed for aspect 1.
@@ -201,6 +208,8 @@ const ModeFree3dPlugin = forwardRef<PluginHandle, object>(function ModeFree3dPlu
         disposeMesh(mesh)
       }
       layerMeshesRef.current.clear()
+      scene.remove(viewGuides)
+      disposeViewGuides3d(viewGuides)
       scene.clear()
       renderer.dispose()
       if (renderer.domElement.parentElement === container) {
@@ -211,9 +220,18 @@ const ModeFree3dPlugin = forwardRef<PluginHandle, object>(function ModeFree3dPlu
       cameraRef.current = null
       controlsRef.current = null
       layersGroupRef.current = null
+      viewGuidesRef.current = null
       userInteractedRef.current = false
     }
+    // Visibility changes are applied imperatively below; setup remains mount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (viewGuidesRef.current) viewGuidesRef.current.visible = viewGuidesVisible
+    const sched = (rendererRef.current as unknown as { __scheduleRender?: () => void } | null)?.__scheduleRender
+    sched?.()
+  }, [viewGuidesVisible])
 
   // ── per-layer mesh up-report ───────────────────────────────────────
   // React effect order is bottom-up: child effects run before the parent setup
@@ -378,7 +396,8 @@ function VoxelLayerInstance({
   // it has no separate success-green channel, so editor-selection maps onto the
   // same brighten path — a faithful approximation of the legacy 3D highlight).
   const selectedEditorNodeIds = useRenderStore(s => s.selectedEditorNodeIds)
-  const selected = !!layer && selectedEditorNodeIds.includes(layer.nodeId)
+  const selected = !!layer
+    && (selectedEditorNodeIds.includes(layer.nodeId) || selectedEditorNodeIds.includes(layer.key))
 
   const cacheKey = useMemo(() => {
     if (!layer || !layer.visible) return undefined

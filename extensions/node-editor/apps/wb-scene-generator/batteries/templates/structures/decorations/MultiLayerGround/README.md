@@ -1,6 +1,6 @@
 # MultiLayerGround（多层地面）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_multi_layer_ground`，也可用 basename `MultiLayerGround`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_multi_layer_ground`，也可用 basename `MultiLayerGround`。
 
 把上游场景的足迹切片为基准掩码网格，用 `multi_layer_ground` 电池在目标区域生成多层 Perlin 噪声地面（多值网格），按值拆分后逐张建为命名场景子节点；输出与其它装饰结构一致的五个固定端口。
 
@@ -30,4 +30,4 @@
 
 `scene_passthrough → node_explode → rect_grid → voxel_slice`（取顶层切片做掩码）→ `multi_layer_ground`（多层多值地面网格）→ `grid_split_by_value` → `grid2node`（按 `AssetName` 命名，挂 `asset_type=tile`）→ `add_child`；同时 `alg_region_subtract`（掩码 − 地面）得到 Rest 子树。最后 `scene_merge_subtrees` 合并并 `scene_focus_path` 分别聚焦，导出五个固定端口。
 
-`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。
+`in_0` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。

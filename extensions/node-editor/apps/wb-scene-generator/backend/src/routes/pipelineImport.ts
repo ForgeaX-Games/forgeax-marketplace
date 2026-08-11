@@ -15,8 +15,9 @@ import type {
   ImportTemplate,
   Runtime,
 } from '@forgeax/node-runtime'
-import { getRuntime, getRuntimeForProject, resolveWorkspaceRoot } from '../runtime.js'
-import { ensureMutationAccess } from './projects.js'
+import { getProjectDir, getRuntime, getRuntimeForProject, resolveWorkspaceRoot } from '../runtime.js'
+import { extractCaller, ensureMutationAccess } from './projects.js'
+import { readSceneModule } from '../scene-script/store.js'
 
 // Where graph templates live. Kept under the runtime project root so an
 // isolated test run (FORGEAX_PROJECT_ROOT=<temp>) gets its own templates dir,
@@ -101,72 +102,13 @@ export async function registerPipelineImportRoutes(app: FastifyInstance): Promis
   // ({ file: { path, source } }). Applies via the kernel importPipelineGraph
   // (single applyBatch → graph:applied → live-sync). Honours executeAfter so
   // the preview reflects the imported graph.
-  app.post<{ Params: ProjectParams }>(`${prefix}/import`, async (req, reply) => {
-    const { projectId } = req.params
-    const access = await ensureMutationAccess(req, projectId)
-    if (!access.ok) return reply.code(403).send({ status: 'rejected', reason: access.reason, code: access.code, projectId: access.projectId })
-    const rt = await getRuntimeForProject(projectId)
-    const body = (req.body ?? {}) as ImportBody
-    const options = body.options ?? {}
-
-    let rawGraph: unknown
-    let declaredFormat = body.format
-    if (body.file?.path) {
-      const full = resolveTemplatePath(rt, body.file.path)
-      if (!full || !existsSync(full)) {
-        return reply.code(404).send({ status: 'rejected', reason: `template not found: ${body.file.path}` })
-      }
-      try {
-        const parsed = JSON.parse(readFileSync(full, 'utf-8')) as { format?: string; graph?: unknown }
-        // A template file may wrap the graph as { format, graph } or be the raw graph.
-        rawGraph = parsed.graph ?? parsed
-        declaredFormat = declaredFormat ?? parsed.format
-      } catch (e) {
-        return reply.code(400).send({ status: 'rejected', reason: `template parse failed: ${(e as Error).message}` })
-      }
-    } else if (body.graph !== undefined) {
-      rawGraph = body.graph
-    } else {
-      return reply.code(400).send({ status: 'rejected', reason: 'missing graph (provide inline `graph` or `file.path`)' })
-    }
-
-    const format = detectFormat(rawGraph, declaredFormat)
-    const result = await importPipelineGraph(rt, toImportInput(format, rawGraph), {
-      mode: options.mode ?? 'replace',
-      remapNodeIds: options.remapNodeIds,
-      idRemap: options.idRemap,
-      opIdMap: options.opIdMap,
-      actor: options.actor ?? 'import',
-      ...(options.label !== undefined ? { label: options.label } : {}),
-    })
-
-    if (result.status !== 'ok') {
-      return reply.code(422).send(result as ImportPipelineResponse)
-    }
-
-    // graph:applied is emitted by the kernel importPipelineGraph (one applyBatch
-    // → bus) and fanned out to every live editor by the /ws subscription binding
-    // — the same single-source path /api/v1/batch uses. We deliberately do NOT
-    // broadcast a second copy here (it carries actor + batchId for the History
-    // bridge already).
-
-    // Post-import execution so previews reflect the imported graph. Exec events
-    // stream over /ws → the editor's exec:completed → refreshConnectedOutputs.
-    const executeAfter = options.executeAfter ?? 'none'
-    let executed = false
-    if (executeAfter === 'full' || executeAfter === 'downstream') {
-      try {
-        const handle = await executeNode(rt, {})
-        await handle.done
-        executed = true
-      } catch (e) {
-        app.log?.warn?.(`[pipeline import] post-import execute failed: ${(e as Error).message}`)
-      }
-    }
-
-    const response: ImportPipelineResponse = { ...result, executed }
-    return response
-  })
+  app.post<{ Params: ProjectParams }>(`${prefix}/import`, async (_req, reply) =>
+    reply.code(410).send({
+      status: 'rejected',
+      code: 'runtime-graph-authoring-removed',
+      reason: 'Runtime Graph import is no longer an authoring write path. Use Scene Script, or explicitly lift an existing legacy project.',
+    }),
+  )
 
   // Inline export for orchestrators (aw-support construction snapshots): same
   // shape as the on-disk export file, without writing into templates/.

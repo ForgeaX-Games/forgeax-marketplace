@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/main.js'
 import { formatExecuteVerificationFailure, summarizeProjectOpen, tools } from '../src/tool-handlers.js'
+import { applyBatch } from '@forgeax/node-runtime'
+import { getRuntimeForProject } from '../src/runtime.js'
 
 // 复盘(2026-07-01):runtime.ts 的 ProjectRegistry 是模块级单例，`resolveWorkspaceRoot()`
 // 只在它首次被 buildApp() 触发初始化时读一次 FORGEAX_PROJECT_ROOT——本文件之前从未设置，
@@ -72,7 +74,7 @@ describe('ToolRegistry scene handlers', () => {
     }
   })
 
-  it('resolves a single battery and exposes renderer metadata', async () => {
+  it('keeps only the human battery catalog and renderer metadata', async () => {
     const app = await buildApp()
     await app.listen({ host: '127.0.0.1', port: 0 })
     const addr = app.server.address()
@@ -89,17 +91,13 @@ describe('ToolRegistry scene handlers', () => {
       const one = await tools['scene:batteries.get']({ id: all[0].id }, ctx('scene:batteries.get'))
       expect(one).toEqual(expect.objectContaining({ id: all[0].id }))
 
-      const composer = await tools['scene:composerUtilities.list']({}, ctx('scene:composerUtilities.list')) as Array<{ id: string }>
-      expect(composer.length).toBeGreaterThan(0)
-      expect(composer.length).toBeLessThan(all.length)
-      expect(composer.every((op) => !op.id.startsWith('alg_'))).toBe(true)
-
-      const util = await tools['scene:composerUtilities.get']({ id: 'tree_merge' }, ctx('scene:composerUtilities.get'))
-      expect(util).toEqual(expect.objectContaining({ id: 'tree_merge' }))
-
-      await expect(
-        tools['scene:composerUtilities.get']({ id: 'rect_grid' }, ctx('scene:composerUtilities.get')),
-      ).rejects.toThrow(/not exposed/)
+      expect(tools).not.toHaveProperty('scene:composerUtilities.list')
+      expect(tools).not.toHaveProperty('scene:composerUtilities.get')
+      expect(tools).not.toHaveProperty('scene:templates.list')
+      expect(tools).not.toHaveProperty('scene:templates.get')
+      expect(tools).not.toHaveProperty('scene:pipeline.instantiateTemplate')
+      expect(tools).not.toHaveProperty('scene:pipeline.applyBatch')
+      expect(tools).not.toHaveProperty('scene:pipeline.import')
 
       const renderer = await tools['scene:renderer.info']({}, ctx('scene:renderer.info'))
       expect(renderer).toEqual(expect.objectContaining({ pane: 'renderer', paneUrl: '/?pane=renderer' }))
@@ -206,10 +204,9 @@ describe('ToolRegistry scene handlers', () => {
       const projectId = created.id!
       expect(projectId).toBeTruthy()
       await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentId))
-      await tools['scene:pipeline.applyBatch'](
-        {
-          projectId,
-          ops: [
+      await applyBatch(
+        await getRuntimeForProject(projectId),
+        [
             {
               type: 'createNode',
               nodeId: 'g2n_tool',
@@ -218,8 +215,7 @@ describe('ToolRegistry scene handlers', () => {
               params: { name: 'ToolHouse', grid: [[1, 1]] },
             },
           ],
-        },
-        ctx('scene:pipeline.applyBatch', agentId),
+        { actor: 'test-runtime-fixture' },
       )
 
       const baked = await tools['scene:baked.bakeFromExecute'](
@@ -302,10 +298,10 @@ describe('ToolRegistry scene handlers', () => {
         await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentA))
         await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentB))
 
-        // A claims write via first mutation.
-        await tools['scene:pipeline.applyBatch'](
-          { projectId, ops: [{ type: 'createNode', nodeId: 'a1', opId: 'grid2node', position: { x: 0, y: 0 }, params: {} }] },
-          ctx('scene:pipeline.applyBatch', agentA),
+        // A claims write via the canonical Scene Script mutation.
+        await tools['scene:script.put'](
+          { projectId, source: 'const root = emptyScene({})\nsceneOutput({ scene: root.scene })' },
+          ctx('scene:script.put', agentA),
         )
 
         // B can still soft-open / stay attached — open is shared.
@@ -313,9 +309,9 @@ describe('ToolRegistry scene handlers', () => {
           tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentB)),
         ).resolves.toMatchObject({ openMode: 'shared' })
 
-        const pending = tools['scene:pipeline.applyBatch'](
-          { projectId, ops: [{ type: 'createNode', nodeId: 'b1', opId: 'grid2node', position: { x: 1, y: 0 }, params: {} }] },
-          ctx('scene:pipeline.applyBatch', agentB),
+        const pending = tools['scene:script.put'](
+          { projectId, source: 'const root = emptyScene({})\nsceneOutput({ scene: root.scene })' },
+          ctx('scene:script.put', agentB),
         )
         await new Promise((r) => setTimeout(r, 120))
         await tools['scene:projects.close']({ id: projectId }, ctx('scene:projects.close', agentA))
@@ -337,16 +333,16 @@ describe('ToolRegistry scene handlers', () => {
 
         await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentA))
         await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentB))
-        await tools['scene:pipeline.applyBatch'](
-          { projectId, ops: [{ type: 'createNode', nodeId: 'a1', opId: 'grid2node', position: { x: 0, y: 0 }, params: {} }] },
-          ctx('scene:pipeline.applyBatch', agentA),
+        await tools['scene:script.put'](
+          { projectId, source: 'const root = emptyScene({})\nsceneOutput({ scene: root.scene })' },
+          ctx('scene:script.put', agentA),
         )
 
         // B leaves without holding write — A must still be able to mutate.
         await tools['scene:projects.close']({ id: projectId }, ctx('scene:projects.close', agentB))
-        await tools['scene:pipeline.applyBatch'](
-          { projectId, ops: [{ type: 'createNode', nodeId: 'a2', opId: 'grid2node', position: { x: 2, y: 0 }, params: {} }] },
-          ctx('scene:pipeline.applyBatch', agentA),
+        await tools['scene:script.put'](
+          { projectId, source: 'const root = emptyScene({})\nsceneOutput({ scene: root.scene })' },
+          ctx('scene:script.put', agentA),
         )
         await tools['scene:projects.close']({ id: projectId }, ctx('scene:projects.close', agentA))
       })
@@ -364,9 +360,9 @@ describe('ToolRegistry scene handlers', () => {
 
         await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentA))
         // Write lock is claimed by the first mutation, not by soft open.
-        await tools['scene:pipeline.applyBatch'](
-          { projectId, ops: [{ type: 'createNode', nodeId: 'h1', opId: 'grid2node', position: { x: 0, y: 0 }, params: {} }] },
-          ctx('scene:pipeline.applyBatch', agentA),
+        await tools['scene:script.put'](
+          { projectId, source: 'const root = emptyScene({})\nsceneOutput({ scene: root.scene })' },
+          ctx('scene:script.put', agentA),
         )
         const res = await tools['scene:projects.heartbeat'](
           { id: projectId },
@@ -438,427 +434,6 @@ describe('ToolRegistry scene handlers', () => {
     })
   })
 
-  // P0-2 (2026-07-15 tool 升级方案): applyBatch 的 connect op 除了 in_N/out_N
-  // 编号 port 外，还能用 `{ label: "..." }` 按 instantiateTemplate 返回的语义
-  // 名字寻址——这里用真实的 IslandRegions 模板（batteries/templates/scene/
-  // IslandRegions）端到端验证：resolve 出来的是正确的底层 in_N/out_N。
-  describe('applyBatch connect-by-label (P0-2)', () => {
-    async function withProject(fn: (p: { projectId: string; agentId: string }) => Promise<void>) {
-      const app = await buildApp()
-      await app.listen({ host: '127.0.0.1', port: 0 })
-      const addr = app.server.address()
-      const port = typeof addr === 'object' && addr ? addr.port : 0
-      writeFileSync(
-        portsFile,
-        JSON.stringify({ plugins: { '@forgeax-plugin/wb-scene-generator': { backendPort: port } } }),
-      )
-      try {
-        const agentId = `label-test-${Math.random().toString(36).slice(2)}`
-        const created = await tools['scene:projects.create']({ name: 'Label Addr Test' }, ctx('scene:projects.create')) as { id?: string }
-        const projectId = created.id!
-        await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentId))
-        await fn({ projectId, agentId })
-      } finally {
-        await app.close()
-      }
-    }
-
-    it('resolves source/target { label } into the underlying in_N/out_N port names', async () => {
-      await withProject(async ({ projectId, agentId }) => {
-        const a = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: 0, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-        const b = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: 400, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-        expect(a.groupId).toBeTruthy()
-        expect(b.groupId).toBeTruthy()
-
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              {
-                type: 'connect',
-                edgeId: 'e_label_test',
-                source: { nodeId: a.groupId, port: { label: 'Island' } },
-                target: { nodeId: b.groupId, port: { label: 'Scene' } },
-              },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-
-        const summary = await tools['scene:pipeline.get'](
-          { projectId, nodeIds: [a.groupId, b.groupId] },
-          ctx('scene:pipeline.get', agentId),
-        ) as { edges: Array<{ id?: string; source: { port: string }; target: { port: string } }> }
-        const edge = summary.edges.find((e) => e.id === 'e_label_test')
-        expect(edge).toBeDefined()
-        // "Island" is out_1, "Scene" is in_0 on IslandRegions (see the template JSON).
-        expect(edge!.source.port).toBe('out_1')
-        expect(edge!.target.port).toBe('in_0')
-      })
-    })
-
-    it('rejects an unknown label with the list of available labels', async () => {
-      await withProject(async ({ projectId, agentId }) => {
-        const a = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: 0, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-        const b = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: 400, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-
-        await expect(
-          tools['scene:pipeline.applyBatch'](
-            {
-              projectId,
-              ops: [
-                {
-                  type: 'connect',
-                  source: { nodeId: a.groupId, port: { label: 'Island' } },
-                  target: { nodeId: b.groupId, port: { label: 'NotARealLabel' } },
-                },
-              ],
-            },
-            ctx('scene:pipeline.applyBatch', agentId),
-          ),
-        ).rejects.toThrow(/label "NotARealLabel" not found.*Available labels/s)
-      })
-    })
-
-    it('rejects a label on a node that is not a __group__', async () => {
-      await withProject(async ({ projectId, agentId }) => {
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              { type: 'createNode', nodeId: 'plain1', opId: 'grid2node', position: { x: 0, y: 0 }, params: {} },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-        await expect(
-          tools['scene:pipeline.applyBatch'](
-            {
-              projectId,
-              ops: [
-                {
-                  type: 'connect',
-                  source: { nodeId: 'plain1', port: { label: 'Whatever' } },
-                  target: { nodeId: 'plain1', port: 'in_0' },
-                },
-              ],
-            },
-            ctx('scene:pipeline.applyBatch', agentId),
-          ),
-        ).rejects.toThrow(/not a __group__/)
-      })
-    })
-
-    it('accepts { label, portName } when they agree (Island → out_1 on IslandRegions)', async () => {
-      await withProject(async ({ projectId, agentId }) => {
-        const a = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: 0, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-        const b = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: 400, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              {
-                type: 'connect',
-                edgeId: 'e_label_portname_ok',
-                source: { nodeId: a.groupId, port: { label: 'Island', portName: 'out_1' } },
-                target: { nodeId: b.groupId, port: { label: 'Scene' } },
-              },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-
-        const summary = await tools['scene:pipeline.get'](
-          { projectId, nodeIds: [a.groupId, b.groupId] },
-          ctx('scene:pipeline.get', agentId),
-        ) as { edges: Array<{ id?: string; source: { port: string } }> }
-        const edge = summary.edges.find((e) => e.id === 'e_label_portname_ok')
-        expect(edge!.source.port).toBe('out_1')
-      })
-    })
-
-    it('rejects { label, portName } when label resolves to a different port (Scene vs out_1)', async () => {
-      await withProject(async ({ projectId, agentId }) => {
-        const a = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: 0, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-        const b = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: 400, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-
-        await expect(
-          tools['scene:pipeline.applyBatch'](
-            {
-              projectId,
-              ops: [
-                {
-                  type: 'connect',
-                  source: { nodeId: a.groupId, port: { label: 'Scene', portName: 'out_1' } },
-                  target: { nodeId: b.groupId, port: { label: 'Scene' } },
-                },
-              ],
-            },
-            ctx('scene:pipeline.applyBatch', agentId),
-          ),
-        ).rejects.toThrow(/label "Scene".*resolves to "out_0".*portName "out_1"/s)
-      })
-    })
-
-    it('leaves plain string ports untouched (no extra HTTP round-trip needed)', async () => {
-      await withProject(async ({ projectId, agentId }) => {
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              { type: 'createNode', nodeId: 'p1', opId: 'grid2node', position: { x: 0, y: 0 }, params: { name: 'P1', grid: [[1]] } },
-              { type: 'createNode', nodeId: 'p2', opId: 'grid2node', position: { x: 200, y: 0 }, params: { name: 'P2', grid: [[1]] } },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-        const result = await tools['scene:pipeline.get'](
-          { projectId, nodeIds: ['p1', 'p2'] },
-          ctx('scene:pipeline.get', agentId),
-        ) as { nodes: Array<{ id: string }> }
-        expect(result.nodes.map((n) => n.id)).toEqual(expect.arrayContaining(['p1', 'p2']))
-      })
-    })
-  })
-
-  // P0-4 (2026-07-15 tool 升级方案): applyBatch 的 `appendMergeItem` 复合操作——
-  // 一次调用即可把 updateNode(portCount+1) + connect(item_N) 两步都做对，不用
-  // 自己数当前 portCount。
-  describe('applyBatch appendMergeItem (P0-4)', () => {
-    it('increments portCount and wires sequential item_N slots, including across repeated calls in one batch', async () => {
-      const app = await buildApp()
-      await app.listen({ host: '127.0.0.1', port: 0 })
-      const addr = app.server.address()
-      const port = typeof addr === 'object' && addr ? addr.port : 0
-      writeFileSync(
-        portsFile,
-        JSON.stringify({ plugins: { '@forgeax-plugin/wb-scene-generator': { backendPort: port } } }),
-      )
-      try {
-        const agentId = 'append-merge-agent'
-        const created = await tools['scene:projects.create']({ name: 'Append Merge Test' }, ctx('scene:projects.create')) as { id?: string }
-        const projectId = created.id!
-        await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentId))
-
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              { type: 'createNode', nodeId: 'm0_merge', opId: 'tree_merge', position: { x: 0, y: 0 }, params: { portCount: 1 } },
-              { type: 'createNode', nodeId: 'src_a', opId: 'grid2node', position: { x: -200, y: 0 }, params: { name: 'SrcA', grid: [[1]] } },
-              { type: 'createNode', nodeId: 'src_b', opId: 'grid2node', position: { x: -200, y: 100 }, params: { name: 'SrcB', grid: [[1]] } },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              { type: 'appendMergeItem', mergeNodeId: 'm0_merge', source: { nodeId: 'src_a', port: 'out_0' } },
-              { type: 'appendMergeItem', mergeNodeId: 'm0_merge', source: { nodeId: 'src_b', port: 'out_0' } },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-
-        const raw = await tools['scene:pipeline.get'](
-          { projectId, raw: true },
-          ctx('scene:pipeline.get', agentId),
-        ) as { nodes: Record<string, { id: string; params?: Record<string, unknown> }> | Array<{ id: string; params?: Record<string, unknown> }>; edges: Record<string, unknown> | unknown[] }
-        const nodes = Array.isArray(raw.nodes) ? raw.nodes : Object.values(raw.nodes)
-        const merge = nodes.find((n) => n.id === 'm0_merge')
-        expect(merge?.params?.portCount).toBe(3) // started at 1, +2 appends
-
-        const edges = Array.isArray(raw.edges) ? raw.edges : Object.values(raw.edges as Record<string, unknown>)
-        const toMerge = (edges as Array<{ source: { nodeId: string; port: string }; target: { nodeId: string; port: string } }>).filter(
-          (e) => e.target.nodeId === 'm0_merge',
-        )
-        expect(toMerge.map((e) => e.target.port).sort()).toEqual(['item_1', 'item_2'])
-      } finally {
-        await app.close()
-      }
-    })
-
-    async function withMergeProject(fn: (p: { projectId: string; agentId: string }) => Promise<void>) {
-      const app = await buildApp()
-      await app.listen({ host: '127.0.0.1', port: 0 })
-      const addr = app.server.address()
-      const port = typeof addr === 'object' && addr ? addr.port : 0
-      writeFileSync(
-        portsFile,
-        JSON.stringify({ plugins: { '@forgeax-plugin/wb-scene-generator': { backendPort: port } } }),
-      )
-      try {
-        const agentId = `append-merge-contract-${Math.random().toString(36).slice(2)}`
-        const created = await tools['scene:projects.create']({ name: 'Append Merge Contract Test' }, ctx('scene:projects.create')) as { id?: string }
-        const projectId = created.id!
-        await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentId))
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              { type: 'createNode', nodeId: 'aw_m0_merge', opId: 'tree_merge', position: { x: 0, y: 0 }, params: { portCount: 1 } },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-        await fn({ projectId, agentId })
-      } finally {
-        await app.close()
-      }
-    }
-
-    it('appendMergeItem accepts Scene output for AI callers (IslandRegions out_0)', async () => {
-      await withMergeProject(async ({ projectId, agentId }) => {
-        const ir = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: -200, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              {
-                type: 'appendMergeItem',
-                mergeNodeId: 'aw_m0_merge',
-                source: { nodeId: ir.groupId, port: { label: 'Scene', portName: 'out_0' } },
-              },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-
-        const summary = await tools['scene:pipeline.get'](
-          { projectId, nodeIds: ['aw_m0_merge', ir.groupId] },
-          ctx('scene:pipeline.get', agentId),
-        ) as { edges: Array<{ source: { nodeId: string; port: string }; target: { nodeId: string; port: string } }> }
-        const edge = summary.edges.find((e) => e.target.nodeId === 'aw_m0_merge' && e.source.nodeId === ir.groupId)
-        expect(edge?.source.port).toBe('out_0')
-      })
-    })
-
-    it('appendMergeItem rejects domain output for AI callers (Island → out_1)', async () => {
-      await withMergeProject(async ({ projectId, agentId }) => {
-        const ir = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: -200, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-
-        await expect(
-          tools['scene:pipeline.applyBatch'](
-            {
-              projectId,
-              ops: [
-                {
-                  type: 'appendMergeItem',
-                  mergeNodeId: 'aw_m0_merge',
-                  source: { nodeId: ir.groupId, port: { label: 'Island' } },
-                },
-              ],
-            },
-            ctx('scene:pipeline.applyBatch', agentId),
-          ),
-        ).rejects.toThrow(/appendMergeItem.*Scene output.*merge/i)
-      })
-    })
-
-    it('appendMergeItem allows domain output for non-AI callers (backward compat)', async () => {
-      await withMergeProject(async ({ projectId, agentId }) => {
-        const ir = await tools['scene:pipeline.instantiateTemplate'](
-          { projectId, templateId: 'IslandRegions', position: { x: -200, y: 0 } },
-          ctx('scene:pipeline.instantiateTemplate', agentId),
-        ) as { groupId?: string }
-
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              {
-                type: 'appendMergeItem',
-                mergeNodeId: 'aw_m0_merge',
-                source: { nodeId: ir.groupId, port: { label: 'Island' } },
-              },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId, 'user'),
-        )
-
-        const summary = await tools['scene:pipeline.get'](
-          { projectId, nodeIds: ['aw_m0_merge', ir.groupId] },
-          ctx('scene:pipeline.get', agentId),
-        ) as { edges: Array<{ source: { nodeId: string; port: string } }> }
-        const edge = summary.edges.find((e) => e.source.nodeId === ir.groupId)
-        expect(edge?.source.port).toBe('out_1')
-      })
-    })
-
-    it('rejects appendMergeItem targeting a node that is not tree_merge', async () => {
-      const app = await buildApp()
-      await app.listen({ host: '127.0.0.1', port: 0 })
-      const addr = app.server.address()
-      const port = typeof addr === 'object' && addr ? addr.port : 0
-      writeFileSync(
-        portsFile,
-        JSON.stringify({ plugins: { '@forgeax-plugin/wb-scene-generator': { backendPort: port } } }),
-      )
-      try {
-        const agentId = 'append-merge-reject-agent'
-        const created = await tools['scene:projects.create']({ name: 'Append Merge Reject Test' }, ctx('scene:projects.create')) as { id?: string }
-        const projectId = created.id!
-        await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentId))
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
-              { type: 'createNode', nodeId: 'not_a_merge', opId: 'grid2node', position: { x: 0, y: 0 }, params: {} },
-              { type: 'createNode', nodeId: 'src', opId: 'grid2node', position: { x: -200, y: 0 }, params: {} },
-            ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
-        )
-        await expect(
-          tools['scene:pipeline.applyBatch'](
-            {
-              projectId,
-              ops: [{ type: 'appendMergeItem', mergeNodeId: 'not_a_merge', source: { nodeId: 'src', port: 'out_0' } }],
-            },
-            ctx('scene:pipeline.applyBatch', agentId),
-          ),
-        ).rejects.toThrow(/not "tree_merge"/)
-      } finally {
-        await app.close()
-      }
-    })
-  })
-
   // P0-3 (2026-07-15 tool 升级方案): pipeline.get 的 nameContains/opIdIn grep 式
   // 模糊过滤。
   describe('pipeline.get nameContains/opIdIn (P0-3)', () => {
@@ -876,16 +451,14 @@ describe('ToolRegistry scene handlers', () => {
         const created = await tools['scene:projects.create']({ name: 'Search Test' }, ctx('scene:projects.create')) as { id?: string }
         const projectId = created.id!
         await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentId))
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [
+        await applyBatch(
+          await getRuntimeForProject(projectId),
+          [
               { type: 'createNode', nodeId: 'house_1', opId: 'grid2node', name: '望江客栈_主楼', position: { x: 0, y: 0 }, params: {} },
               { type: 'createNode', nodeId: 'house_2', opId: 'grid2node', name: '望江客栈_偏房', position: { x: 200, y: 0 }, params: {} },
               { type: 'createNode', nodeId: 'unrelated', opId: 'grid2node', name: 'Something Else', position: { x: 400, y: 0 }, params: {} },
             ],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
+          { actor: 'test-runtime-fixture' },
         )
 
         const result = await tools['scene:pipeline.get'](
@@ -914,12 +487,10 @@ describe('ToolRegistry scene handlers', () => {
         const created = await tools['scene:projects.create']({ name: 'Search OpId Test' }, ctx('scene:projects.create')) as { id?: string }
         const projectId = created.id!
         await tools['scene:projects.open']({ id: projectId }, ctx('scene:projects.open', agentId))
-        await tools['scene:pipeline.applyBatch'](
-          {
-            projectId,
-            ops: [{ type: 'createNode', nodeId: 'g1', opId: 'grid2node', position: { x: 0, y: 0 }, params: {} }],
-          },
-          ctx('scene:pipeline.applyBatch', agentId),
+        await applyBatch(
+          await getRuntimeForProject(projectId),
+          [{ type: 'createNode', nodeId: 'g1', opId: 'grid2node', position: { x: 0, y: 0 }, params: {} }],
+          { actor: 'test-runtime-fixture' },
         )
 
         const hit = await tools['scene:pipeline.get'](

@@ -7,6 +7,5 @@ export default defineConfig({
     environment: 'node',
     globals: false,
     include: ['src/**/*.test.{ts,tsx}'],
-    passWithNoTests: true,
   },
 })

@@ -36,6 +36,7 @@ export interface GroupNodeData {
   exposedOutputs: ExposedPort[]
   /** Template-class group: locked ports, restyled, only the enter button. */
   isTemplate?: boolean
+  runtimeParams?: Record<string, unknown>
   /** Injected by Canvas: ungroup callback. */
   onUngroup?: (groupId: string) => void
   /** Injected by Canvas: enter-group-view callback. */
@@ -871,6 +872,7 @@ export function buildGroupNodeData(
   onUngroup: (groupId: string) => void,
   onEnterGroup?: (groupId: string) => void,
   isTemplate?: boolean,
+  runtimeParams?: Record<string, unknown>,
 ): GroupNodeData {
   return {
     groupId: group.id,
@@ -878,6 +880,7 @@ export function buildGroupNodeData(
     exposedInputs: group.exposedInputs,
     exposedOutputs: group.exposedOutputs,
     isTemplate,
+    runtimeParams,
     onUngroup,
     onEnterGroup,
   }

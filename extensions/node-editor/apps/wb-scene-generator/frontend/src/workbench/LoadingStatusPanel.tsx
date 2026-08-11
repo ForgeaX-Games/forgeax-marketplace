@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { sceneT } from '../sceneI18n.js'
 import './LoadingStatusPanel.css'
 
 export type LoadingStepState = 'active' | 'done'
@@ -61,7 +62,7 @@ export function LoadingStatusPanel({ steps }: { steps: LoadingStep[] }): JSX.Ele
         aria-expanded={!collapsed}
       >
         <span className={`load-status__spinner${hasActive ? '' : ' load-status__spinner--done'}`} aria-hidden="true" />
-        <span className="load-status__text">{hasActive ? activeStep?.label ?? '加载中…' : '加载完成'}</span>
+        <span className="load-status__text">{hasActive ? activeStep?.label ?? sceneT('loading.active') : sceneT('loading.done')}</span>
         <span className="load-status__count">
           {doneCount}/{steps.length}
         </span>

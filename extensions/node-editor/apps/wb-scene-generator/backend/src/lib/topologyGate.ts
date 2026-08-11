@@ -6,8 +6,8 @@
 // aw-support (`src/orchestration/scene-graph-analysis.ts`) and only ever ran
 // when aw-support built the NEXT continuation message — i.e. an agent that
 // tripped one of these anti-patterns would not find out until an entire
-// extra dispatch round-trip later (see connect-node-task/SKILL.md's "真实翻
-// 车案例" for the real production incident this caused: agent burned dozens
+// extra dispatch round-trip later. In the original production incident, the
+// agent burned dozens
 // of turns adjusting tree_merge params when the actual bug was fan-out
 // topology).
 //
@@ -104,9 +104,8 @@ export interface RestChainReport {
 /**
  * Detect Rest/Scene fan-out: the same upstream Scene/Rest output wired in
  * parallel into 2+ template-group Scene inputs. `AddBaseGrid.out_1` fan-out
- * and any other group's Rest-output fan-out are both covered — see the real
- * incident in connect-node-task/SKILL.md §"❌ 真实翻车案例——5 个模板全部从
- * 同一个端口扇出".
+ * and any other group's Rest-output fan-out are both covered; the original
+ * incident had five templates fed from the same output port.
  *
  * Returns `ok: true` (no violations, not an error) when no `AddBaseGrid`
  * group exists — this Rest-chain discipline is specific to the aw-support
@@ -257,8 +256,7 @@ export interface LocalMergeViolation {
  * `tree_merge` requires every connected item to resolve, so a local pre-merge
  * with even one bad/undefined item silently kills the WHOLE merge — and that
  * failure then silently propagates to the root merge/flatten, making it look
- * like a completely unrelated node has no output. See
- * connect-node-task/SKILL.md §"Rest 串链纪律" for the full real-world case.
+ * like a completely unrelated node has no output.
  */
 export function detectIllegalLocalMerge(
   edges: readonly TopologyGraphEdge[],
@@ -343,8 +341,7 @@ export interface ManualPointsZeroDefault {
  * neither an explicit non-zero `params.x`/`params.y` NOR an incoming edge
  * into the node's `x`/`y` input ports — so the battery's own silent defaults
  * (both 0) silently kick in. `execute` reports `completed`/`ok:true` for this
- * because nothing errors — it's just wrong. See
- * connect-node-task/SKILL.md §"manual_points 的 x/y 不填会静默变成 (0,0)".
+ * because nothing errors — it's just wrong.
  *
  * Unlike aw-support's copy of this check, this module has no access to the
  * task spec's *intended* coordinate (that lives in aw-support's run

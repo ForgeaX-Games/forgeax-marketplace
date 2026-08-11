@@ -16,7 +16,8 @@
 
 > ### 📍 POI 点位约束（接 `in_3` 前必读）
 > 每个 POI 必须在**可铺路 region 内**或**区域边缘合理锚点**上；须通过 **体素/footprint 导出 + 推理** 得出（如 `outer_door`、`building_footprint_mask` 门格、建筑外侧邻格），**禁止拍坐标**。
-> 接入前逐点确认：**不在区域外、不在建筑体内、不悬空无效格**。Sino 操作手册详见 [PathConnection 管线文档](../../../../skills/compose-sino-scene/instructions/pipelines/PathConnection.md) §1。
+> 接入前逐点确认：**不在区域外、不在建筑体内、不悬空无效格**。Agent 调用时以
+> 版本化 Scene Contract 的公开参数、诊断和 Source Map 为准。
 
 **整图通常只需一个 PathConnection**——多个连接点（门、路口、地图边界锚点等）先用 `tree_merge`（`inferredAccess:"item"`）合并为 **point2d 列表**，再接入 `in_3`。
 
@@ -76,7 +77,7 @@
 前置：已实例化 `ArchitectureRegions` 并拿到 `<G_ARCH>`。先实例化本组拿回 `<G_PATH>`：
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"PathConnection", "position":{"x":-500,"y":600},
            "opts":{"actor":"ai:sino","label":"实例化 PathConnection"} } }
 ```
@@ -288,7 +289,7 @@ POI **禁止拍中心格**；须 **导出 → 推理 → 校验 → 组装**（�
 ```bash
 PID=p_mr4b9s3j_dycp8k
 curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute" \
-  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: ai' \
+  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: workbench' \
   -d '{"narrativeLocationNames":["父区域","驿道"]}' \
   | jq '.outputs.verify_path1.out_1 | length'
 ```

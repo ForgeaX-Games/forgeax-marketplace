@@ -10,7 +10,7 @@ function baseLayer(partial: Partial<BakedLayer> & Pick<BakedLayer, 'nodePath' | 
 
 const FIXTURE_PATH = resolve(
   import.meta.dirname,
-  '../../../../../../../../aw-support/terrain/pipelines/scene_nodes_testset/scene_nodes.wuxia.json',
+  'fixtures/scene_nodes.wuxia.json',
 )
 
 describe('applyNarrativeAreaTags — real wuxia fixture', () => {

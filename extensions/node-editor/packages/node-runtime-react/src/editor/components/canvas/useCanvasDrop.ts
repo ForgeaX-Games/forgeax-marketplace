@@ -9,14 +9,10 @@ import type { Node, ReactFlowInstance } from '../../xyflow.js'
 import { usePipelineStore, useHistoryStore } from '../../stores/index.js'
 import { createEmptyPipeline } from '../../stores/pipelineStore.helpers.js'
 import type { Battery, PipelineNode } from '../../types.js'
-import { resolveNodeType, DEFAULT_BATTERY_WIDTH, estimateBatteryNodeWidth, estimateGroupNodeWidth, mintCanvasNodeId } from './canvasConstants.js'
+import { resolveNodeType, DEFAULT_BATTERY_WIDTH, estimateBatteryNodeWidth, mintCanvasNodeId } from './canvasConstants.js'
 import { formatIdAsLabel } from '../../utils/batteryLabels.js'
 import { RELAY_BATTERY_ID, RELAY_NODE_HEIGHT, RELAY_NODE_WIDTH } from './RelayNode.js'
 import { getEditorTransport } from '../../transport/index.js'
-import { buildGroupNodeData } from './GroupNode.js'
-import { expandLoadedGroupBundle, remapGroupBundle } from './groupViewUtils.js'
-import { computeGroupContentHash, writeGroupProvenance } from './groupStatus.js'
-import { isTemplateBattery, getSmallLabel } from '../sidebar/batteryGrouping.js'
 
 /** Shared kernel op id backing every saved-prompt node (see PromptNode). */
 const PROMPT_OP_ID = 'prompt_template'
@@ -72,13 +68,12 @@ export type PlaceBatteryFn = (
   options?: { presetText?: string; presetParams?: Record<string, unknown> },
 ) => string | null
 
-export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterGroup, onExternalDrop, onInnerNodeAdd }: UseCanvasDropParams) {
+export function useCanvasDrop({ reactFlowInstance, setNodes, onExternalDrop, onInnerNodeAdd }: UseCanvasDropParams) {
   // Canvas wrapper + ReactFlow both register onDrop; the same native drop can
   // invoke both handlers. Dedupe by timeStamp+position so placeBattery runs once.
   const lastDropSigRef = useRef<string | null>(null)
 
   const addNode = usePipelineStore((s) => s.addNode)
-  const addGroup = usePipelineStore((s) => s.addGroup)
   const addAnnotation = usePipelineStore((s) => s.addAnnotation)
   const incrementalExecute = usePipelineStore((s) => s.incrementalExecute)
 
@@ -117,89 +112,30 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
       }
 
       if (battery.type === 'group') {
-        // Templates are a locked, restyled class of group battery (big tag
-        // 'templates/…'); regular dragged-out group batteries are normal groups.
-        const droppedIsTemplate = isTemplateBattery(battery)
-        // Provenance for the dropped instance: every group dragged from the
-        // library is `saved` (its content matches the library file it came
-        // from). Capture the source location so a later edit + save overwrites
-        // that file directly, and the content hash so the status reads `saved`
-        // until the user actually edits it. Templates carry the isTemplate flag.
-        const loadScope: 'groups' | 'templates' = isTemplateBattery(battery) ? 'templates' : 'groups'
-        const sourceCategory = droppedIsTemplate ? getSmallLabel(battery) : (battery.displayGroup?.split('/')[1] ?? battery.category)
-        const sourceBatteryName = battery.name
-        void getEditorTransport().api.loadGroup(battery.id, { scope: loadScope })
-          .then((loaded) => {
-            if (!loaded) {
-              console.warn(`[placeBattery] group template not found: ${battery.id} (scope=${loadScope})`)
-              return
-            }
-            const [root, ...deps] = expandLoadedGroupBundle(loaded)
-            const remapped = remapGroupBundle(root, deps, position)
-            for (const dep of remapped.deps) addGroup(dep)
-            addGroup(remapped.root)
-
-            const noop = (_groupId: string) => {}
-            const rfNode: Node = {
-              id: remapped.root.id,
-              type: 'group',
-              position,
-              style: { width: estimateGroupNodeWidth(remapped.root, usePipelineStore.getState().batteries) },
-              data: buildGroupNodeData(remapped.root, onUngroup ?? noop, onEnterGroup ?? noop, droppedIsTemplate),
-              selected: false,
-            }
-            setNodes((nds) => [...nds, rfNode])
-
-            // Record BEFORE the lazy pipeline is created (currentPipeline may
-            // still be null on the very first drop into a fresh project); an
-            // empty pipeline is the correct pre-state for undoing the first node.
-            if (!inGroupView) {
-              const { currentPipeline } = usePipelineStore.getState()
-              useHistoryStore.getState().record('add_node', currentPipeline ?? createEmptyPipeline(), {
-                nodeIds: [remapped.root.id],
-                label: `添加模板节点：${battery.name}`,
-                labelEn: `Add template: ${formatIdAsLabel(battery.id)}`,
-              })
-            }
-
-            insertNode({
-              id: remapped.root.id,
-              batteryId: '__group__',
-              name: remapped.root.name,
-              position,
-              // Stamp provenance so the dropped group is `saved` and (for
-              // templates) locked. The hash is over the remapped (id-free)
-              // content so it matches the library file regardless of fresh ids.
-              params: writeGroupProvenance({ groupId: remapped.root.id }, {
-                sourceCategory,
-                sourceBatteryName,
-                // The library id is the dragged battery's own id; keep it so a
-                // later edit + save overwrites that exact library entry instead
-                // of minting a duplicate keyed on the remapped instance id.
-                sourceGroupId: battery.id,
-                savedContentHash: computeGroupContentHash(remapped.root),
-                ...(droppedIsTemplate ? { isTemplate: true } : {}),
-              }),
+        // Published native Definitions are authoring entities, not JSON graph
+        // bundles. Add the public function call to canonical Scene Script and
+        // let the resulting graph:applied/loadPipeline rebuild the canvas. Never
+        // fall back to loadGroup → client remap → createGroup for this marker:
+        // that path diverges from canonical source and is rejected by the
+        // Scene-Script batch adapter.
+        if (battery.nativeDefinition) {
+          if (inGroupView) {
+            console.error('[placeBattery] native Scene Definitions can only be added at the project root')
+            return null
+          }
+          void getEditorTransport().api
+            .instantiateNativeDefinition(battery.nativeDefinition.functionName, position)
+            .then(() => usePipelineStore.getState().loadPipeline())
+            .catch((error) => {
+              console.error(
+                `[placeBattery] failed to instantiate native Definition '${battery.nativeDefinition?.functionName}':`,
+                error,
+              )
             })
-            // In a group view the dropped group is an inner member (routed to the
-            // group-view sink); the root persist+execute below would target a node
-            // absent from the root graph. The exit flush handles persistence/run.
-            if (inGroupView) return
-            setTimeout(() => {
-              // Persist FIRST (this commits the createGroup op that materialises
-              // the group shadow node in the kernel), THEN execute. Chaining the
-              // execute off the persist promise — instead of firing both in the
-              // same tick with `persist:false` — fixes a drop-then-execute race:
-              // the group node's execute used to race ahead of its still-in-flight
-              // createGroup persist, so the kernel had no such node yet and
-              // executeNode threw "target node not found", surfacing as a bare 500.
-              void usePipelineStore.getState().persistSession()
-                .then(() =>
-                  usePipelineStore.getState().incrementalExecute(remapped.root.id, false, { persist: false }),
-                )
-            }, 50)
-          })
-          .catch((e) => console.error('[placeBattery] failed to load group template:', e))
+          return null
+        }
+
+        console.error(`[placeBattery] unpublished legacy Group/Template '${battery.id}' is unavailable`)
         return null
       }
 
@@ -362,7 +298,7 @@ export function useCanvasDrop({ reactFlowInstance, setNodes, onUngroup, onEnterG
       }
       return nodeId
     },
-    [setNodes, addNode, addGroup, addAnnotation, incrementalExecute, onUngroup, onEnterGroup, onInnerNodeAdd],
+    [setNodes, addNode, addAnnotation, incrementalExecute, onInnerNodeAdd],
   )
 
   const onDrop = useCallback(

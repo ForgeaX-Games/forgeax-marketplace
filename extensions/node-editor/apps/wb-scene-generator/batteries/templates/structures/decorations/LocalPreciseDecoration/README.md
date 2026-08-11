@@ -1,6 +1,6 @@
 # LocalPreciseDecoration（局部精准装饰播撒）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_local_precise_decoration`，也可用 basename `LocalPreciseDecoration`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_local_precise_decoration`，也可用 basename `LocalPreciseDecoration`。
 
 以**兴趣点**为中心，在父区域有效格内的圆形半径内采样多个小型装饰物点位并挂树；算法核心为 scenealg **`alg_points_center_scatter`**（源自 `components/decoration/precise_decoration_scatter`）。
 
@@ -29,7 +29,7 @@
 | OUT | `out_1` | Decoration 装饰（主产物；**单份**已内部 merge 收束的 scene，不再按点 fan-out） |
 | OUT | `out_2` | Rest 剩余空地 |
 
-`in_1` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `scene:templates.get` 为准。
+`in_1` 悬空会导致整组静默空跑（execute 仍 completed）。完整端口以 `GET /api/v1/group-templates/:id?scope=templates` 为准。
 
 ## 内部管线（③ 段 scenealg）
 
@@ -72,7 +72,7 @@ scene → explode → rect_grid → voxel_slice（region）
 ```bash
 PID=p_mr4b9s3j_dycp8k
 curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
-  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: ai' \
+  -H 'content-type: application/json' -H 'x-forgeax-caller-kind: workbench' \
   -d '{"narrativeLocationNames":["父区域"]}' \
   | jq '.outputs.verify_lp1.out_4.itemCount'
 # 预期 ≥ 8（前缀 局部）
@@ -87,7 +87,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 ### 前置：造一个独立 Demo Scene（可跨模板复用的固定写法）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AddBaseGrid", "groupId":"demo_abg", "position":{"x":-800,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid（独立 demo scene）"} } }
 ```
@@ -122,7 +122,7 @@ curl -s -X POST "http://127.0.0.1:9557/api/v1/projects/$PID/execute/summary" \
 ### applyBatch 片段（可直接照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"LocalPreciseDecoration", "groupId":"demo_lp", "position":{"x":-400,"y":2100},
            "opts":{"actor":"ai:sino","label":"实例化 LocalPreciseDecoration"} } }
 ```

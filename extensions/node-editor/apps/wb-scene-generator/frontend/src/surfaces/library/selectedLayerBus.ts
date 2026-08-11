@@ -84,7 +84,7 @@ export function writeSelectedLayer(info: SelectedLayerInfo | null): void {
   }
   writeSelectedLayers({
     layers: [snap],
-    editContext: { editMode: false, viewMode: 'topBillboard', drawMode: 'asset', editAvailable: false },
+    editContext: { editMode: false, viewMode: 'top', drawMode: 'asset', editAvailable: false },
   })
 }
 

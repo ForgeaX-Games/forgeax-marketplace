@@ -5,7 +5,7 @@ import { useRenderStore } from '../renderer/store.js'
 import {
   useBakedLayer, useBakedLayerKeys, useVoxelLayer, useVoxelLayerKeys, useGridLayerKeys,
 } from '../renderer/framework/useLayer.js'
-import { useNodePreviews, projectLiveOutputs } from '../renderer/bridge/useNodePreviews.js'
+import { notifyLocalParamEdit, useNodePreviews, projectLiveOutputs } from '../renderer/bridge/useNodePreviews.js'
 import { useAliasMetas } from '../renderer/bridge/useAliasMetas.js'
 import { useScreenshotCapture } from '../renderer/bridge/useScreenshotCapture.js'
 import { useRendererCommands } from '../renderer/bridge/useRendererCommands.js'
@@ -18,16 +18,17 @@ import { defaultPaintTargetName } from '../renderer/framework/paintTarget.js'
 import { buildPathTree, pathParent, type PathTreeNode } from '../renderer/framework/pathTree.js'
 import { colorForValueCss } from '../renderer/framework/palette.js'
 import type { PluginHandle } from '../renderer/framework/plugin.js'
+import { zoomViewportCentered } from '../renderer/framework/viewport2d.js'
 import type { ViewMode, DrawMode } from '../renderer/types.js'
 import { useWorkbenchChild } from '../workbench/useWorkbenchChild.js'
+import { isWorkbenchMessage, workbenchTargetOrigin, type WorkbenchMessage } from '../workbench/protocol.js'
+import { sceneT, useSceneLocale, type SceneKey } from '../sceneI18n.js'
 import { writeSelectedLayers } from './library/selectedLayerBus.js'
 import { bakedLayerToSnapshot, outputLayerToSnapshot } from './library/layerSnapshots.js'
 import { reconcilePanelSelection } from './library/selectionReconcile.js'
 import {
   writeEditMode,
   writePreviewEditContext,
-  readShowGrid,
-  subscribeShowGrid,
   readBrushMode,
   subscribeBrushMode,
   readEditTool,
@@ -37,46 +38,43 @@ import {
 } from './library/editToolbarBus.js'
 import { libraryApi } from './library/libraryApi.js'
 import {
-  Box, Camera, ChevronDown, ChevronRight, Eye, EyeOff, Home, Layers, Maximize2, Minimize2, Pencil, Plus, Trash,
+  Box, Camera, ChevronDown, ChevronRight, Eye, EyeOff, Layers, NodeEditor, Pencil, Plus, Trash,
 } from './icons.js'
+import {
+  clampDrawerWidth,
+  effectiveDrawerWidth,
+  loadPreviewDrawerWidth,
+  savePreviewDrawerWidth,
+} from './previewDrawerLayout.js'
 import './RendererSurface.css'
 
 const VIEW_MODES: ViewMode[] = ['top', 'topBillboard', 'iso', 'free3d', '3DMesh']
 const DRAW_MODES: DrawMode[] = ['wire', 'color', 'asset']
-const VIEW_LABELS: Record<ViewMode, string> = {
-  top: 'Top',
-  topBillboard: 'Billboard',
-  iso: 'Iso',
-  free3d: 'Free 3D',
-  '3DMesh': '3DMesh',
-}
-const DRAW_LABELS: Record<DrawMode, string> = {
-  wire: 'Wire',
-  color: 'Color',
-  asset: 'Asset',
+const VIEW_LABEL_KEYS = {
+  top: 'preview.view.top',
+  topBillboard: 'preview.view.billboard',
+  iso: 'preview.view.iso',
+  free3d: 'preview.view.free3d',
+  '3DMesh': 'preview.view.mesh3d',
+} as const satisfies Record<ViewMode, SceneKey>
+const DRAW_LABEL_KEYS = {
+  wire: 'preview.draw.wire',
+  color: 'preview.draw.color',
+  asset: 'preview.draw.asset',
+} as const satisfies Record<DrawMode, SceneKey>
+
+function viewLabel(mode: ViewMode): string {
+  return sceneT(VIEW_LABEL_KEYS[mode])
 }
 
-const LS_LAYERS_WIDTH_KEY = 'wb-scene-generator.renderer-layers-width'
-const DEFAULT_LAYERS_WIDTH = 220
-const MIN_LAYERS_WIDTH = 140
-const MAX_LAYERS_WIDTH = 520
+function drawLabel(mode: DrawMode): string {
+  return sceneT(DRAW_LABEL_KEYS[mode])
+}
+
 const LAYER_INDENT_STEP = 10
 const LAYER_INDENT_MAX = 52
 
-function loadLayersPanelWidth(): number {
-  try {
-    const raw = localStorage.getItem(LS_LAYERS_WIDTH_KEY)
-    if (raw) {
-      const n = Number.parseInt(raw, 10)
-      if (Number.isFinite(n)) return Math.max(MIN_LAYERS_WIDTH, Math.min(MAX_LAYERS_WIDTH, n))
-    }
-  } catch { /* ignore */ }
-  return DEFAULT_LAYERS_WIDTH
-}
-
-function saveLayersPanelWidth(width: number): void {
-  try { localStorage.setItem(LS_LAYERS_WIDTH_KEY, String(width)) } catch { /* ignore */ }
-}
+type PreviewDrawer = 'effects' | 'editable' | 'output'
 
 function layerRowPadding(depth: number): number {
   return 8 + Math.min(depth * LAYER_INDENT_STEP, LAYER_INDENT_MAX)
@@ -99,14 +97,9 @@ type ScreenshotState =
   | { status: 'success'; dataUrl: string; width: number; height: number }
   | { status: 'error'; message: string }
 
-// Faithful renderer pane. Toolbar order mirrors the legacy Preview chrome:
-//   Preview title · view-mode dropdown · Wire/Color/Asset segment · status pill
-//   … (spacer) … screenshot · layers-panel toggle · reset-view · fullscreen.
-// Zoom is handled by canvas wheel-zoom (centered on cursor); the old gear
-// dropdown that wrapped zoom + reset was removed in favor of a direct button.
-// The Layers side panel lists ONLY scene_output voxel layers (matching legacy
-// LayersSidePanel); grid previews still render live on the canvas but are NOT
-// listed here. Scene layers flow in from completed executions via WS.
+// Renderer pane. Canvas actions live in the left tool capsule (Effects, Editable,
+// Output drawers, Node Editor toggle, screenshot, reset, fullscreen).
+// Zoom is available in the canvas preview label; wheel-zoom remains on canvas.
 export function RendererSurface({
   client,
   gameSlug,
@@ -115,6 +108,7 @@ export function RendererSurface({
   /** Active ForgeaX game from host iframe `?slug=` — mesh3d export lands here. */
   gameSlug?: string | null
 }): JSX.Element {
+  useSceneLocale()
   useNodePreviews(client)
   useAliasMetas(client)
   useRendererCommands()
@@ -136,7 +130,8 @@ export function RendererSurface({
   const drawMode = useRenderStore((s) => s.drawMode)
   const setViewMode = useRenderStore((s) => s.setViewMode)
   const setDrawMode = useRenderStore((s) => s.setDrawMode)
-  const resetViewport2d = useRenderStore((s) => s.resetViewport2d)
+  const viewGuideVisible = useRenderStore((s) => s.viewGuides[viewMode])
+  const setViewGuideVisible = useRenderStore((s) => s.setViewGuideVisible)
   const setSelectedEditorNodeIds = useRenderStore((s) => s.setSelectedEditorNodeIds)
   // Voxel (scene_output) layers — the read-only "Output" section of the panel.
   const layerKeys = useVoxelLayerKeys()
@@ -149,7 +144,6 @@ export function RendererSurface({
   const bakedTree = useMemo(() => buildPathTree(bakedKeys, (key) => bakedLayersMap[key]), [bakedKeys, bakedLayersMap])
   const editMode = useRenderStore((s) => s.editMode)
   const setEditMode = useRenderStore((s) => s.setEditMode)
-  const setShowGrid = useRenderStore((s) => s.setShowGrid)
   const setBrushMode = useRenderStore((s) => s.setBrushMode)
   const setEditTool = useRenderStore((s) => s.setEditTool)
   const setEditZ = useRenderStore((s) => s.setEditZ)
@@ -168,13 +162,44 @@ export function RendererSurface({
   // empty-state + status (legacy counts both buckets), never listed in the panel.
   const gridKeys = useGridLayerKeys()
   const totalLayers = layerKeys.length + gridKeys.length
-  const { isFocused, requestFocus, reportStatus } = useWorkbenchChild('renderer')
+  const { reportStatus } = useWorkbenchChild('renderer')
+  const workbenchOrigin = workbenchTargetOrigin()
+  const postToHost = useCallback((msg: WorkbenchMessage) => {
+    if (typeof window === 'undefined' || window.parent === window) return
+    window.parent.postMessage(msg, workbenchOrigin)
+  }, [workbenchOrigin])
+  const capturePreviewFrame = useCallback(():
+    | { dataUrl: string; width: number; height: number; capturedAt: string }
+    | { error: string; capturedAt: string } => {
+    const capturedAt = new Date().toISOString()
+    const handle = pluginRef.current
+    handle?.renderFrame?.()
+    const canvas = handle?.getFrameCanvas?.()
+    if (!canvas) return { error: sceneT('preview.screenshotNoFrame'), capturedAt }
+    try {
+      return {
+        dataUrl: canvas.toDataURL('image/png'),
+        width: canvas.width,
+        height: canvas.height,
+        capturedAt,
+      }
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error), capturedAt }
+    }
+  }, [])
 
   // Pure VIEW state (no graph/runtime mutation) — kept local to the renderer.
-  const [showViewMenu, setShowViewMenu] = useState(false)
-  const [layersPanelOpen, setLayersPanelOpen] = useState(true)
-  const [layersPanelWidth, setLayersPanelWidth] = useState(loadLayersPanelWidth)
-  const [editablePanelHeight, setEditablePanelHeight] = useState(180)
+  const [activeDrawer, setActiveDrawer] = useState<PreviewDrawer | null>(null)
+  // Card visibility belongs to the host's `editorCardOpen` state. Availability
+  // persistence is deliberately not consulted here; the initial query below
+  // establishes the authoritative state over the workbench protocol.
+  const [editorVisible, setEditorVisible] = useState(false)
+  const [drawerMaxHeight, setDrawerMaxHeight] = useState(430)
+  const [drawerUserWidth, setDrawerUserWidth] = useState(loadPreviewDrawerWidth)
+  const [drawerContainerWidth, setDrawerContainerWidth] = useState(0)
+  const drawerDockRef = useRef<HTMLDivElement>(null)
+  const canvasWrapRef = useRef<HTMLDivElement>(null)
+  const drawerWidth = effectiveDrawerWidth(drawerUserWidth, drawerContainerWidth)
   const [sceneExport, setSceneExport] = useState<SceneExportState>({ status: 'idle' })
   const [screenshot, setScreenshot] = useState<ScreenshotState>({ status: 'idle' })
   // Selected Layers-panel row lives in the store so the AI/Agent `select-layer`
@@ -220,6 +245,10 @@ export function RendererSurface({
     if (!range) selectAnchorRef.current = key
     panelSelectionEchoRef.current = key
     setSelectedLayer(key)
+    const layer = layers[key]
+    if (layer) {
+      postToHost({ type: 'workbench:preview-lineage-selection', path: layer.nodePath })
+    }
   }
   // Collapsed sink/path container rows (collapsible tree). Keyed by pathKey;
   // default expanded.
@@ -242,7 +271,7 @@ export function RendererSurface({
 
   const revealBakedLayerForRename = useCallback((path: string) => {
     const key = `baked:${path}`
-    setLayersPanelOpen(true)
+    setActiveDrawer('editable')
     setActiveBakedLayer(key)
     setSelectedBakedKeys(new Set([key]))
     bakedAnchorRef.current = key
@@ -288,14 +317,6 @@ export function RendererSurface({
     writePreviewEditContext({ editMode, viewMode, drawMode, editAvailable })
   }, [editMode, viewMode, drawMode, editAvailable])
 
-  // The grid toggle lives in the left pane's edit toolbar; mirror its published
-  // state into the render store (initial read + live subscription) so compose
-  // draws the grid. Cross-iframe, so this is the only path it arrives by.
-  useEffect(() => {
-    setShowGrid(readShowGrid())
-    return subscribeShowGrid(setShowGrid)
-  }, [setShowGrid])
-
   // Brush mode (Free/Box) also lives in the left pane's edit toolbar; mirror it
   // into the render store so the canvas interaction switches accordingly.
   useEffect(() => {
@@ -316,32 +337,14 @@ export function RendererSurface({
     return subscribeEditZ(setEditZ)
   }, [setEditZ])
 
-  const beginLayerSectionResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startHeight = editablePanelHeight
-    const panel = e.currentTarget.parentElement
-    const panelHeight = panel?.getBoundingClientRect().height ?? 0
-    const onMove = (mv: MouseEvent): void => {
-      const max = Math.max(90, panelHeight - 120)
-      setEditablePanelHeight(Math.max(70, Math.min(max, startHeight + mv.clientY - startY)))
-    }
-    const onUp = (): void => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }, [editablePanelHeight])
-
-  const beginLayersPanelWidthResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const beginDrawerWidthResize = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
     const startX = e.clientX
-    const startWidth = layersPanelWidth
+    const startWidth = drawerUserWidth
     const onMove = (mv: MouseEvent): void => {
-      const next = Math.max(MIN_LAYERS_WIDTH, Math.min(MAX_LAYERS_WIDTH, startWidth + startX - mv.clientX))
-      setLayersPanelWidth(next)
-      saveLayersPanelWidth(next)
+      const next = clampDrawerWidth(startWidth + mv.clientX - startX)
+      setDrawerUserWidth(next)
+      savePreviewDrawerWidth(next)
     }
     const onUp = (): void => {
       window.removeEventListener('mousemove', onMove)
@@ -349,7 +352,63 @@ export function RendererSurface({
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-  }, [layersPanelWidth])
+  }, [drawerUserWidth, drawerContainerWidth])
+
+  useEffect(() => {
+    const el = canvasWrapRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const measure = (): void => {
+      setDrawerContainerWidth(el.getBoundingClientRect().width)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    postToHost({ type: 'workbench:query-editor-visibility' })
+  }, [postToHost])
+
+  useEffect(() => {
+    const measure = (): void => {
+      let visiblePreviewHeight = window.innerHeight
+      try {
+        const frameRect = (window.frameElement as HTMLElement | null)?.getBoundingClientRect()
+        const editorRect = window.parent.document.querySelector('.scene-workbench__editor')?.getBoundingClientRect()
+        if (editorVisible && frameRect && editorRect && editorRect.width > 0 && editorRect.height > 0) {
+          visiblePreviewHeight = editorRect.top - frameRect.top
+        }
+      } catch {
+        // Direct renderer preview or cross-origin host: use the iframe viewport.
+      }
+      const dockTop = drawerDockRef.current?.getBoundingClientRect().top ?? 52
+      const availableHeight = visiblePreviewHeight - dockTop - 12
+      setDrawerMaxHeight(Math.max(120, Math.min(430, availableHeight)))
+    }
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    try {
+      const editor = window.parent.document.querySelector('.scene-workbench__editor')
+      if (editor) observer?.observe(editor)
+    } catch {
+      // Direct renderer preview or cross-origin host.
+    }
+    window.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [editorVisible])
+
+  useEffect(() => {
+    if (!activeDrawer) return
+    const closeOnOutsideClick = (event: PointerEvent): void => {
+      if (!drawerDockRef.current?.contains(event.target as Node)) setActiveDrawer(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
+  }, [activeDrawer])
 
   // Editor-selection bridge: the workbench host forwards the kernel editor's
   // current node selection over `workbench:editor-selection`. We mirror it into
@@ -357,9 +416,14 @@ export function RendererSurface({
   // layers/previews (view-only; no graph mutation). Replaces the legacy
   // `editor:selection` WS event, which this backend doesn't emit.
   useEffect(() => {
+    const inIframe = window.parent !== window
     const handler = (event: MessageEvent) => {
-      const data = event.data as { type?: unknown; selectedNodeIds?: unknown; previewDisabledNodeIds?: unknown; outputs?: unknown } | null
-      if (!data || typeof data.type !== 'string') return
+      if (inIframe) {
+        if (event.origin !== workbenchOrigin) return
+        if (event.source !== window.parent) return
+      }
+      if (!isWorkbenchMessage(event.data)) return
+      const data = event.data
       if (data.type === 'workbench:project-changed') {
         // SOFT project-switch reset: the host no longer hard-remounts this
         // iframe (see WorkbenchHost's project-changed effect), so this is now
@@ -378,41 +442,62 @@ export function RendererSurface({
         })
         setSceneExport({ status: 'idle' })
         setScreenshot({ status: 'idle' })
+        setActiveDrawer(null)
         return
       }
-      if (data.type === 'workbench:editor-selection') {
-        setSelectedEditorNodeIds(Array.isArray(data.selectedNodeIds) ? (data.selectedNodeIds as string[]) : [])
+      if (data.type === 'workbench:capture-preview') {
+        postToHost({
+          type: 'workbench:preview-captured',
+          requestId: data.requestId,
+          ...capturePreviewFrame(),
+        })
+      } else if (data.type === 'workbench:editor-selection') {
+        setSelectedEditorNodeIds(data.selectedNodeIds)
+      } else if (data.type === 'workbench:lineage-highlight') {
+        const scenePaths = new Set(data.paths)
+        const bakedPaths = new Set(data.bakedPaths)
+        const state = useRenderStore.getState()
+        const matchingKeys = [
+          ...Object.values(state.layers)
+            .filter((layer) => scenePaths.has(layer.nodePath))
+            .map((layer) => layer.key),
+          ...Object.values(state.bakedLayers)
+            .filter((layer) => bakedPaths.has(layer.nodePath))
+            .map((layer) => layer.key),
+        ]
+        setSelectedEditorNodeIds([...new Set([...state.selectedEditorNodeIds, ...matchingKeys])])
       } else if (data.type === 'workbench:preview-change') {
         // Build the override map from the editor's preview-off set: every listed
         // node is forced preview-off; absent nodes fall back to the backend.
-        const ids = Array.isArray(data.previewDisabledNodeIds) ? (data.previewDisabledNodeIds as string[]) : []
         const overrides: Record<string, boolean> = {}
-        for (const id of ids) overrides[id] = false
+        for (const id of data.previewDisabledNodeIds) overrides[id] = false
         useRenderStore.getState().setPreviewOverrides(overrides)
+      } else if (data.type === 'workbench:editor-visibility-changed') {
+        setEditorVisible(data.visible)
+      } else if (data.type === 'workbench:restore-layout') {
+        setActiveDrawer(null)
+        setDrawerUserWidth(loadPreviewDrawerWidth())
+        setSceneExport({ status: 'idle' })
+        setScreenshot({ status: 'idle' })
+        setEditorVisible(false)
       } else if (data.type === 'workbench:preview-data') {
         syncTrace('preview:iframe-received', {
-          nodes: data.outputs && typeof data.outputs === 'object'
-            ? Object.keys(data.outputs as object).join(',')
-            : '(none)',
+          nodes: Object.keys(data.outputs).join(',') || '(none)',
         })
         // Live direct-push from the editor: freshly executed outputs, painted into
         // the render store with zero network. This is the slider-drag fast path —
         // it bypasses the WS exec:completed → getNodeOutput re-pull so the preview
         // repaints in the same frame the execute response landed. The trailing WS
         // refresh still owns GC + the durable post-drag settle.
-        if (data.outputs && typeof data.outputs === 'object') {
-          projectLiveOutputs(data.outputs as Record<string, Record<string, unknown>>)
-        }
+        projectLiveOutputs(data.outputs)
+      } else if (data.type === 'workbench:param-edit-active') {
+        notifyLocalParamEdit()
       }
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [setSelectedEditorNodeIds])
+  }, [capturePreviewFrame, postToHost, setSelectedEditorNodeIds, workbenchOrigin])
 
-  const resetView = () => {
-    pluginRef.current?.resetView?.()
-    resetViewport2d()
-  }
 
   const exportIsMesh3d = viewMode === '3DMesh'
   const exportSceneZip = async () => {
@@ -472,14 +557,14 @@ export function RendererSurface({
   }, [])
   const addBakedLayer = async () => {
     try {
-      const path = await bakedApi.addLayer('Layer')
+      const path = await bakedApi.addLayer(sceneT('layers.defaultName'))
       await structuralBakedRefresh()
       revealBakedLayerForRename(path)
     } catch (e) { console.warn('[baked] add layer failed', e) }
   }
   const addBakedSubLayer = async (nodePath: string) => {
     try {
-      const path = await bakedApi.addSubLayer(nodePath, 'Sub')
+      const path = await bakedApi.addSubLayer(nodePath, sceneT('layers.defaultSubName'))
       await structuralBakedRefresh()
       revealBakedLayerForRename(path)
     } catch (e) { console.warn('[baked] action failed', e) }
@@ -560,6 +645,13 @@ export function RendererSurface({
     })
     if (!range) bakedAnchorRef.current = key
     setActiveBakedLayer(key)
+    const layer = bakedLayersMap[key]
+    if (layer) {
+      postToHost({
+        type: 'workbench:preview-lineage-selection',
+        bakedLayerId: layer.nodePath,
+      })
+    }
     // Mirror the last-clicked baked row into the store's single selection so the
     // panel and SELECT-mode share one source of truth (bidirectional). Output
     // rows already do this via onSelectLayer; baked rows must too, otherwise a
@@ -662,14 +754,24 @@ export function RendererSurface({
       setSelectedBakedKeys((prev) => (prev.size === 1 && prev.has(bakedKey) ? prev : new Set([bakedKey])))
       setSelectedOutputKeys((prev) => (prev.size === 0 ? prev : new Set()))
       bakedAnchorRef.current = bakedKey
+      setActiveDrawer('editable')
+      postToHost({
+        type: 'workbench:preview-lineage-selection',
+        bakedLayerId: bakedLayersMap[bakedKey]!.nodePath,
+      })
     } else if (outputKey) {
       setSelectedOutputKeys((prev) => (prev.size === 1 && prev.has(outputKey) ? prev : new Set([outputKey])))
       setSelectedBakedKeys((prev) => (prev.size === 0 ? prev : new Set()))
       selectAnchorRef.current = outputKey
+      setActiveDrawer('output')
+      postToHost({
+        type: 'workbench:preview-lineage-selection',
+        path: layers[outputKey]!.nodePath,
+      })
     }
     // If the key matches neither bucket yet (layers still loading), leave the
     // sets alone; the publish effect's selectedKey fallback still emits it.
-  }, [selectedKey, bakedLayersMap, layers])
+  }, [selectedKey, bakedLayersMap, layers, postToHost])
 
   // Publish all selected baked + output layers to the left-pane inspector bus.
   useEffect(() => {
@@ -716,285 +818,374 @@ export function RendererSurface({
   ])
 
   const captureScreenshot = () => {
-    const handle = pluginRef.current
+    setActiveDrawer(null)
+    if (editorVisible) postToHost({ type: 'workbench:toggle-editor' })
     // Reuse the existing low-level render API (the plugin's §7.3 screenshot
     // protocol): force one synchronous compose, then read the live frame canvas.
     // This is the SAME render path the headless `useScreenshotCapture` WS loop
     // uses — we do not re-implement rendering.
-    handle?.renderFrame?.()
-    const canvas = handle?.getFrameCanvas?.()
-    if (!canvas) {
-      setScreenshot({ status: 'error', message: 'No rendered frame to capture yet — switch to a populated view and try again.' })
-      return
-    }
-    try {
+    const captured = capturePreviewFrame()
+    if ('dataUrl' in captured) {
       // Present the frame as a copyable PNG data URL. The studio embeds this
       // plugin in a sandboxed cross-origin iframe whose permissions policy
       // blocks BOTH the image-blob clipboard write and the `<a download>` click
       // (the previous implementation), so neither surfaces anything usable.
       // A base64 data URL is plain text the user can select + copy, and renders
       // as a right-click-able thumbnail — no clipboard / download dependency.
-      const dataUrl = canvas.toDataURL('image/png')
-      setScreenshot({ status: 'success', dataUrl, width: canvas.width, height: canvas.height })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setScreenshot({ status: 'error', message })
+      setScreenshot({
+        status: 'success',
+        dataUrl: captured.dataUrl,
+        width: captured.width,
+        height: captured.height,
+      })
+    } else {
+      setScreenshot({ status: 'error', message: captured.error })
     }
   }
   const dismissScreenshot = () => setScreenshot({ status: 'idle' })
   const selectAllText = (e: React.FocusEvent<HTMLTextAreaElement> | React.MouseEvent<HTMLTextAreaElement>) => {
     e.currentTarget.select()
   }
+  const toggleDrawer = (drawer: PreviewDrawer): void => {
+    dismissScreenshot()
+    if (editorVisible) postToHost({ type: 'workbench:toggle-editor' })
+    setActiveDrawer((current) => current === drawer ? null : drawer)
+  }
+  const toggleEffectsDrawer = (): void => toggleDrawer('effects')
+  const toggleEditor = (): void => {
+    postToHost({ type: 'workbench:toggle-editor' })
+  }
 
   return (
     <div className="renderer-surface">
-      <div className="renderer-toolbar">
-        <span className="renderer-toolbar__title">Preview</span>
-        <div className="renderer-mode-container">
-          <button
-            type="button"
-            className={`renderer-mode-trigger${showViewMenu ? ' is-open' : ''}`}
-            onClick={() => setShowViewMenu((v) => !v)}
-            aria-haspopup="listbox"
-            aria-expanded={showViewMenu}
-          >
-            <span className="renderer-mode-trigger__label">{VIEW_LABELS[viewMode]}</span>
-            <ChevronDown size={14} className="renderer-mode-trigger__chevron" />
-          </button>
-          {showViewMenu && (
-            <div className="renderer-mode-dropdown" role="listbox">
-              <div className="renderer-mode-header">View</div>
-              {VIEW_MODES.map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  role="option"
-                  aria-selected={viewMode === m}
-                  className={`renderer-mode-item${viewMode === m ? ' is-active' : ''}`}
-                  onClick={() => {
-                    setViewMode(m)
-                    setShowViewMenu(false)
-                  }}
-                >
-                  {VIEW_LABELS[m]}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="renderer-draw-segment" role="tablist" aria-label="Draw mode">
-          {DRAW_MODES.map((d) => (
-            <button
-              key={d}
-              type="button"
-              role="tab"
-              className={`renderer-draw-item${drawMode === d ? ' is-active' : ''}`}
-              aria-selected={drawMode === d}
-              onClick={() => setDrawMode(d)}
-            >
-              {DRAW_LABELS[d]}
-            </button>
-          ))}
-        </div>
-        <span className="renderer-status-pill" title="Renderer ready">
-          Ready
-        </span>
-        <div className="renderer-export-container">
-          <button
-            type="button"
-            className="renderer-export-btn"
-            aria-label={exportIsMesh3d ? 'Export 3D scene' : 'Export scene.zip'}
-            title={
-              exportIsMesh3d
-                ? 'Cook baked 3DMesh into .forgeax/games/<slug>/assets/3d/scenes/wb-scene-generator/<sceneId>/'
-                : 'Cook current baked scene and export scene.zip'
-            }
-            disabled={sceneExport.status === 'pending'}
-            onClick={runExport}
-          >
-            {sceneExport.status === 'pending'
-              ? 'Exporting...'
-              : exportIsMesh3d
-                ? 'Export 3D scene'
-                : 'Export scene.zip'}
-          </button>
-          {sceneExport.status === 'success' && sceneExport.kind === 'sceneZip' && (
-            <div className="renderer-export-popover" role="status" aria-live="polite">
-              <button
-                type="button"
-                className="renderer-export-popover__close"
-                aria-label="Close scene export result"
-                onClick={dismissSceneExport}
-              >
-                X
-              </button>
-              <div className="renderer-export-popover__title">Scene export ready</div>
-              <label className="renderer-export-popover__field">
-                <span>Select and copy this full URL to download scene.zip:</span>
-                <input
-                  aria-label="Scene zip download URL"
-                  readOnly
-                  value={sceneExport.result.downloadUrl}
-                  onFocus={selectExportUrl}
-                  onClick={selectExportUrl}
-                />
-              </label>
-            </div>
-          )}
-          {sceneExport.status === 'success' && sceneExport.kind === 'mesh3d' && (
-            <div className="renderer-export-popover" role="status" aria-live="polite">
-              <button
-                type="button"
-                className="renderer-export-popover__close"
-                aria-label="Close scene export result"
-                onClick={dismissSceneExport}
-              >
-                X
-              </button>
-              <div className="renderer-export-popover__title">3D scene export ready</div>
-              <label className="renderer-export-popover__field">
-                <span>Package path (project-relative):</span>
-                <input
-                  aria-label="3D scene export relative path"
-                  readOnly
-                  value={sceneExport.result.projectRelativeDir}
-                  onFocus={selectExportUrl}
-                  onClick={selectExportUrl}
-                />
-              </label>
-              <label className="renderer-export-popover__field">
-                <span>Absolute scene directory:</span>
-                <input
-                  aria-label="3D scene export absolute path"
-                  readOnly
-                  value={sceneExport.result.sceneDir}
-                  onFocus={selectExportUrl}
-                  onClick={selectExportUrl}
-                />
-              </label>
-            </div>
-          )}
-          {sceneExport.status === 'error' && (
-            <div
-              className="renderer-export-popover renderer-export-popover--error"
-              role="status"
-              aria-live="polite"
-            >
-              <button
-                type="button"
-                className="renderer-export-popover__close"
-                aria-label="Close scene export result"
-                onClick={dismissSceneExport}
-              >
-                X
-              </button>
-              <div className="renderer-export-popover__title">Export failed</div>
-              <div className="renderer-export-popover__message" title={sceneExport.message}>
-                {sceneExport.message}
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="renderer-toolbar__spacer" />
-        <button
-          type="button"
-          className={`renderer-icon-btn${editMode && editAvailable ? ' is-active' : ''}`}
-          title={editAvailable ? (editMode ? 'Exit edit mode' : 'Edit mode — paint tiles into a baked layer') : 'Edit mode requires Billboard view + Asset draw mode'}
-          aria-pressed={editMode && editAvailable}
-          disabled={!editAvailable}
-          onClick={() => setEditMode(!editMode)}
-        >
-          <Pencil size={18} />
-        </button>
-        <div className="renderer-shot-container">
-          <button
-            type="button"
-            className="renderer-icon-btn"
-            title="Save screenshot"
-            onClick={captureScreenshot}
-          >
-            <Camera size={18} />
-          </button>
-          {screenshot.status === 'success' && (
-            <div className="renderer-export-popover renderer-shot-popover" role="status" aria-live="polite">
-              <button
-                type="button"
-                className="renderer-export-popover__close"
-                aria-label="Close screenshot result"
-                onClick={dismissScreenshot}
-              >
-                X
-              </button>
-              <div className="renderer-export-popover__title">Screenshot ready</div>
-              <img
-                className="renderer-shot-popover__preview"
-                src={screenshot.dataUrl}
-                alt={`Preview screenshot ${screenshot.width}×${screenshot.height}`}
-              />
-              <label className="renderer-export-popover__field">
-                <span>Select and copy this PNG data URL (or right-click the image → Copy/Save):</span>
-                <textarea
-                  className="renderer-shot-popover__data"
-                  aria-label="Screenshot PNG data URL"
-                  readOnly
-                  rows={3}
-                  value={screenshot.dataUrl}
-                  onFocus={selectAllText}
-                  onClick={selectAllText}
-                />
-              </label>
-            </div>
-          )}
-          {screenshot.status === 'error' && (
-            <div
-              className="renderer-export-popover renderer-export-popover--error renderer-shot-popover"
-              role="status"
-              aria-live="polite"
-            >
-              <button
-                type="button"
-                className="renderer-export-popover__close"
-                aria-label="Close screenshot result"
-                onClick={dismissScreenshot}
-              >
-                X
-              </button>
-              <div className="renderer-export-popover__title">Screenshot failed</div>
-              <div className="renderer-export-popover__message" title={screenshot.message}>
-                {screenshot.message}
-              </div>
-            </div>
-          )}
-        </div>
-        <button
-          type="button"
-          className={`renderer-icon-btn${layersPanelOpen ? ' is-active' : ''}`}
-          title={layersPanelOpen ? 'Hide scene layers panel' : 'Show scene layers panel'}
-          aria-pressed={layersPanelOpen}
-          onClick={() => setLayersPanelOpen((v) => !v)}
-        >
-          <Layers size={18} />
-        </button>
-        <button
-          type="button"
-          className="renderer-icon-btn"
-          title="Reset view"
-          onClick={resetView}
-        >
-          <Home size={18} />
-        </button>
-        <button
-          type="button"
-          className={`renderer-icon-btn${isFocused ? ' is-active' : ''}`}
-          title={isFocused ? 'Exit fullscreen' : 'Fullscreen'}
-          onClick={requestFocus}
-        >
-          {isFocused ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-        </button>
-      </div>
-
       <div className="renderer-body">
-        <div className="renderer-canvas-wrap">
+        <div ref={canvasWrapRef} className="renderer-canvas-wrap">
+          <PreviewHeader title={sceneT('preview.title')} viewMode={viewMode} />
+          <div ref={drawerDockRef} className="renderer-drawer-dock">
+            <nav className="renderer-drawer-pill" aria-label={sceneT('drawer.tools')}>
+              <button
+                type="button"
+                className={`renderer-drawer-pill__button${activeDrawer === 'effects' ? ' is-active' : ''}`}
+                title={sceneT('drawer.effects')}
+                aria-pressed={activeDrawer === 'effects'}
+                onClick={toggleEffectsDrawer}
+              >
+                <Pencil size={17} />
+              </button>
+              <button
+                type="button"
+                className={`renderer-drawer-pill__button${editorVisible ? ' is-active' : ''}`}
+                title={sceneT('editor.title')}
+                aria-pressed={editorVisible}
+                onClick={toggleEditor}
+              >
+                <NodeEditor size={17} />
+              </button>
+              <button
+                type="button"
+                className={`renderer-drawer-pill__button${activeDrawer === 'output' ? ' is-active' : ''}`}
+                title={sceneT('layers.output')}
+                aria-pressed={activeDrawer === 'output'}
+                onClick={() => toggleDrawer('output')}
+              >
+                <Box size={17} />
+              </button>
+              <button
+                type="button"
+                className={`renderer-drawer-pill__button${activeDrawer === 'editable' ? ' is-active' : ''}`}
+                title={sceneT('layers.editable')}
+                aria-pressed={activeDrawer === 'editable'}
+                onClick={() => toggleDrawer('editable')}
+              >
+                <Layers size={17} />
+              </button>
+              <span className="renderer-drawer-pill__divider" aria-hidden />
+              <button
+                type="button"
+                className="renderer-drawer-pill__button"
+                title={sceneT('preview.saveScreenshot')}
+                onClick={captureScreenshot}
+              >
+                <Camera size={17} />
+              </button>
+            </nav>
+
+            <div className="renderer-shot-container renderer-shot-container--dock">
+              {screenshot.status === 'success' && (
+                <div className="renderer-export-popover renderer-shot-popover" role="status" aria-live="polite">
+                  <button
+                    type="button"
+                    className="renderer-export-popover__close"
+                    aria-label={sceneT('preview.closeScreenshot')}
+                    onClick={dismissScreenshot}
+                  >
+                    X
+                  </button>
+                  <div className="renderer-export-popover__title">{sceneT('preview.screenshotReady')}</div>
+                  <img
+                    className="renderer-shot-popover__preview"
+                    src={screenshot.dataUrl}
+                    alt={sceneT('preview.screenshotAlt', { width: screenshot.width, height: screenshot.height })}
+                  />
+                  <label className="renderer-export-popover__field">
+                    <span>{sceneT('preview.screenshotCopy')}</span>
+                    <textarea
+                      className="renderer-shot-popover__data"
+                      aria-label={sceneT('preview.screenshotDataAria')}
+                      readOnly
+                      rows={3}
+                      value={screenshot.dataUrl}
+                      onFocus={selectAllText}
+                      onClick={selectAllText}
+                    />
+                  </label>
+                </div>
+              )}
+              {screenshot.status === 'error' && (
+                <div
+                  className="renderer-export-popover renderer-export-popover--error renderer-shot-popover"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <button
+                    type="button"
+                    className="renderer-export-popover__close"
+                    aria-label={sceneT('preview.closeScreenshot')}
+                    onClick={dismissScreenshot}
+                  >
+                    X
+                  </button>
+                  <div className="renderer-export-popover__title">{sceneT('preview.screenshotFailed')}</div>
+                  <div className="renderer-export-popover__message" title={screenshot.message}>
+                    {screenshot.message}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <aside
+              className={`renderer-drawer-panel${activeDrawer ? ' is-open' : ''}${drawerMaxHeight < 300 ? ' is-compact' : ''}`}
+              aria-hidden={!activeDrawer}
+              style={{
+                '--renderer-drawer-max-height': `${drawerMaxHeight}px`,
+                '--renderer-drawer-user-width': `${drawerWidth}px`,
+              } as React.CSSProperties}
+            >
+              {activeDrawer && (
+                <div
+                  className="renderer-drawer-panel__resize"
+                  role="separator"
+                  aria-label={sceneT('layers.resize')}
+                  aria-orientation="vertical"
+                  onMouseDown={beginDrawerWidthResize}
+                />
+              )}
+              <div className="renderer-drawer-panel__inner">
+                {activeDrawer === 'effects' && (
+                  <div className="renderer-effects-panel">
+                    <div className="renderer-drawer-panel__title">{sceneT('preview.view')}</div>
+                    <section className="renderer-effects-section">
+                      <h3>{sceneT('preview.view')}</h3>
+                      <div className="renderer-effects-grid">
+                        {VIEW_MODES.map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            className={viewMode === mode ? 'is-active' : ''}
+                            onClick={() => setViewMode(mode)}
+                          >
+                            {viewLabel(mode)}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        className={`renderer-effects-guide-toggle${viewGuideVisible ? ' is-active' : ''}`}
+                        aria-pressed={viewGuideVisible}
+                        onClick={() => setViewGuideVisible(viewMode, !viewGuideVisible)}
+                      >
+                        {sceneT('preview.viewGuides')}
+                      </button>
+                    </section>
+                    <section className="renderer-effects-section">
+                      <h3>{sceneT('preview.drawMode')}</h3>
+                      <div className="renderer-effects-grid">
+                        {DRAW_MODES.map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            className={drawMode === mode ? 'is-active' : ''}
+                            onClick={() => setDrawMode(mode)}
+                          >
+                            {drawLabel(mode)}
+                          </button>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+                )}
+
+                {activeDrawer === 'editable' && (
+                  <div className="renderer-layers-drawer renderer-layers__section renderer-layers__section--editable">
+                    <div className="renderer-drawer-panel__title">{sceneT('layers.editable')}</div>
+                    <div className="renderer-layers__section-head">
+                      <span>{sceneT('layers.editable')}</span>
+                      <span className="renderer-layers__head-actions">
+                        <button
+                          type="button"
+                          className={`renderer-layers__add${editMode && editAvailable ? ' is-active' : ''}`}
+                          title={editAvailable ? (editMode ? sceneT('preview.editExit') : sceneT('preview.editEnter')) : sceneT('preview.editUnavailable')}
+                          aria-pressed={editMode && editAvailable}
+                          disabled={!editAvailable}
+                          onClick={() => setEditMode(!editMode)}
+                        >
+                          <Pencil size={12} /> {sceneT('preview.editMode')}
+                        </button>
+                        {selectedBakedKeys.size > 0 && (
+                          <button type="button" className="renderer-layers__add" title={sceneT('layers.deleteSelectedHint')} onClick={deleteSelectedBaked}>
+                            {sceneT('layers.deleteSelected', { count: selectedBakedKeys.size })}
+                          </button>
+                        )}
+                        <button type="button" className="renderer-layers__add" title={sceneT('layers.addHint')} onClick={addBakedLayer}>
+                          <Plus size={12} /> {sceneT('layers.add')}
+                        </button>
+                      </span>
+                    </div>
+                    {bakedKeys.length === 0 ? (
+                      <div className="renderer-layers__hint">{sceneT('layers.emptyEditable')}</div>
+                    ) : (
+                      <ul
+                        className="renderer-layers__list"
+                        role="listbox"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => { dragKeysRef.current = []; setDropHover(null) }}
+                      >
+                        {bakedTree.map((node) => (
+                          <BakedLayerTreeRows
+                            key={node.pathKey}
+                            node={node}
+                            depth={0}
+                            selectedKeys={selectedBakedKeys}
+                            activeKey={activeBakedLayerKey}
+                            dropHover={dropHover}
+                            collapsed={collapsedBaked}
+                            onToggleCollapsed={toggleCollapsedBaked}
+                            onSelect={onSelectBaked}
+                            onAddSub={addBakedSubLayer}
+                            onRemove={removeBakedLayer}
+                            renamingKey={renamingBakedKey}
+                            onStartRename={setRenamingBakedKey}
+                            onCancelRename={() => setRenamingBakedKey(null)}
+                            onRename={renameBakedLayer}
+                            onDragStartKey={onBakedDragStart}
+                            onDragOverKey={onBakedDragOver}
+                            onDropKey={onBakedDrop}
+                          />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                {activeDrawer === 'output' && (
+                  <div className="renderer-layers-drawer renderer-layers__section renderer-layers__section--output">
+                    <div className="renderer-drawer-panel__title">{sceneT('layers.output')}</div>
+                    <div className="renderer-layers__section-head">
+                      <span>{sceneT('layers.output')}</span>
+                      <span className="renderer-layers__head-actions">
+                        <button
+                          type="button"
+                          className="renderer-layers__add"
+                          title={sceneT('layers.bakeSelectedHint')}
+                          disabled={selectedOutputKeys.size === 0}
+                          onClick={bakeSelectedLayers}
+                        >
+                          {selectedOutputKeys.size > 0
+                            ? sceneT('layers.bakeSelectedCount', { count: selectedOutputKeys.size })
+                            : sceneT('layers.bakeSelected')}
+                        </button>
+                        <button
+                          type="button"
+                          className="renderer-layers__add"
+                          aria-label={exportIsMesh3d ? sceneT('preview.export3d') : sceneT('preview.exportScene')}
+                          title={exportIsMesh3d ? sceneT('preview.export3dTitle') : sceneT('preview.exportSceneTitle')}
+                          disabled={sceneExport.status === 'pending'}
+                          onClick={runExport}
+                        >
+                          {sceneExport.status === 'pending'
+                            ? sceneT('preview.exporting')
+                            : exportIsMesh3d
+                              ? sceneT('preview.export3d')
+                              : sceneT('preview.exportScene')}
+                        </button>
+                      </span>
+                    </div>
+                    {sceneExport.status === 'success' && sceneExport.kind === 'sceneZip' && (
+                      <div className="renderer-drawer-export-result" role="status">
+                        <button type="button" aria-label={sceneT('preview.closeExport')} onClick={dismissSceneExport}>×</button>
+                        <strong>{sceneT('preview.exportSceneReady')}</strong>
+                        <input
+                          aria-label={sceneT('preview.sceneZipAria')}
+                          readOnly
+                          value={sceneExport.result.downloadUrl}
+                          onFocus={selectExportUrl}
+                          onClick={selectExportUrl}
+                        />
+                      </div>
+                    )}
+                    {sceneExport.status === 'success' && sceneExport.kind === 'mesh3d' && (
+                      <div className="renderer-drawer-export-result" role="status">
+                        <button type="button" aria-label={sceneT('preview.closeExport')} onClick={dismissSceneExport}>×</button>
+                        <strong>{sceneT('preview.export3dReady')}</strong>
+                        <input
+                          aria-label={sceneT('preview.export3dRelAria')}
+                          readOnly
+                          value={sceneExport.result.projectRelativeDir}
+                          onFocus={selectExportUrl}
+                          onClick={selectExportUrl}
+                        />
+                        <input
+                          aria-label={sceneT('preview.export3dAbsAria')}
+                          readOnly
+                          value={sceneExport.result.sceneDir}
+                          onFocus={selectExportUrl}
+                          onClick={selectExportUrl}
+                        />
+                      </div>
+                    )}
+                    {sceneExport.status === 'error' && (
+                      <div className="renderer-drawer-export-result is-error" role="status">
+                        <button type="button" aria-label={sceneT('preview.closeExport')} onClick={dismissSceneExport}>×</button>
+                        <strong>{sceneT('preview.exportFailed')}</strong>
+                        <span>{sceneExport.message}</span>
+                      </div>
+                    )}
+                    {layerKeys.length === 0 ? (
+                      <div className="renderer-layers__empty">
+                        <Box size={20} />
+                        <span>{sceneT('layers.emptyOutput')}</span>
+                        <small>{sceneT('layers.emptyOutputHint')}</small>
+                      </div>
+                    ) : (
+                      <ul className="renderer-layers__list" role="listbox">
+                        {layerTree.map((node) => (
+                          <LayerTreeRows
+                            key={node.pathKey}
+                            node={node}
+                            depth={0}
+                            selectedKeys={selectedOutputKeys}
+                            onSelectLayer={onSelectLayer}
+                            collapsed={collapsedOutput}
+                            onToggleCollapsed={toggleCollapsedOutput}
+                          />
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+            </aside>
+          </div>
           <RenderCanvas
             handleRef={pluginRef}
             onPaintTargetMismatch={requestPaintTarget}
@@ -1002,126 +1193,15 @@ export function RendererSurface({
             paintPersistsRef={paintPersistsRef}
           />
         </div>
-        {layersPanelOpen && (
-          <>
-            <div
-              className="renderer-layers__width-splitter"
-              role="separator"
-              aria-label="Resize layers panel"
-              aria-orientation="vertical"
-              aria-valuenow={layersPanelWidth}
-              aria-valuemin={MIN_LAYERS_WIDTH}
-              aria-valuemax={MAX_LAYERS_WIDTH}
-              onMouseDown={beginLayersPanelWidthResize}
-            />
-            <aside className="renderer-layers" aria-label="Scene layers" style={{ width: layersPanelWidth }}>
-            {/* Editable (baked) layers — hand-edited, persisted outside the graph. */}
-            <div className="renderer-layers__section renderer-layers__section--editable" style={{ flexBasis: editablePanelHeight }}>
-              <div className="renderer-layers__section-head">
-                <span>Editable</span>
-                <span className="renderer-layers__head-actions">
-                  {selectedBakedKeys.size > 0 && (
-                    <button type="button" className="renderer-layers__add" title="Delete the selected editable layers" onClick={deleteSelectedBaked}>
-                      Delete ({selectedBakedKeys.size})
-                    </button>
-                  )}
-                  <button type="button" className="renderer-layers__add" title="Add editable layer" onClick={addBakedLayer}>
-                    <Plus size={12} /> Layer
-                  </button>
-                </span>
-              </div>
-              {bakedKeys.length === 0 ? (
-                <div className="renderer-layers__hint">No editable layers. Add one, or Bake an output layer below.</div>
-              ) : (
-                <ul
-                  className="renderer-layers__list"
-                  role="listbox"
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => { dragKeysRef.current = []; setDropHover(null) }}
-                >
-                  {bakedTree.map((node) => (
-                    <BakedLayerTreeRows
-                      key={node.pathKey}
-                      node={node}
-                      depth={0}
-                      selectedKeys={selectedBakedKeys}
-                      activeKey={activeBakedLayerKey}
-                      dropHover={dropHover}
-                      collapsed={collapsedBaked}
-                      onToggleCollapsed={toggleCollapsedBaked}
-                      onSelect={onSelectBaked}
-                      onAddSub={addBakedSubLayer}
-                      onRemove={removeBakedLayer}
-                      renamingKey={renamingBakedKey}
-                      onStartRename={setRenamingBakedKey}
-                      onCancelRename={() => setRenamingBakedKey(null)}
-                      onRename={renameBakedLayer}
-                      onDragStartKey={onBakedDragStart}
-                      onDragOverKey={onBakedDragOver}
-                      onDropKey={onBakedDrop}
-                    />
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div
-              className="renderer-layers__splitter"
-              role="separator"
-              aria-label="Resize editable and output layers"
-              aria-orientation="horizontal"
-              onMouseDown={beginLayerSectionResize}
-            />
-
-            {/* Output layers — transient scene_output projection (read-only).
-                Select (click / ⌘/ctrl-click / shift-range) then Bake selected. */}
-            <div className="renderer-layers__section renderer-layers__section--output">
-              <div className="renderer-layers__section-head">
-                <span>Output</span>
-                <button
-                  type="button"
-                  className="renderer-layers__add"
-                  title="Bake the selected output layers into editable copies"
-                  disabled={selectedOutputKeys.size === 0}
-                  onClick={bakeSelectedLayers}
-                >
-                  Bake selected{selectedOutputKeys.size > 0 ? ` (${selectedOutputKeys.size})` : ''}
-                </button>
-              </div>
-              {layerKeys.length === 0 ? (
-                <div className="renderer-layers__empty">
-                  <Box size={20} />
-                  <span>No scene output layers</span>
-                  <small>Connect a Scene Output battery to see its layers here.</small>
-                </div>
-              ) : (
-                <ul className="renderer-layers__list" role="listbox">
-                  {layerTree.map((node) => (
-                    <LayerTreeRows
-                      key={node.pathKey}
-                      node={node}
-                      depth={0}
-                      selectedKeys={selectedOutputKeys}
-                      onSelectLayer={onSelectLayer}
-                      collapsed={collapsedOutput}
-                      onToggleCollapsed={toggleCollapsedOutput}
-                    />
-                  ))}
-                </ul>
-              )}
-            </div>
-          </aside>
-          </>
-        )}
       </div>
       {pendingPaintTarget && (
         <div className="renderer-modal-backdrop" role="presentation">
-          <div className="renderer-modal" role="dialog" aria-modal="true" aria-label="Create layer for asset">
-            <div className="renderer-modal__title">Create a layer for this asset?</div>
+          <div className="renderer-modal" role="dialog" aria-modal="true" aria-label={sceneT('paint.createDialog')}>
+            <div className="renderer-modal__title">{sceneT('paint.createTitle')}</div>
             <p className="renderer-modal__copy">
-              Current layer <strong>{pendingPaintTarget.activeLayer.nodeName}</strong> is bound to{' '}
-              <strong>{pendingPaintTarget.activeLayer.assetName || 'no asset'}</strong>. You are painting{' '}
-              <strong>{pendingPaintTarget.asset.name}</strong>, so this stroke needs a new editable child layer.
+              {sceneT('paint.currentLayer')} <strong>{pendingPaintTarget.activeLayer.nodeName}</strong> {sceneT('paint.boundTo')}{' '}
+              <strong>{pendingPaintTarget.activeLayer.assetName || sceneT('paint.noAsset')}</strong>. {sceneT('paint.painting')}{' '}
+              <strong>{pendingPaintTarget.asset.name}</strong>{sceneT('paint.requiresChild')}
             </p>
             {pendingPaintTarget.asset.alias && (
               <div className="renderer-modal__asset">
@@ -1130,7 +1210,7 @@ export function RendererSurface({
               </div>
             )}
             <label className="renderer-modal__field">
-              New layer name
+              {sceneT('paint.newLayerName')}
               <input
                 value={paintTargetName}
                 onChange={(e) => setPaintTargetName(e.target.value)}
@@ -1142,13 +1222,37 @@ export function RendererSurface({
               />
             </label>
             <div className="renderer-modal__actions">
-              <button type="button" className="renderer-modal__btn" onClick={cancelPaintTarget}>Cancel</button>
+              <button type="button" className="renderer-modal__btn" onClick={cancelPaintTarget}>{sceneT('common.cancel')}</button>
               <button type="button" className="renderer-modal__btn renderer-modal__btn--primary" onClick={() => void confirmPaintTarget()}>
-                Create and paint
+                {sceneT('paint.createAndPaint')}
               </button>
             </div>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+function PreviewHeader({ title, viewMode }: { title: string; viewMode: ViewMode }): JSX.Element {
+  const scale = useRenderStore((state) => state.viewport2d.scale)
+  const zoomAvailable = viewMode !== 'free3d' && viewMode !== '3DMesh'
+  const zoom = (direction: 'in' | 'out'): void => {
+    const store = useRenderStore.getState()
+    const next = zoomViewportCentered(store.viewport2d, direction)
+    if (next) store.setViewport2d(next)
+  }
+
+  return (
+    <div className="renderer-preview-label" aria-label={title}>
+      <span className="renderer-preview-label__status" aria-hidden />
+      <span className="renderer-preview-label__title">{title}</span>
+      {zoomAvailable && (
+        <span className="renderer-preview-label__zoom">
+          <button type="button" aria-label={sceneT('preview.zoomOut')} onClick={() => zoom('out')}>−</button>
+          <output>{Math.round(scale * 100)}%</output>
+          <button type="button" aria-label={sceneT('preview.zoomIn')} onClick={() => zoom('in')}>+</button>
+        </span>
       )}
     </div>
   )
@@ -1212,7 +1316,7 @@ function LayerTreeRows({
           <button
             type="button"
             className="renderer-layer-caret"
-            title={isCollapsed ? 'Expand' : 'Collapse'}
+            title={isCollapsed ? sceneT('layers.expand') : sceneT('layers.collapse')}
             aria-expanded={!isCollapsed}
             onClick={() => onToggleCollapsed(node.pathKey)}
           >
@@ -1268,7 +1372,7 @@ function LayerRow({
   const label = layer.nodeName || layer.assetName || `#${layer.value}`
   // Green editor-selection highlight when this layer's node is selected in the
   // editor — mirrors the legacy PathTreeRow `is-editor-selected` treatment.
-  const editorSelected = selectedEditorNodeIds.includes(layer.nodeId)
+  const editorSelected = selectedEditorNodeIds.includes(layer.nodeId) || selectedEditorNodeIds.includes(layer.key)
   const subTokens = layer.subTokens
   const isMulti = !!subTokens && subTokens.length > 1
   return (
@@ -1284,7 +1388,7 @@ function LayerRow({
           <button
             type="button"
             className="renderer-layer-caret"
-            title={collapsed ? 'Expand' : 'Collapse'}
+            title={collapsed ? sceneT('layers.expand') : sceneT('layers.collapse')}
             aria-expanded={!collapsed}
             onClick={(e) => {
               e.stopPropagation()
@@ -1297,7 +1401,7 @@ function LayerRow({
           <button
             type="button"
             className="renderer-layer-caret"
-            title={subOpen ? 'Collapse sub-layers' : 'Expand sub-layers'}
+            title={subOpen ? sceneT('layers.collapseSub') : sceneT('layers.expandSub')}
             aria-expanded={subOpen}
             onClick={(e) => {
               e.stopPropagation()
@@ -1317,7 +1421,7 @@ function LayerRow({
         <button
           type="button"
           className="renderer-layer-eye"
-          title={layer.visible ? 'Hide layer' : 'Show layer'}
+          title={layer.visible ? sceneT('layers.hide') : sceneT('layers.show')}
           aria-pressed={layer.visible}
           onClick={(e) => {
             e.stopPropagation()
@@ -1352,7 +1456,7 @@ function LayerRow({
               <button
                 type="button"
                 className="renderer-layer-eye"
-                title={subVisible ? 'Hide sub-layer' : 'Show sub-layer'}
+                title={subVisible ? sceneT('layers.hideSub') : sceneT('layers.showSub')}
                 aria-pressed={subVisible}
                 onClick={(e) => {
                   e.stopPropagation()
@@ -1442,7 +1546,7 @@ function BakedLayerTreeRows({
           <button
             type="button"
             className="renderer-layer-caret"
-            title={isCollapsed ? 'Expand' : 'Collapse'}
+            title={isCollapsed ? sceneT('layers.expand') : sceneT('layers.collapse')}
             aria-expanded={!isCollapsed}
             onClick={() => onToggleCollapsed(node.pathKey)}
           >
@@ -1586,7 +1690,7 @@ function BakedLayerRow({
         <input
           ref={inputRef}
           className="renderer-layer-name-input"
-          aria-label="Rename editable layer"
+          aria-label={sceneT('layers.rename')}
           value={draftName}
           onChange={(e) => setDraftName(e.target.value)}
           onClick={(e) => e.stopPropagation()}
@@ -1610,7 +1714,7 @@ function BakedLayerRow({
       <button
         type="button"
         className="renderer-layer-eye"
-        title="Add sub-layer"
+        title={sceneT('layers.addSub')}
         onClick={(e) => { e.stopPropagation(); onAddSub(layer.nodePath) }}
       >
         <Plus size={12} />
@@ -1618,7 +1722,7 @@ function BakedLayerRow({
       <button
         type="button"
         className="renderer-layer-eye"
-        title="Delete layer"
+        title={sceneT('layers.delete')}
         onClick={(e) => { e.stopPropagation(); onRemove(layer.nodePath) }}
       >
         <Trash size={12} />
@@ -1626,7 +1730,7 @@ function BakedLayerRow({
       <button
         type="button"
         className="renderer-layer-eye"
-        title={layer.visible ? 'Hide layer' : 'Show layer'}
+        title={layer.visible ? sceneT('layers.hide') : sceneT('layers.show')}
         aria-pressed={layer.visible}
         onClick={(e) => { e.stopPropagation(); setBakedLayerVisible(layerKey, !layer.visible) }}
       >

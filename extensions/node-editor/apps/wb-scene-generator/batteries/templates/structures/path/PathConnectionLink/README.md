@@ -1,6 +1,6 @@
 # PathConnectionLink（道路连接·连连看）
 
-> templateId（传给 `scene:pipeline.instantiateTemplate`）：`group_1782300000000_pclnk`，也可用 basename `PathConnectionLink`。
+> templateId（传给 `POST /api/v1/group-templates/:projectId/instantiate`）：`group_1782300000000_pclnk`，也可用 basename `PathConnectionLink`。
 > 实例化后返回全新运行时 `groupId`，后续连线一律用返回值。
 
 ## 这是什么
@@ -52,7 +52,7 @@
 ### 前置：造一个独立 Demo Scene（可跨模板复用的固定写法）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"AddBaseGrid", "groupId":"demo_abg", "position":{"x":-800,"y":0},
            "opts":{"actor":"ai:sino","label":"实例化 AddBaseGrid（独立 demo scene）"} } }
 ```
@@ -85,7 +85,7 @@
 ### applyBatch 片段（可直接照抄）
 
 ```json
-{ "toolId":"scene:pipeline.instantiateTemplate","caller":{"kind":"ai"},
+{ "method":"POST","path":"/api/v1/group-templates/<projectId>/instantiate","caller":{"kind":"workbench"},
   "args":{ "templateId":"PathConnectionLink", "groupId":"demo_path", "position":{"x":-400,"y":1200},
            "opts":{"actor":"ai:sino","label":"实例化 PathConnectionLink"} } }
 ```
