@@ -1,4 +1,11 @@
+import { randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import {
+  buildEngineGlbPath,
+  EDITOR_ASSET_IMPORT_CAPABILITY,
+  EDITOR_ASSET_IMPORT_CAPABILITY_VERSION,
+} from './editor-import.js'
 
 type Caller = {
   kind: 'user' | 'ai' | 'skill' | 'workbench' | 'cli'
@@ -12,6 +19,9 @@ type ToolCtx = {
   toolId: string
   env: Record<string, string | undefined>
   cwd: string
+  capabilities?: {
+    invoke: (capabilityId: string, version: number, input: unknown, options?: { requestId?: string }) => Promise<unknown>
+  }
 }
 
 type ToolHandler = (args: unknown, ctx: ToolCtx) => Promise<unknown>
@@ -25,12 +35,56 @@ function objectArgs(args: unknown): Record<string, unknown> {
     : {}
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
 function stringArg(args: Record<string, unknown>, key: string): string {
   const value = args[key]
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(`missing string arg: ${key}`)
   }
   return value
+}
+
+type EngineImportInput = {
+  base64: string
+  directory?: unknown
+  name?: unknown
+  requestId?: unknown
+}
+
+async function importGlbBytes(ctx: ToolCtx, input: EngineImportInput): Promise<{
+  directory: string
+  sourceName: string
+  destPath: string
+  requestId: string
+  receipt: unknown
+}> {
+  if (!ctx.capabilities) {
+    throw new Error('Editor import capability is unavailable; open this generator inside Studio and retry.')
+  }
+  if (!input.base64.trim()) throw new Error('GLB source bytes are empty')
+  const target = buildEngineGlbPath(input.directory, input.name)
+  const requestId = typeof input.requestId === 'string' && input.requestId.trim() ? input.requestId.trim() : randomUUID()
+  const receipt = await ctx.capabilities.invoke(
+    EDITOR_ASSET_IMPORT_CAPABILITY,
+    EDITOR_ASSET_IMPORT_CAPABILITY_VERSION,
+    {
+      base64: input.base64,
+      destPath: target.destPath,
+      sourceName: target.sourceName,
+      requestId,
+    },
+    { requestId },
+  )
+  if (isRecord(receipt) && receipt.ok === false) {
+    const error = isRecord(receipt.error) ? receipt.error : {}
+    const failure = new Error(typeof error.hint === 'string' ? error.hint : 'Editor asset import failed') as Error & { code?: string }
+    failure.code = typeof error.code === 'string' ? error.code : 'editor-asset-import-failed'
+    throw failure
+  }
+  return { ...target, requestId, receipt }
 }
 
 // Resolve the target project for a pipeline tool call. If the agent passes an
@@ -552,6 +606,66 @@ export const tools: Record<string, ToolHandler> = {
     const body = objectArgs(args)
     const projectId = await resolveProjectId(ctx, body)
     return request(ctx, 'POST', '/api/v1/agent/glb/export', { ...body, projectId })
+  },
+  // AI-facing one-shot workflow: bake the current lowpoly graph, then import
+  // the resulting GLB through the same Editor capability as the human UI.
+  'lowpoly:export-to-engine': async (args, ctx) => {
+    const body = objectArgs(args)
+    const projectId = await resolveProjectId(ctx, body)
+    const exported = await request(ctx, 'POST', '/api/v1/agent/glb/export', { ...body, projectId })
+    if (!isRecord(exported) || typeof exported.path !== 'string') {
+      throw new Error('GLB export completed without a readable artifact path')
+    }
+
+    const exportSummary = {
+      requestId: typeof exported.requestId === 'string' ? exported.requestId : undefined,
+      relPath: typeof exported.relPath === 'string' ? exported.relPath : undefined,
+      bytes: typeof exported.bytes === 'number' ? exported.bytes : undefined,
+    }
+    const exportedName = typeof body.name === 'string' && body.name.trim()
+      ? body.name
+      : (typeof exported.relPath === 'string' ? exported.relPath.split('/').at(-1) : 'lowpoly-model')
+    const base64 = (await readFile(exported.path)).toString('base64')
+
+    try {
+      const imported = await importGlbBytes(ctx, {
+        base64,
+        directory: body.directory,
+        name: exportedName,
+        requestId: randomUUID(),
+      })
+      return {
+        status: 'succeeded',
+        format: 'glb',
+        projectId,
+        export: exportSummary,
+        import: {
+          requestId: imported.requestId,
+          directory: imported.directory,
+          sourceName: imported.sourceName,
+          destPath: imported.destPath,
+          receipt: imported.receipt,
+        },
+        recoveryActions: [],
+      }
+    } catch (error) {
+      const typed = error as Error & { code?: string }
+      return {
+        status: 'partial',
+        format: 'glb',
+        projectId,
+        export: exportSummary,
+        import: {
+          status: 'failed',
+          error: {
+            code: typed.code ?? 'editor-asset-import-failed',
+            hint: typed.message,
+            retryable: true,
+          },
+        },
+        recoveryActions: ['lowpoly:export-to-engine'],
+      }
+    }
   },
 }
 

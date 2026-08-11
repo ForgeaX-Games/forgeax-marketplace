@@ -32,7 +32,7 @@
           "zh": "平衡 / 数值",
           "en": "Balance & Sim"
         },
-        "icon": "📐",
+        "icon": "ChartBarBig",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -59,6 +59,22 @@
           "**/balance/**",
           "**/sim/**"
         ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "balance.launcher",
+        "title": {
+          "zh": "平衡 / 数值",
+          "en": "Balance & Sim"
+        },
+        "icon": "ChartBarBig",
+        "order": 180,
+        "category": "general",
+        "pageType": {
+          "extension": "self",
+          "id": "balance"
+        }
       }
     ]
   }

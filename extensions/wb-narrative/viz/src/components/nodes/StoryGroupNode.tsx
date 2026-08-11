@@ -1,8 +1,9 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import type { StepStatus } from "../../types";
+import { NodeProgressBar, NodeProgressRing, statusColor, statusPct } from "./NodeProgress";
 import { useT } from "../../i18n";
-import { resolveGraphNodeLabel } from "../../i18n/graphLabels";
+import { resolveGraphNodeLabel, resolveSeatLabel } from "../../i18n/graphLabels";
 
 interface PhaseInfo {
   id: string;
@@ -13,6 +14,10 @@ interface PhaseInfo {
 
 interface StoryGroupData {
   label: string;
+  /** 副标题：专家容器用它报所跑的席位管线名。 */
+  sublabel?: string;
+  /** 席位容器：标题按席位 id 查 i18n，label 只作缺键兜底。 */
+  seatId?: string;
   status: StepStatus;
   childCount: number;
   expanded: boolean;
@@ -22,18 +27,13 @@ interface StoryGroupData {
 
 function StoryGroupNodeRaw({ data, id }: NodeProps<StoryGroupData>) {
   const t = useT();
-  const { label, status, childCount, expanded, progress, phases } = data;
-  const displayLabel = resolveGraphNodeLabel(id, label);
+  const { label, sublabel, seatId, status, childCount, expanded, progress, phases } = data;
+  const displayLabel = seatId
+    ? resolveSeatLabel(seatId, label)
+    : resolveGraphNodeLabel(id, label);
 
-  const dotColor =
-    status === "completed" ? "rgba(77,255,160,0.85)" :
-    status === "running" ? "rgba(255,107,53,0.9)" :
-    status === "failed" ? "rgba(255,80,80,0.8)" : "rgba(77,255,160,0.15)";
-
-  const pct = status === "completed" ? 100 :
-              status === "running" ? (progress ?? 50) :
-              status === "failed" ? 100 : 0;
-
+  const dotColor = statusColor(status);
+  const pct = statusPct(status, progress);
   const isComposite = !!phases?.length;
 
   return (
@@ -43,10 +43,11 @@ function StoryGroupNodeRaw({ data, id }: NodeProps<StoryGroupData>) {
       <div className="rf-story-group-header">
         <span style={{ fontSize: 8, color: dotColor, pointerEvents: "none" }}>◈</span>
         <span className="rf-story-group-label">{displayLabel}</span>
+        {sublabel && <span className="rf-story-group-sublabel">{sublabel}</span>}
         {childCount > 0 && (
           <span className="rf-story-group-count">{childCount}</span>
         )}
-        <ProgressRing pct={pct} status={status} size={16} />
+        <NodeProgressRing pct={pct} status={status} size={16} />
         {expanded && <span className="rf-story-collapse-hint">▾</span>}
         {!expanded && childCount > 0 && <span className="rf-story-collapse-hint">▸</span>}
       </div>
@@ -65,12 +66,7 @@ function StoryGroupNodeRaw({ data, id }: NodeProps<StoryGroupData>) {
         </div>
       )}
 
-      <div className="rf-progress-bar">
-        <div
-          className={`rf-progress-fill status-${status}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      <NodeProgressBar pct={pct} status={status} />
 
       {!expanded && childCount > 0 && (
         <div className="rf-story-summary">
@@ -85,45 +81,6 @@ function StoryGroupNodeRaw({ data, id }: NodeProps<StoryGroupData>) {
 
       <Handle type="source" position={Position.Right} className="rf-handle" />
     </div>
-  );
-}
-
-function ProgressRing({ pct, status, size = 16 }: { pct: number; status: string; size?: number }) {
-  const cx = size / 2, cy = size / 2, r = (size - 3) / 2;
-  const circ = 2 * Math.PI * r;
-  const dash = circ * pct / 100;
-  const color = status === "completed" ? "rgba(77,255,160,0.85)" :
-                status === "running" ? "rgba(255,107,53,0.9)" :
-                status === "failed" ? "rgba(255,80,80,0.8)" : "rgba(77,255,160,0.15)";
-
-  if (pct >= 100 && status === "completed") {
-    return (
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth={1.5} />
-        <polyline
-          points={`${cx-3},${cy} ${cx-1},${cy+2.5} ${cx+3.5},${cy-2.5}`}
-          fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={1.5} />
-      <circle
-        cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth={1.5}
-        strokeDasharray={`${dash.toFixed(1)} ${circ.toFixed(1)}`}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${cx} ${cy})`}
-      />
-      {pct > 0 && pct < 100 && (
-        <text x={cx} y={cy + 2} textAnchor="middle" fill={color}
-          fontSize={5} fontFamily="monospace" fontWeight={700}>
-          {pct}%
-        </text>
-      )}
-    </svg>
   );
 }
 

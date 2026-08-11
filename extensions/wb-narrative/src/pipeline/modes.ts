@@ -545,12 +545,20 @@ export const MODE_CONFIGS: ModeConfig[] = [
   },
 ];
 
-/** Tier 的默认 Mode 映射 — 所有 Tier 默认走 design_auto */
+/**
+ * Tier 的默认 Mode 映射 —— 所有 Tier 默认走 narrative_auto（纯叙事）。
+ *
+ * 四期前默认是 design_auto（策划+自动叙事），于是没显式给 mode 的运行会先跑
+ * D0-D4 那段**游戏策划案**（核心概念/系统架构/玩法设计/价值框架/策划文档整合）。
+ * 那是游戏策划的产物，不在叙事工坊的范围里：PRD v1.4 §3.2.3 的通用流程从
+ * 需求清单起、到质检止，全文没有 D0-D4。默认值改成 narrative_auto 之后，
+ * D0-D4 只在调用方**显式**选 design_* 时出现。
+ */
 export const TIER_DEFAULT_MODE: Record<TierId, ModeId> = {
-  tier1: "design_auto",
-  tier2: "design_auto",
-  tier3: "design_auto",
-  tier4: "design_auto",
+  tier1: "narrative_auto",
+  tier2: "narrative_auto",
+  tier3: "narrative_auto",
+  tier4: "narrative_auto",
 };
 
 export function getModeConfig(modeId: ModeId): ModeConfig {

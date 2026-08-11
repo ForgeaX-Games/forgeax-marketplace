@@ -32,6 +32,26 @@ function filePrefixesOf(seat: AssistantSeat): string[] {
   return [...prefixes].sort();
 }
 
+/**
+ * 文件名前缀 → 产它的 step id。
+ *
+ * 前端「点左栏的一份产物，节点视图定位到对应节点」要靠它把文件反查回 step。
+ * 席位那层的 filePrefixes 只到席位粒度（需求清单席同时拥有 00_ 与 01_），
+ * 定位要的是具体那一步，所以单独投一张精确表。
+ *
+ * 同一 index 被多个键占用时先到先得（如 12_ 同属 script_generation 与
+ * script_scene_generation）：STEP_FILE_MAP 的书写顺序即主次顺序，
+ * 排在前面的是真正的 step，后面的是顺带落盘的派生产物。
+ */
+function filePrefixStepMap(): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const [stepId, entry] of Object.entries(STEP_FILE_MAP)) {
+    const prefix = `${entry.index}_`;
+    if (!(prefix in map)) map[prefix] = stepId;
+  }
+  return map;
+}
+
 export function renderSeatsModule(): string {
   const rows = ASSISTANT_SEATS.map((seat) => {
     const bindings = seat.bindings.map((b) => {
@@ -106,6 +126,22 @@ export function resolveSeatAgents(id: string, scope?: string | null): string[] {
 /** 席位的代表步骤：通用绑定的第一步，用于单节点试跑。 */
 export function seatPrimaryStep(id: string): string | undefined {
   return resolveSeatAgents(id)[0];
+}
+
+/**
+ * 文件名前缀 → 产它的 step id。点一份产物要定位到节点视图的哪个节点，查这张表。
+ * 席位的 filePrefixes 只到席位粒度，定位要的是具体那一步，故单列。
+ */
+export const FILE_PREFIX_STEP: Readonly<Record<string, string>> = ${JSON.stringify(filePrefixStepMap(), null, 2)};
+
+/** 由 \`<group>/<路径>\` 反查产它的 step id；查不到返回 undefined。 */
+export function stepIdForFile(groupedPath: string): string | undefined {
+  const base = groupedPath.split("/").pop() ?? groupedPath;
+  // 长前缀优先：01a_ 必须先于 01_ 命中，否则全局控制参数会被认成偏好分析。
+  const hit = Object.keys(FILE_PREFIX_STEP)
+    .filter((p) => base.startsWith(p))
+    .sort((a, b) => b.length - a.length)[0];
+  return hit ? FILE_PREFIX_STEP[hit] : undefined;
 }
 `;
 }

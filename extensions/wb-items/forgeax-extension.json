@@ -132,7 +132,7 @@
         },
         "icon": "Backpack",
         "order": 150,
-        "category": "workbench",
+        "category": "2D",
         "pageType": {
           "extension": "self",
           "id": "items"

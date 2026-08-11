@@ -73,6 +73,14 @@
 
 ### Added
 
+- **Direct-to-Editor GLB import workflow.** The viewer now exposes a single
+  project-relative destination dialog, while `lowpoly:export-to-engine` gives AI
+  one structured export → Editor import action. Both paths use the host's
+  versioned `editor.asset.import` capability and the Editor's existing
+  `assetIO` → `importAsset` SSOT. *Why:* generated assets should reach the game
+  project without making people manually download and re-import files, and AI
+  calls should return compact receipts instead of base64.
+
 - **`model.bakeBatch`, source-hash `model.patch`, and Placement DSL support.**
   Independent part batches reduce LLM round trips, hash conflicts protect human
   edits, and `align_centers`/`place_on_face`/`place_on_surface` use computed

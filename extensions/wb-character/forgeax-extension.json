@@ -14,7 +14,7 @@
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
-  "icon": "⚒️",
+  "icon": "MessageSquareText",
   "keywords": [
     "character",
     "portrait",
@@ -115,7 +115,7 @@
           "zh": "角色编辑",
           "en": "Character Editor"
         },
-        "icon": "⚒️",
+        "icon": "MessageSquareText",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -185,9 +185,9 @@
           "zh": "角色编辑",
           "en": "Character Editor"
         },
-        "icon": "⚒️",
+        "icon": "MessageSquareText",
         "order": 100,
-        "category": "workbench",
+        "category": "2D",
         "pageType": {
           "extension": "self",
           "id": "wb-character"

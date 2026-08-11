@@ -2,12 +2,12 @@
  * L3 情节生成（PlotProcessor）
  *
  * 设计哲学（继承自 v3）：
- * - 继承 L2 结构（1:1 映射），不产生新分支
+ * - 继承结构席给定的剧情树（1:1 映射），不产生新分支
  * - 三重约束：边界约束（cause→result）、范围约束（content）、边界校验（前后节点不越界）
  * - 拓扑分层执行（分支并行 + 主干顺序）：
  *   同层节点并行，层间顺序，通过滑动窗口传递前驱实际内容摘要
- * - 情节内容为小说级笔触（1000-2000 字），含 jrpg_elements
- * - 增强上下文：祖先链（L0→L1→L2）、用户需求、剧情简介
+ * - 情节内容为小说级笔触（1000-2000 字），含演出要素（jrpg_elements 为历史字段名）
+ * - 增强上下文：上游脉络（宏观框架→叙事单元→本节点）、用户需求、剧情简介
  */
 import type { NarrativeContext, DetailedOutlineNode, PlotNode } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
@@ -15,6 +15,7 @@ import { extractJSON } from "../llm-client.js";
 import { validateTripleConstraints } from "../../utils/constraint-validator.js";
 import { buildDesignContextSnippet, appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
+import { PROSE_CRAFT } from "../prompt/narrative-craft.js";
 import { getNodeFilter } from "../node-merge.js";
 import { structureValidationL3 } from "./structure-validation.js";
 import {
@@ -23,7 +24,7 @@ import {
   topologicalLayers,
 } from "./context-helpers.js";
 
-const SYSTEM_PROMPT = `你是叙事与游戏剧本设计师，请基于L2细纲节点生成L3情节。所有输出必须使用中文。
+const SYSTEM_PROMPT = `你是叙事与游戏剧本设计师，请为剧情树上的指定节点写出情节正文。所有输出必须使用中文。
 
 ### 三重约束系统（必须严格遵守）
 
@@ -48,6 +49,7 @@ const SYSTEM_PROMPT = `你是叙事与游戏剧本设计师，请基于L2细纲�
   "content": "情节详细内容描述（1000-2000字，小说级笔触）",
   "story_elements": { "plot": { "cause": "起因", "process": "经过", "result": "结果" } },
   "jrpg_elements": {
+    // 字段名是历史遗留，内容是与品类无关的**演出要素**：场景、在场角色、对白、道具、镜头。
     "scene_location": "主场景位置",
     "scene_locations": ["主场景", "细分场景"],
     "scene_characters": ["角色1", "角色2"],
@@ -69,21 +71,19 @@ export const PLOT_GENERATION_COMPOSER: PromptComposer = {
 旁白式点评）都不属于这一层。
 
 1. 读取本节点给定的目标—障碍—转折—结果，这是本段不可改动的骨架。
-2. 认清本节点的功能位：分支节点要把"玩家即将面临的选择"铺垫到位、让选项各有分量；
-   聚合节点要让来自不同分支的玩家都读得通，不能预设他走过哪一条；
-   结局节点要给出收束感，不留下待续的钩子。
+2. 认清本节点的功能位，按上面「按功能位分写」那一段的要求落笔。
 3. 以角色视角展开动作与内心，让每个转折都由角色的选择导出，而非被作者推着走。
 4. 嵌入环境描写传递世界观气质——环境要参与叙事，不做背景板。
-5. 对话承担本段的关键信息与人物关系变化，不做闲谈填充；每句都要能听出是谁在说。
-6. 用节奏控制服务情感强度：紧张处句短段密，舒缓处句长段松。
-7. 自检：是否忠于骨架？有没有把游戏机制直接写进正文（机制裸露）？
+5. 用节奏控制服务情感强度：紧张处句短段密，舒缓处句长段松。
+6. 自检：是否忠于骨架？有没有把游戏机制直接写进正文（机制裸露）？
    角色声音是否与角色档案一致？聚合节点是否不慎假定了玩家的来路？`,
     base: SYSTEM_PROMPT,
     ip_dna: IP_DNA_SLOT_BLOCK,
+    craft: PROSE_CRAFT,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "constraints", "cot"],
+  systemBlockOrder: ["base", "ip_dna", "craft", "style_guide", "constraints", "cot"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -197,8 +197,8 @@ ${buildIpSourceReference(ctx)}
 ## 剧情简介
 ${JSON.stringify(ctx.plot_synopsis ?? {}, null, 2)}
 
-${ancestorChain ? `## 祖先链上下文（L0→L1→当前L2）\n${ancestorChain}\n` : ""}
-## L2 细纲节点（你需要为此生成情节）
+${ancestorChain ? `## 上游脉络（宏观框架 → 所属叙事单元 → 当前节点）\n${ancestorChain}\n` : ""}
+## 当前节点（你需要为它写情节正文）
 ${JSON.stringify(node, null, 2)}
 
 ## 边界校验上下文

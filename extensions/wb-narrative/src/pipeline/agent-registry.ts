@@ -58,13 +58,31 @@ export function registerNarrativeAgent(agent: NarrativeAgent): void {
   registerAgentDef(def);
 }
 
+/**
+ * 补上席位归属。
+ *
+ * narrativeAgentFromDef 只翻译 AgentDef 自己有的字段，而席位归属是另一层
+ * 事实（assistant-seats 的绑定表）。不在这里补，注册过 AgentDef 的 agent 就会
+ * 比桥接出来的少一份归属信息——前端按席位归并进度与产物会漏，
+ * resolveConnectionCapabilities 也拿不到 roleCategory。
+ */
+function withSeatMetadata(agent: NarrativeAgent): NarrativeAgent {
+  const seat = getSeatForAgent(agent.id);
+  if (!seat) return agent;
+  agent.seatId = seat.id;
+  agent.roleCategory ??= "engineer";
+  return agent;
+}
+
+function fromDef(def: AgentDef): NarrativeAgent {
+  const agent = narrativeAgentFromDef(def);
+  if (def.prototype) agent.prototype = def.prototype;
+  return withSeatMetadata(agent);
+}
+
 export function getNarrativeAgent(id: string): NarrativeAgent | undefined {
   const def = getAgentDef(id);
-  if (def) {
-    const agent = narrativeAgentFromDef(def);
-    if (def.prototype) agent.prototype = def.prototype;
-    return agent;
-  }
+  if (def) return fromDef(def);
   const desc = STEP_REGISTRY.get(id);
   if (!desc) return undefined;
   return bridgeStepDescriptor(desc);
@@ -85,9 +103,7 @@ export function listNarrativeAgents(): NarrativeAgent[] {
   const out: NarrativeAgent[] = [];
   for (const def of getAllAgentDefs()) {
     seen.add(def.id);
-    const agent = narrativeAgentFromDef(def);
-    if (def.prototype) agent.prototype = def.prototype;
-    out.push(agent);
+    out.push(fromDef(def));
   }
   for (const desc of STEP_REGISTRY.values()) {
     if (seen.has(desc.id)) continue;

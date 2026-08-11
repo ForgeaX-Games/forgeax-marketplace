@@ -50,7 +50,7 @@ function StoryChildNodeRaw({ data }: NodeProps<StoryChildData>) {
     }
   }, [enterDelay, alreadyPlayed, ringDuration, data.nodeId, markAnimPlayed]);
 
-  const cls = isMerge ? "merge" : isBranch ? "branch" : "main";
+  const cls = `${isMerge ? "merge" : isBranch ? "branch" : "main"}${expanded ? " is-expanded" : ""}`;
   // 展示用 id：去掉前端撞号消歧后缀（"5.2#1" → "5.2"），内部 nodeId 仍保唯一用于动画追踪/键。
   const displayId = nodeId.split("#")[0];
   const badge =
@@ -75,6 +75,7 @@ function StoryChildNodeRaw({ data }: NodeProps<StoryChildData>) {
           <span className="rf-child-name" title={name}>{name}</span>
           {badge && <span className="rf-child-badge">{badge}</span>}
           <ChildProgressRing enterDelay={enterDelay} skipAnim={skipAnim} ringDuration={ringDuration} />
+          {expanded && <span className="rf-child-close" aria-hidden>✕</span>}
         </div>
         {/* 第二行：正文预览，最多两行、超出以省略号结束；无正文时回落到叙事功能 */}
         {content ? (
@@ -84,16 +85,16 @@ function StoryChildNodeRaw({ data }: NodeProps<StoryChildData>) {
         ) : null}
       </div>
 
+      {/* 展开是原地续一段，不是另盖一张卡：序号 + 标题 + 预览就在上面没动过，
+          这里只补它们装不下的全量内容。nodrag/nopan 让这一段能滚动、能选字。 */}
       {expanded && (
-        <div className="rf-child-overlay">
-          <div className="rf-child-exp-header">
-            <span className="rf-child-id">{displayId}</span>
-            {contentId && <span className="rf-child-cid">{contentId}</span>}
-            {badge && <span className="rf-child-badge">{badge}</span>}
-            {stageType && <span className="rf-child-stage">{stageType}</span>}
-            <span className="rf-child-close">✕</span>
-          </div>
-          <div className="rf-child-exp-title">{name}</div>
+        <div className="rf-child-detail nodrag nopan" onClick={(e) => e.stopPropagation()}>
+          {(contentId || stageType) && (
+            <div className="rf-child-exp-header">
+              {contentId && <span className="rf-child-cid">{contentId}</span>}
+              {stageType && <span className="rf-child-stage">{stageType}</span>}
+            </div>
+          )}
           {fullData ? (
             <div className="rf-child-exp-content">
               <GenericObjectView data={fullData} />

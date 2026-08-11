@@ -18,6 +18,22 @@ export interface ViewerI18nStrings {
     export: string
     exportTooltip: string
     exportHeader: string
+    directImportHeader: string
+    directImportToggle: string
+    directImportToggleSub: string
+    directImportAction: string
+    directImportActionSub: string
+    directImportTitle: string
+    directImportDescription: string
+    directImportDirectoryLabel: string
+    directImportDirectoryHint: string
+    directImportFilenameLabel: string
+    directImportFilenameHint: string
+    directImportSubmit: string
+    directImportWorking: string
+    directImportSuccess: string
+    directImportRetry: string
+    directImportClose: string
     exportObj: string
     exportObjSub: string
     exportGlb: string
@@ -103,6 +119,22 @@ const ZH: ViewerI18nStrings = {
     export: '导出',
     exportTooltip: '导出当前模型',
     exportHeader: '导出格式',
+    directImportHeader: '导入到引擎',
+    directImportToggle: '直接导入到引擎',
+    directImportToggleSub: '开启后只保留 GLB 导入操作',
+    directImportAction: '选择目录并导入 GLB',
+    directImportActionSub: '生成文件后自动交给 Editor 导入并烘焙',
+    directImportTitle: '导入 GLB 到引擎',
+    directImportDescription: '选择项目内的目标目录。生成 GLB 后会自动走 Editor 的统一导入链路。',
+    directImportDirectoryLabel: '项目相对目录',
+    directImportDirectoryHint: '例如 assets/3d；不能使用绝对路径或 ..',
+    directImportFilenameLabel: '文件名',
+    directImportFilenameHint: '只支持 .glb，扩展名可省略',
+    directImportSubmit: '生成并导入',
+    directImportWorking: '正在生成 GLB 并导入 Editor…',
+    directImportSuccess: '已导入项目，Content Browser 将在刷新后显示它。',
+    directImportRetry: '重试',
+    directImportClose: '完成',
     exportObj: 'OBJ',
     exportObjSub: '保存当前视图中的物体为 Wavefront OBJ',
     exportGlb: 'GLB（带动画）',
@@ -188,6 +220,22 @@ const EN: ViewerI18nStrings = {
     export: 'Export',
     exportTooltip: 'Export current model',
     exportHeader: 'Export format',
+    directImportHeader: 'Import to Engine',
+    directImportToggle: 'Import directly to Engine',
+    directImportToggleSub: 'When enabled, only the GLB import action is shown',
+    directImportAction: 'Choose a folder and import GLB',
+    directImportActionSub: 'Generate the file, then send it through the Editor import pipeline',
+    directImportTitle: 'Import GLB to Engine',
+    directImportDescription: 'Choose a project-relative destination. The generated GLB will use the Editor import pipeline automatically.',
+    directImportDirectoryLabel: 'Project-relative directory',
+    directImportDirectoryHint: 'For example assets/3d; absolute paths and .. are not allowed',
+    directImportFilenameLabel: 'File name',
+    directImportFilenameHint: 'GLB only; the extension may be omitted',
+    directImportSubmit: 'Generate and import',
+    directImportWorking: 'Generating the GLB and importing it into the Editor…',
+    directImportSuccess: 'Imported into the project. Content Browser will show it after refresh.',
+    directImportRetry: 'Retry',
+    directImportClose: 'Done',
     exportObj: 'OBJ',
     exportObjSub: 'Save the visible object as Wavefront OBJ',
     exportGlb: 'GLB (animated)',

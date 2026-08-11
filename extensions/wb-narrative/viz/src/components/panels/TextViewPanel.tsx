@@ -666,7 +666,14 @@ function StreamText({ text, isRunning }: { text: string; isRunning: boolean }) {
 // Step renderer dispatch
 // ══════════════════════════════════════════════════════════════════════════════
 
-function StepRenderer({
+/**
+ * 按 stepId 分派到对应的可读渲染。
+ *
+ * 导出给 FilePreview 用：左栏点开一份产物时，那份产物走的是与文本视图**同一套**渲染，
+ * 而不是另写一遍或干脆摊成 JSON。分派只认 stepId 与数据本身，`result` 给 null 也能工作
+ * （落到数据驱动的那几支），所以能安全地渲染不属于当前那一跑的文件。
+ */
+export function StepRenderer({
   stepId, data, result, isRunning,
 }: {
   stepId: string;

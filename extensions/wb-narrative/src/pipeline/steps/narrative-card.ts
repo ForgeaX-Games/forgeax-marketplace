@@ -2,8 +2,8 @@ import type { NarrativeContext, NarrativeCard } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { matchPreset, WRITING_CORE, OUTPUT_TEMPLATE, type Tier4Preset } from "../../knowledge/game-narrative/tier4-presets.js";
-import { appendUserInstructions, buildDesignContextSnippet, buildIpSourceReference } from "./design-context-helper.js";
-import { composeSystemPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
+import { buildDesignContextSnippet, buildIpSourceReference, userInstructionsBlock } from "./design-context-helper.js";
+import { composeSystemPrompt, composeUserPrompt, IP_DNA_SLOT_BLOCK } from "../prompt-composer.js";
 import type { PromptComposer } from "../prompt-composer.js";
 
 function buildPresetContext(preset: Tier4Preset): string {
@@ -77,44 +77,53 @@ ${WRITING_CORE.principles.map((p) => `- ${p}`).join("\n")}`,
     "final_chapter": "最终章（如：Boss战/大团圆）"
   }
 }`,
-  },
-  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "cot", "ip_source", "output_schema"],
-  userBlockOrder: [],
-  skillSlots: ["style_guide", "constraints"],
-};
-
-/**
- * Tier4 叙事卡生成步骤
- * 1. 匹配品类预设（22种+通用兜底）
- * 2. 基于预设的组合逻辑和要素库生成叙事卡
- */
-export async function narrativeCardGeneration(
-  ctx: NarrativeContext,
-  llm: LLMClient,
-): Promise<void> {
-  const preset = matchPreset(ctx.user_input);
-  const presetContext = buildPresetContext(preset);
-
-  const designSnippet = buildDesignContextSnippet(ctx);
-  const userPrompt = `用户需求：${ctx.user_input}
-
-## 匹配到的品类预设
-${presetContext}
-${designSnippet ? `\n## 策划约束（若有）\n${designSnippet}\n` : ""}
-## 输出模板参考
-${OUTPUT_TEMPLATE}
-
-请根据用户需求和品类预设，生成一张完整的叙事卡（JSON格式）。
+    // ── 上下文输入段（八段骨架第 ⑦ 段）──
+    // 这几块原先是 step 函数里手工拼的字符串。搬进 composer 是为了让 user prompt
+    // 也有单一事实源：runner 只认 composer 装配出来的提示词，留在函数体里就意味着
+    // 「跑 runner」与「跑 step 函数」会发出两份不同的 user prompt。
+    user_request: (ctx: NarrativeContext): string => `用户需求：${ctx.user_input}`,
+    preset_context: (ctx: NarrativeContext): string =>
+      `## 匹配到的品类预设\n${buildPresetContext(matchPreset(ctx.user_input))}`,
+    design_constraints: (ctx: NarrativeContext): string => {
+      const snippet = buildDesignContextSnippet(ctx);
+      return snippet ? `## 策划约束（若有）\n${snippet}` : "";
+    },
+    output_reference: `## 输出模板参考\n${OUTPUT_TEMPLATE}`,
+    task_request: `请根据用户需求和品类预设，生成一张完整的叙事卡（JSON格式）。
 要求：
 1. 游戏名称要有创意，体现游戏主题
 2. 一句话要让人秒懂玩法+想玩
 3. 故事要有画面感，用短句保持节奏
 4. 玩法映射要准确对应游戏核心机制
-5. 关卡拓展要有递进感`;
+5. 关卡拓展要有递进感`,
+    user_instructions: (ctx: NarrativeContext): string => userInstructionsBlock(ctx),
+  },
+  systemBlockOrder: ["role", "task_spec", "ip_dna", "style_guide", "constraints", "cot", "ip_source", "output_schema"],
+  userBlockOrder: [
+    "user_request",
+    "preset_context",
+    "design_constraints",
+    "output_reference",
+    "task_request",
+    "user_instructions",
+  ],
+  skillSlots: ["style_guide", "constraints"],
+};
 
+/**
+ * Tier4 叙事卡生成步骤（兼容期实现）。
+ *
+ * 本席已切到 SingleTurnRunner（AgentDef.useNewRunner），提示词与校验都由
+ * composer + validator 提供，两条路发出的文本完全相同——所以这个函数只在
+ * 未注册 AgentDef 的场景下作为兜底存在，不再是唯一实现。
+ */
+export async function narrativeCardGeneration(
+  ctx: NarrativeContext,
+  llm: LLMClient,
+): Promise<void> {
   const raw = await llm.callWithRetry(
     composeSystemPrompt(NARRATIVE_CARD_COMPOSER, ctx),
-    appendUserInstructions(userPrompt, ctx),
+    composeUserPrompt(NARRATIVE_CARD_COMPOSER, ctx),
     { temperature: 0.8 },
     (r) => {
       const card = extractJSON<NarrativeCard>(r);

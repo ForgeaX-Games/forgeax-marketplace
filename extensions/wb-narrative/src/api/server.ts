@@ -11,6 +11,10 @@ import { buildAutoSteps } from "../pipeline/design-steps/auto-narrative-builder.
 import { getGenresByCategory, GENRE_TAXONOMY, findGenreByCode, getGenreDisplayName, type ContentLocale } from "../knowledge/genre-taxonomy.js";
 import { getNarrativeType } from "../knowledge/genre-narrative-type.js";
 import { planPipeline } from "../pipeline/planner/index.js";
+import { resolveSeatStepGroups, resolveNarrativePipeline } from "../pipeline/narrative-pipelines.js";
+import { expertDisplayName } from "../pipeline/expert-agents.js";
+import { seatGroupsForSteps } from "../pipeline/seat-attribution.js";
+import { BANNER_STEP_IDS, stepDisplayNames } from "../pipeline/step-registry.js";
 import { buildRunManifest, buildEntryManifests } from "../pipeline/run-manifest-builder.js";
 import {
   checkpointAgentsFrom,
@@ -29,7 +33,7 @@ import { getAgentDef } from "../pipeline/blueprint/agent-def-registry.js";
 import { STEP_IDS as S } from "../pipeline/modes.js";
 import { LLMClient } from "../pipeline/llm-client.js";
 import { buildKnowledgePromptSection, buildNodeTreeSummary, preClassifyChange, PIPELINE_KNOWLEDGE } from "../pipeline/pipeline-knowledge.js";
-import type { NarrativeContext, PipelineProgress, TierId, ModeId, PlotsGenerated, JrpgScript, SceneMap, QuestGraph, StepMeta, StepModification, StoryFramework, OutlinesGenerated, DetailedOutlinesGenerated, UploadedScript, NarrativeAxesSelection } from "../types/index.js";
+import type { NarrativeContext, PipelineProgress, TierId, ModeId, PlotsGenerated, JrpgScript, SceneMap, QuestGraph, StepMeta, StepModification, StoryFramework, OutlinesGenerated, DetailedOutlinesGenerated, UploadedScript, NarrativeAxesSelection, AnnounceStepGroup } from "../types/index.js";
 import {
   resolveNarrativeStructure,
   STORY_TYPES,
@@ -809,16 +813,25 @@ app.get("/api/narrative/genres", (req, res) => {
       categories: grouped.map((bucket) => ({
         category: bucket.category,
         label: bucket.label,
-        genres: bucket.genres.map((g) => ({
-          code: g.code,
-          name: getGenreDisplayName(g, locale),
-          tier: g.tier,
-          narrative_ratio: g.narrative_ratio,
-          narrative_type: g.narrative_type,
-          pipeline_template: g.pipelineTemplate,
-          needs: g.needs,
-          keywords: g.keywords.slice(0, 5),
-        })),
+        genres: bucket.genres.map((g) => {
+          const pipeline = resolveNarrativePipeline(g.code, g.tier);
+          return {
+            code: g.code,
+            name: getGenreDisplayName(g, locale),
+            tier: g.tier,
+            narrative_ratio: g.narrative_ratio,
+            narrative_type: g.narrative_type,
+            /** @deprecated 旧 step 模板；四期起路由目标是 narrative_pipeline。 */
+            pipeline_template: g.pipelineTemplate,
+            // 该品类真正会跑的席位管线。前端专家节点显示与单跑都认这一个，
+            // 否则画布上写着 tpl-vn-v2、后端跑的却是 pl-film-game。
+            narrative_pipeline: pipeline.id,
+            narrative_pipeline_name: pipeline.name,
+            expert_name: expertDisplayName(g.code, g.tier, locale),
+            needs: g.needs,
+            keywords: g.keywords.slice(0, 5),
+          };
+        }),
       })),
     };
     const totalGenres = payload.categories.reduce((s, c) => s + c.genres.length, 0);
@@ -942,11 +955,38 @@ const DESIGN_STEP_IDS_FOR_ANNOUNCE: string[] = [
  *    The frontend will continue to use its preview until progress arrives.
  *  - resolved mode → flatten ModeConfig.steps and return mode.pipeline_template.
  */
+/**
+ * 品类 + 层级 → 画布的专家/席位嵌套结构。
+ *
+ * 这是"谁在跑、由哪些席位组成"的唯一算法，start 的 announce 帧与历史回放共用它。
+ * 分成两套算的话，同一条 run 在跑的时候是「互动叙事专家 > 需求清单助手」三层嵌套，
+ * 事后打开就退化成一排扁平卡片——同一份产物在两个时刻长得不一样。
+ */
+function expertStepGroups(
+  genreCode: string | undefined | null,
+  tier: TierId | undefined,
+): AnnounceStepGroup[] | undefined {
+  if (!genreCode) return undefined;
+  const entry = findGenreByCode(genreCode);
+  if (!entry) return undefined;
+  const seat = resolveSeatStepGroups(entry.code, tier ?? entry.tier);
+  return [
+    {
+      id: seat.pipeline.id,
+      label: expertDisplayName(entry.code, entry.tier),
+      steps: seat.stepGroups,
+      pipelineId: seat.pipeline.id,
+      pipelineName: seat.pipeline.name,
+      seats: seatGroupsForSteps(seat.stepGroups),
+    },
+  ];
+}
+
 function buildPipelineStepsAnnounce(
   state: RunState,
   resolvedMode: ModeId | undefined,
   tierHint: TierId | undefined,
-): { steps: string[]; pipelineTemplate?: string } {
+): { steps: string[]; pipelineTemplate?: string; stepGroups?: AnnounceStepGroup[] } {
   const isDesignAuto = resolvedMode === ("design_auto" as ModeId);
   const isNarrativeAuto = resolvedMode === ("narrative_auto" as ModeId);
 
@@ -959,34 +999,31 @@ function buildPipelineStepsAnnounce(
   //
   // 注意：仅当本次 announce 本身有完整 step list（下面两个分支 return 的）才注入；
   // 否则保持原样（空 steps），让前端继续走本地预览 fallback。
-  const META_HEAD: string[] = ["pipeline_config"];
+  const META_HEAD: string[] = [...BANNER_STEP_IDS];
   const isAutoRouting = !state.genreCode;
   if (isAutoRouting) META_HEAD.unshift("tier_router");
 
-  // Phase 6: 当用户显式指定 genre_code 时，优先用 Planner 计算步骤列表。
+  // 显式指定品类时，这一帧的步序必须与 pipeline.run() 将要跑的完全一致，
+  // 否则画布先按本帧铺一套节点、几秒后又被 run() 的 announce 换掉一套。
+  // 故同样走 resolveSeatStepGroups（事实源 = 叙事策划专家组 CSV）。
   if ((isDesignAuto || isNarrativeAuto) && state.genreCode) {
     try {
       const entry = findGenreByCode(state.genreCode);
       if (entry) {
-        const planResult = planPipeline({
-          genre_code: entry.code,
-          tier: tierHint ?? entry.tier,
-          needs: entry.needs,
-          narrative_type: getNarrativeType(state.genreCode),
-          pipelineTemplate: entry.pipelineTemplate,
-        });
-        const flatPlannerSteps = planResult.stepGroups.flatMap(
-          (g) => Array.isArray(g) ? g : [g],
-        );
+        const seat = resolveSeatStepGroups(entry.code, tierHint ?? entry.tier);
+        const seatSteps = seat.stepGroups;
         const steps = isDesignAuto
-          ? [...DESIGN_STEP_IDS_FOR_ANNOUNCE, ...flatPlannerSteps]
-          : flatPlannerSteps;
+          ? [...DESIGN_STEP_IDS_FOR_ANNOUNCE, ...seatSteps.filter((id: string) => !DESIGN_STEP_IDS_FOR_ANNOUNCE.includes(id))]
+          : seatSteps;
         if (process.env.NARRATIVE_AUTO_DEBUG === "1") {
-          console.log(`[announce] Planner genre=${state.genreCode} template=${entry.pipelineTemplate}`);
-          console.log(`[announce]   plannerSteps=[${flatPlannerSteps.join(",")}]`);
+          console.log(`[announce] seat pipeline=${seat.pipeline.id} genre=${state.genreCode}`);
           console.log(`[announce]   final steps=[${[...META_HEAD, ...steps].join(",")}]`);
         }
-        return { steps: [...META_HEAD, ...steps], pipelineTemplate: entry.pipelineTemplate };
+        return {
+          steps: [...META_HEAD, ...steps],
+          pipelineTemplate: entry.pipelineTemplate,
+          stepGroups: expertStepGroups(entry.code, tierHint ?? entry.tier),
+        };
       }
     } catch (e) {
       console.warn("[announce] Planner failed, falling back:", (e as Error).message);
@@ -1392,22 +1429,27 @@ function launchNarrativeRun(p: LaunchRunParams): LaunchedRun {
   try {
     const announce = buildPipelineStepsAnnounce(state, resolvedMode, tier);
     announcedTemplate = announce.pipelineTemplate;
-    state.progress.unshift({
-      type: "pipeline_steps_announce",
-      stage: "announce",
-      step: 0,
-      totalSteps: announce.steps.length,
-      status: "pending",
-      steps: announce.steps,
-      pipelineTemplate: announce.pipelineTemplate,
-      complexity: state.complexity,
-      routingMode: state.routingMode,
-      // A2-4: 显式品类时把 genre_code 带到 announce 帧，让前端知道走的是 manual 路由
-      genreCode: state.genreCode,
-    });
-    // Phase 1: 同步刷新 state.pipelineSteps，让首次 saveCheckpoint / writeManifestIncremental
-    // 就能带上 pipelineOrder（不必等下一次 onProgress）。
+    // 空步序不发帧：它一个信息都不带（模板/品类此时同样为空），发出去只会让下游
+    // 多一帧需要辨识的噪声。真正的步序由 pipeline.run() 的 announce 帧补上。
     if (announce.steps.length > 0) {
+      state.progress.unshift({
+        type: "pipeline_steps_announce",
+        stage: "announce",
+        step: 0,
+        totalSteps: announce.steps.length,
+        status: "pending",
+        steps: announce.steps,
+        stepNames: stepDisplayNames(announce.steps),
+        metaSteps: [...BANNER_STEP_IDS],
+        stepGroups: announce.stepGroups,
+        pipelineTemplate: announce.pipelineTemplate,
+        complexity: state.complexity,
+        routingMode: state.routingMode,
+        // A2-4: 显式品类时把 genre_code 带到 announce 帧，让前端知道走的是 manual 路由
+        genreCode: state.genreCode,
+      });
+      // Phase 1: 同步刷新 state.pipelineSteps，让首次 saveCheckpoint / writeManifestIncremental
+      // 就能带上 pipelineOrder（不必等下一次 onProgress）。
       state.pipelineSteps = [...announce.steps];
     }
   } catch (e) {
@@ -1759,6 +1801,8 @@ app.post("/api/narrative/resume", async (req, res) => {
         totalSteps: resumeAnnounceSteps.length,
         status: "pending",
         steps: resumeAnnounceSteps,
+        stepNames: stepDisplayNames(resumeAnnounceSteps),
+        metaSteps: [...BANNER_STEP_IDS],
         pipelineTemplate: resumeAnnounceTemplate,
         complexity: state.complexity,
         routingMode: state.routingMode,
@@ -2058,6 +2102,8 @@ app.post("/api/narrative/regenerate", async (req, res) => {
         totalSteps: regenAnnounceSteps.length,
         status: "pending",
         steps: regenAnnounceSteps,
+        stepNames: stepDisplayNames(regenAnnounceSteps),
+        metaSteps: [...BANNER_STEP_IDS],
         pipelineTemplate: regenAnnounceTemplate,
         complexity: state.complexity,
         routingMode: state.routingMode,
@@ -3009,6 +3055,19 @@ interface HistoryItem {
   complexity?: number;
   parentKey?: string;
   forkReason?: string;
+  /**
+   * 条目卡第二、三行要的料。
+   *
+   * 第二行报「需求输入 / 文件上传」，第三行报「叙事路由」。userInput + routeGroup + tier + mode
+   * 只够说一半：上传型条目的正文是文件而非文字，而路由自三轴换轴后由品类与类型/题材/结构定调。
+   * 这些字段本来都已落在 manifest 或 _entry.json 里，只是没投影出来，前端只能显示半张脸。
+   */
+  genreCode?: string;
+  inputType?: string;
+  uploadedFileNames?: string[];
+  storyType?: string;
+  storyTheme?: string;
+  narrativeStructure?: string;
   /** 运行类型标记（"ip-dna" = IP DNA 摄入/改编运行；缺省为普通叙事/策划运行）。 */
   kind?: string;
   /**
@@ -3284,6 +3343,12 @@ function parseDirEntry(dir: string): HistoryItem {
       complexity: raw.complexity ?? activeRun?.complexity,
       parentKey: raw.parentKey ?? undefined,
       forkReason: raw.forkReason ?? undefined,
+      genreCode: raw.genre_code ?? activeRun?.genreCode ?? entryForPipes?.genreCode,
+      inputType: entryForPipes?.inputType,
+      uploadedFileNames: entryForPipes?.uploadedFileNames,
+      storyType: raw.storyType ?? entryForPipes?.storyType,
+      storyTheme: raw.storyTheme ?? entryForPipes?.storyTheme,
+      narrativeStructure: raw.narrativeStructure ?? entryForPipes?.narrativeStructure,
       kind: raw.kind ?? undefined,
       generationRunId: ipGenerationRunId,
       pipelineCount: pipeCount,
@@ -3314,6 +3379,12 @@ function parseDirEntry(dir: string): HistoryItem {
         routeGroup: entryCfg.routeGroup as HistoryItem["routeGroup"],
         complexity: entryCfg.complexity,
         parentKey: entryCfg.parentKey,
+        genreCode: entryCfg.genreCode,
+        inputType: entryCfg.inputType,
+        uploadedFileNames: entryCfg.uploadedFileNames,
+        storyType: entryCfg.storyType,
+        storyTheme: entryCfg.storyTheme,
+        narrativeStructure: entryCfg.narrativeStructure,
         kind: entryCfg.ipRunKey ? "ip-dna" : undefined,
         generationRunId: ipGenerationRunId,
         pipelineCount: pipeCount,
@@ -3563,6 +3634,11 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
           checkpoint?.routingMode ??
           (manifest.routingMode as "auto" | "semi" | "manual" | undefined) ??
           data.routingMode;
+        // 专家/席位嵌套随条目回放：结构由品类 + 层级现算，与 start 那帧同一个函数。
+        data.stepGroups = expertStepGroups(
+          data.genre_code as string | undefined,
+          (checkpoint?.tier ?? (manifest.tier as TierId | undefined) ?? data.tier) as TierId | undefined,
+        );
         // Phase-1：附带 _entry.json（多管线 pipelines / 画布拓扑），供 O 侧还原。
         const entryCfgFull = loadEntryConfig(key);
         if (entryCfgFull) data.entry = entryCfgFull;
@@ -3605,6 +3681,12 @@ app.get("/api/narrative/history/:key/load", (req, res) => {
       routingMode:
         checkpoint.routingMode ??
         (manifest.routingMode as "auto" | "semi" | "manual" | undefined),
+      stepGroups: expertStepGroups(
+        checkpoint.genre_code
+          ?? (manifest.genre_code as string | undefined)
+          ?? checkpoint.ctx.tier_detection?.genre_code,
+        (checkpoint.tier ?? (manifest.tier as TierId | undefined)) as TierId | undefined,
+      ),
       entry: entryCfgCp ?? undefined,
     });
     return;
@@ -3710,6 +3792,7 @@ function launchAgentRun(p: {
         totalSteps: announced.length,
         status: "pending",
         steps: announced,
+        stepNames: stepDisplayNames(announced),
       },
     ],
     streamBuffer: [],

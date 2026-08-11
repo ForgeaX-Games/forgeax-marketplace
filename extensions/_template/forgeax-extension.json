@@ -14,7 +14,7 @@
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
-  "icon": "🧩",
+  "icon": "LayoutTemplate",
   "hidden": true,
   "keywords": [
     "template",
@@ -53,7 +53,7 @@
           "zh": "插件模板",
           "en": "Plugin Template"
         },
-        "icon": "🧩",
+        "icon": "LayoutTemplate",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {

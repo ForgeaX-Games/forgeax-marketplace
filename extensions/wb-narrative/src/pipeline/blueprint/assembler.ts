@@ -19,15 +19,13 @@ import type {
 } from "./types.js";
 import type { ModeId, TierId, NarrativeContext } from "../../types/index.js";
 import type { PipelineTemplateId } from "../templates.js";
-import type { NeedsKey, NeedsScore } from "../universal-agent/types.js";
-import { planPipeline } from "../planner/index.js";
+import { resolveSeatStepGroups } from "../narrative-pipelines.js";
 import { STEP_REGISTRY } from "../step-registry.js";
 import { getAgentDef, hasAgentDef } from "./agent-def-registry.js";
 import { PromptResolver } from "./prompt-resolver.js";
 import { getStepSkill } from "../../knowledge/game-narrative/skill-loader.js";
 import { findGenreByCode } from "../../knowledge/genre-taxonomy.js";
 import { getModeConfig } from "../modes.js";
-import type { NarrativeType } from "../../knowledge/genre-narrative-type.js";
 import { STEP_IDS as S } from "../modes.js";
 
 export interface AssemblerInput {
@@ -35,9 +33,7 @@ export interface AssemblerInput {
   mode: ModeId;
   tier: TierId;
   complexity?: number;
-  /** narrative_type 用于 planner；缺省时从 genre taxonomy 推断 */
-  narrativeType?: NarrativeType;
-  /** 直接提供步骤序列（跳过 planner 选步）；用于 resume/rerun */
+  /** 直接提供步骤序列（跳过选步）；用于 resume/rerun */
   overrideSteps?: string[];
   /** 用于向后兼容的 ctx 快照（PromptComposer 桥接路径需要） */
   ctx?: NarrativeContext;
@@ -69,25 +65,18 @@ export function assembleBlueprint(input: AssemblerInput): PipelineBlueprint {
       parallelGroups = extractParallelGroupIndices(modeConfig.steps);
       pipelineTemplate = modeConfig.pipeline_template ?? "needs-driven";
     } else {
+      // 动态模式的步序与 run() / /plan 同源：品类 + 层级 → 四条席位管线之一。
+      // blueprint 是 run() 的平行执行路径，两边各算一份步序迟早会分叉。
       const genreEntry = findGenreByCode(genreCode);
-      const needs: Partial<Record<NeedsKey, NeedsScore>> = genreEntry?.needs ?? {};
-      const narrativeType = input.narrativeType ?? genreEntry?.narrative_type ?? "linear";
-
-      const planResult = planPipeline({
-        genre_code: genreCode,
-        tier,
-        needs,
-        narrative_type: narrativeType,
-        pipelineTemplate: genreEntry?.pipelineTemplate,
-      });
-
-      stepIds = flattenStepGroups(planResult.stepGroups);
-      parallelGroups = extractParallelGroupIndices(planResult.stepGroups);
-      pipelineTemplate = planResult.metadata.resolvedTemplate;
-      plannerMeta = {
-        selectedSteps: planResult.metadata.selectedSteps,
-        skippedByThreshold: planResult.metadata.skippedByThreshold,
-      };
+      const seat = resolveSeatStepGroups(genreCode, tier);
+      const designPrefix =
+        modeConfig?.isDynamic && modeConfig.steps.length > 0
+          ? flattenStepGroups(modeConfig.steps)
+          : [];
+      stepIds = [...designPrefix, ...seat.stepGroups.filter((id) => !designPrefix.includes(id))];
+      parallelGroups = [];
+      pipelineTemplate = genreEntry?.pipelineTemplate ?? "needs-driven";
+      plannerMeta = { selectedSteps: [...stepIds], skippedByThreshold: [] };
     }
   }
 
@@ -139,18 +128,22 @@ function buildStepBlueprint(
   const skill = getStepSkill(genreCode, stepId);
   let resolvedPrompts: ResolvedPrompts;
 
-  if (hasAgentDef(stepId)) {
+  // 内联 PromptComposer 是生产提示词的事实源，优先于 .md 模板。
+  //
+  // 顺序不能反：自从席位实现按配置表批量注册 AgentDef 之后，「注册过 AgentDef」
+  // 不再意味着「提示词已迁到 agent-templates/」——那批 .md 多数已归档，
+  // loadTemplate 找不到文件会返回空串。先看 composer 才不会把有提示词的 step
+  // 解析成空提示词。
+  const stepDesc = STEP_REGISTRY.get(stepId);
+  if (stepDesc?.composer && ctx) {
+    resolvedPrompts = PromptResolver.resolveFromComposer(stepDesc.composer, ctx);
+  } else if (hasAgentDef(stepId)) {
     resolvedPrompts = PromptResolver.resolveFromTemplate(agentDef.prompts, skill, genreCode);
   } else {
-    const stepDesc = STEP_REGISTRY.get(stepId);
-    if (stepDesc?.composer && ctx) {
-      resolvedPrompts = PromptResolver.resolveFromComposer(stepDesc.composer, ctx);
-    } else {
-      resolvedPrompts = {
-        systemPrompt: "",
-        userPromptTemplate: "",
-      };
-    }
+    resolvedPrompts = {
+      systemPrompt: "",
+      userPromptTemplate: "",
+    };
   }
 
   const baseConfig = agentDef.structure.type === "single-turn"

@@ -2,7 +2,6 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, useReactFlow, type NodeProps } from "reactflow";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import { useT, getLocale } from "../../i18n";
-import { TEMPLATE_LABELS } from "../../pipeline-templates";
 import {
   TIER_ITEMS,
   NARRATIVE_ROUTES,
@@ -11,9 +10,11 @@ import {
   TIER_HAS_COMPLEXITY,
 } from "../../lib/routingCatalog";
 import type { UploadedItem } from "../../lib/uploads";
-import { fetchGenres, type GenreCategoryGroup } from "../../hooks/useNarrativeStream";
+import { fetchGenres, type GenreCategoryGroup, type NarrativeAxesCatalog } from "../../hooks/useNarrativeStream";
+import { loadNarrativeAxes, axisOptionLabel } from "../../lib/axesCache";
 import { useSingleAgentRun } from "../../hooks/useSingleAgentRun";
-import { computeAnchoredPipelines, CATEGORY_COLOR } from "../../composer/composerCatalog";
+import { computeAnchoredPipelines, isEntryNode, CATEGORY_COLOR } from "../../composer/composerCatalog";
+import { NodeProgressBar, NodeProgressRing, statusPct } from "../nodes/NodeProgress";
 import type { TierId, ModeId } from "../../types";
 import { ComposerFileEditor } from "./ComposerFileEditor";
 
@@ -51,6 +52,7 @@ function loadGenres(locale: string): Promise<GenreCategoryGroup[]> {
  *
  * 详情栏完全复刻左侧栏对应入口：
  *  - 直接输入 → 需求文本框；标签选择 → 五维标签+自定义；文件上传 → 拖放区+文件列表。
+ *  - 需求入口 → 输入方式三选一 + 三轴（叙事类型/叙事题材/叙事体量）。
  *  - 叙事全量 → 叙事层级/游戏品类/复杂度；叙事单品 → 叙事模块/复杂度。
  */
 function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>) {
@@ -72,9 +74,28 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
   const routeGroup = (cfg.routeGroup as string) ?? "planning";
   const inputTab = (cfg.inputTab as string) ?? "text";
 
+  // 入口节点出「需求输入 + 三轴」；独立的叙事全量/单品路由节点出旧的层级·品类·模块面板。
+  const isEntry = !!node && isEntryNode(node);
+  const showInputCfg = node?.category === "input";
+  const showRoutingCfg = node?.category === "routing";
+  const showAxesCfg = isEntry;
+
+  // 三轴词表（类型/题材）：入口节点专用，进程内共享一次请求。
+  const [axes, setAxes] = useState<NarrativeAxesCatalog>({ types: [], themes: [], structures: [] });
+  useEffect(() => {
+    if (!showAxesCfg) return;
+    let alive = true;
+    void loadNarrativeAxes().then((a) => { if (alive) setAxes(a); });
+    return () => { alive = false; };
+  }, [showAxesCfg]);
+
   // 「叙事全量」节点：拉取品类目录（按 locale 缓存）。
+  // 专家节点也要：卡上报的管线名由品类查表得出，静态快捷项（JRPG/ORPG/影游）
+  // 拖进来时不带管线信息，需要现查——前端不推算品类→管线，那是后端的表。
   const [genres, setGenres] = useState<GenreCategoryGroup[]>([]);
-  const needGenres = node?.category === "routing" && routeGroup === "planning";
+  const needGenres =
+    (showRoutingCfg && routeGroup === "planning") ||
+    (node?.category === "expert" && !node.narrativePipelineName);
   useEffect(() => {
     if (!needGenres) return;
     let alive = true;
@@ -90,6 +111,17 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
       .filter((g) => g.tier === tierVal)
       .map((g) => ({ code: g.code, name: g.name }));
   }, [genres, tierVal]);
+
+  /** 专家节点跑的席位管线：节点自带的优先，缺了按 genreCode 查品类目录。 */
+  const expertPipeline = useMemo(() => {
+    if (node?.category !== "expert") return null;
+    if (node.narrativePipelineId || node.narrativePipelineName) {
+      return { id: node.narrativePipelineId, name: node.narrativePipelineName };
+    }
+    const code = cfg.genreCode as string | undefined;
+    const g = code ? genres.flatMap((c) => c.genres).find((x) => x.code === code) : undefined;
+    return g ? { id: g.narrative_pipeline, name: g.narrative_pipeline_name } : null;
+  }, [node, cfg.genreCode, genres]);
 
   // 文件上传节点：从下游连接的「叙事路由」节点解析 tier/mode/complexity/是否就绪，喂给 IpStageFlow。
   const fileRouting = useMemo(() => {
@@ -112,13 +144,15 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
   }, [node, inputTab, composerNodes, composerEdges]);
 
   // 单 agent 试跑（Phase-2 M9）：工程师 = 单步 agent，专家 = composite 子 DAG。
-  // 二者都能脱离管线单跑；agent id 分别取 stepId 与 pipelineTemplate（后者已注册 composite AgentDef）。
+  // 专家取 catalogId（expert.genre.<code> / expert.jrpg 这类），它就是后端注册的
+  // composite AgentDef id；旧版取 pipelineTemplate，那是个 step 模板 id，
+  // 注册表里查不到 tpl-vn-v2，点试跑只会得到「未知 agent」。
   const soloRun = useSingleAgentRun();
   const soloAgentId =
     node?.category === "engineer"
       ? (node.stepId ?? null)
       : node?.category === "expert"
-        ? (node.pipelineTemplate ?? null)
+        ? (node.catalogId ?? null)
         : null;
   // 试跑要有需求文本：取本节点所在管线的输入节点内容（与 fileRouting 同一条解析路径）。
   const soloUserInput = useMemo(() => {
@@ -188,6 +222,7 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
   const cls = [
     "rf-pipeline-node",
     "composer-node",
+    "composer-node--card",
     "nopan",
     `cat-${node.category}`,
     selected ? "selected" : "",
@@ -197,38 +232,62 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
     .filter(Boolean)
     .join(" ");
 
+  const inputSummary = (): string => {
+    if (inputTab === "tags") {
+      const sel = (cfg.tagSelections as Record<string, string>) ?? {};
+      const picked = Object.values(sel).filter(Boolean);
+      return picked.length ? picked.join(" · ") : t("composer.node.noInput");
+    }
+    if (inputTab === "file") {
+      return uploadedItems.length
+        ? uploadedItems.map((f) => f.name).join(", ")
+        : t("composer.cfg.fileEmpty");
+    }
+    return String(cfg.userInput ?? "").trim() || t("composer.node.noInput");
+  };
+
+  /** 入口节点的路由这一半：三轴各报一格，没选的报「自动」——留空是合法选择，不是缺项。 */
+  const axisSummary = (): string => {
+    const auto = t("composer.cfg.tierAuto");
+    const typeCode = (cfg.storyType as string | null) ?? null;
+    const themeCode = (cfg.storyTheme as string | null) ?? null;
+    const hit = (list: typeof axes.types, code: string | null) => {
+      if (!code) return auto;
+      const o = list.find((x) => x.code === code);
+      return o ? axisOptionLabel(o) : code;
+    };
+    const lv = cfg.complexity as number | undefined;
+    const scaleLab = lv ? t(`complexity.${lv}.label`) : null;
+    const scale = lv ? (scaleLab === `complexity.${lv}.label` ? String(lv) : scaleLab) : auto;
+    return `${hit(axes.types, typeCode)}｜${hit(axes.themes, themeCode)}｜${scale}`;
+  };
+
+  const routeSummary = (): string => {
+    if (routeGroup === "narrative") {
+      const m = (cfg.mode as string) || "narrative_auto";
+      const lab = t(`route.${m}.label`);
+      return lab === `route.${m}.label` ? m : lab;
+    }
+    const tl = tierVal
+      ? (t(`tier.${tierVal}`) === `tier.${tierVal}` ? tierVal.toUpperCase() : t(`tier.${tierVal}`))
+      : t("composer.cfg.tierAuto");
+    const g = cfg.genreCode ? ` · ${cfg.genreCode}` : "";
+    return `${label(t, "composer.cfg.routeGroup.planning")}｜${tl}${g}`;
+  };
+
   const summary = (() => {
     switch (node.category) {
-      case "input": {
-        if (inputTab === "tags") {
-          const sel = (cfg.tagSelections as Record<string, string>) ?? {};
-          const picked = Object.values(sel).filter(Boolean);
-          return picked.length ? picked.join(" · ") : t("composer.node.noInput");
-        }
-        if (inputTab === "file") {
-          return uploadedItems.length
-            ? uploadedItems.map((f) => f.name).join(", ")
-            : t("composer.cfg.fileEmpty");
-        }
-        const v = String(cfg.userInput ?? "").trim();
-        return v || t("composer.node.noInput");
-      }
-      case "routing": {
-        if (routeGroup === "narrative") {
-          const m = (cfg.mode as string) || "narrative_auto";
-          const label = t(`route.${m}.label`);
-          return label === `route.${m}.label` ? m : label;
-        }
-        const tl = tierVal
-          ? (t(`tier.${tierVal}`) === `tier.${tierVal}` ? tierVal.toUpperCase() : t(`tier.${tierVal}`))
-          : t("composer.cfg.tierAuto");
-        const g = cfg.genreCode ? ` · ${cfg.genreCode}` : "";
-        return `${label(t, "composer.cfg.routeGroup.planning")}｜${tl}${g}`;
-      }
+      // 入口节点一行报两半：需求说了什么，以及三轴落在哪。
+      case "input":
+        return isEntry ? `${inputSummary()} ⟶ ${axisSummary()}` : inputSummary();
+      case "routing":
+        return routeSummary();
+      // 专家卡报的是「跑哪条席位管线」。旧版报 tpl-* 模板 id，那是四期前的步序模板，
+      // 与后端实际路由的 pl-* 管线不是一回事，卡上写着 v2 而后端跑的是新管线。
+      // 无品类的「其他品类叙事专家」报「自动」：管线由后端识别出品类后才定，
+      // 这时报空白会让人以为节点坏了。
       case "expert":
-        return node.pipelineTemplate
-          ? (TEMPLATE_LABELS[node.pipelineTemplate] ?? node.pipelineTemplate)
-          : "—";
+        return expertPipeline?.name ?? expertPipeline?.id ?? t("composer.cfg.tierAuto");
       case "assistant":
         return t("composer.cfg.strategy");
       case "engineer":
@@ -252,10 +311,45 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
           ? t("tms.confirmDone")
           : t("composer.node.ready");
 
+  // 试跑起来之后，这枚节点就该像管线节点那样报进度：标题栏换成进度环，底部一条进度条。
+  // 环与条用的是与管线视图同一份实现（NodeProgress），两侧的"生成中"长一个样。
+  const runStatus =
+    soloRun.state.status === "running"
+      ? "running"
+      : soloRun.state.status === "completed"
+        ? "completed"
+        : soloRun.state.status === "failed"
+          ? "failed"
+          : null;
+  const runPct = (() => {
+    if (!runStatus) return 0;
+    const total = soloRun.state.steps.length;
+    const done = soloRun.state.steps.filter((s) => s.status === "completed").length;
+    const ratio = total > 0 ? Math.round((done / total) * 100) : undefined;
+    return statusPct(runStatus, ratio);
+  })();
+
   const complexityOptions = COMPLEXITY_LEVELS.map((c) => {
     const lab = t(`complexity.${c.level}.label`);
     return { level: c.level, label: lab === `complexity.${c.level}.label` ? String(c.level) : lab };
   });
+
+  /** 需求这一半填够了没。入口节点的"确认"只有一枚，得同时管住三种说法中当前那一种。 */
+  const inputReady = (() => {
+    if (inputTab === "tags") {
+      const sel = (cfg.tagSelections as Record<string, string>) ?? {};
+      const custom = String(((cfg.tagCustomTexts as Record<string, string>) ?? {}).custom ?? "").trim();
+      return Object.values(sel).filter(Boolean).length > 0 || !!custom;
+    }
+    if (inputTab === "file") return uploadedItems.length > 0;
+    return !!String(cfg.userInput ?? "").trim();
+  })();
+
+  const INPUT_WAYS: { id: string; labelKey: string }[] = [
+    { id: "text", labelKey: "composer.item.input.text" },
+    { id: "tags", labelKey: "composer.item.input.tags" },
+    { id: "file", labelKey: "composer.item.input.file" },
+  ];
 
   return (
     <div className={cls} style={{ ["--cat-color" as string]: catColor }}>
@@ -278,10 +372,14 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
         <div className="rf-pipeline-header composer-node__head">
           <span className="composer-node__icon" aria-hidden>{node.icon}</span>
           <span className="rf-pipeline-label composer-node__title">{node.label}</span>
-          <span className={`composer-node__status is-${statusKind}`}>
-            <span className="composer-node__status-dot" aria-hidden />
-            <span className="composer-node__status-text">{statusText}</span>
-          </span>
+          {runStatus ? (
+            <NodeProgressRing pct={runPct} status={runStatus} size={16} />
+          ) : (
+            <span className={`composer-node__status is-${statusKind}`}>
+              <span className="composer-node__status-dot" aria-hidden />
+              <span className="composer-node__status-text">{statusText}</span>
+            </span>
+          )}
         </div>
         {!expanded && (
           <div className="composer-node__summary" title={typeof summary === "string" ? summary : undefined}>
@@ -289,12 +387,32 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
           </div>
         )}
       </div>
+      {runStatus && <NodeProgressBar pct={runPct} status={runStatus} />}
 
       {/* 详情/编辑栏（交互补集）：点击编辑，不触发拖动/平移 */}
       {expanded && (
         <div className="composer-node__editor nodrag nopan">
+          {/* ── 入口节点：三种说法自己挑一种，不必回目录里换一枚节点 ── */}
+          {isEntry && (
+            <div className="composer-config__field">
+              <span className="composer-config__label">{t("composer.cfg.inputWay")}</span>
+              <div className="composer-config__seg">
+                {INPUT_WAYS.map((way) => (
+                  <button
+                    key={way.id}
+                    type="button"
+                    className={`composer-config__seg-btn${inputTab === way.id ? " is-active" : ""}`}
+                    onClick={() => setField({ inputTab: way.id })}
+                  >
+                    {t(way.labelKey)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* ── 输入需求：直接输入 ── */}
-          {node.category === "input" && inputTab === "text" && (
+          {showInputCfg && inputTab === "text" && (
             <>
               <label className="composer-config__field">
                 <span className="composer-config__label">{t("composer.cfg.input")}</span>
@@ -306,17 +424,20 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
                   onChange={(e) => setField({ userInput: e.target.value })}
                 />
               </label>
-              <ConfirmFoot
-                confirmed={confirmed}
-                disabled={!String(cfg.userInput ?? "").trim()}
-                onConfirm={() => set({ confirmed: true })}
-                t={t}
-              />
+              {/* 入口节点的确认统一在最后一枚，管需求与路由两半，这里不再各出一个。 */}
+              {!isEntry && (
+                <ConfirmFoot
+                  confirmed={confirmed}
+                  disabled={!inputReady}
+                  onConfirm={() => set({ confirmed: true })}
+                  t={t}
+                />
+              )}
             </>
           )}
 
           {/* ── 输入需求：标签选择 ── */}
-          {node.category === "input" && inputTab === "tags" && (
+          {showInputCfg && inputTab === "tags" && (
             <>
               {TAG_DIMENSIONS.filter((d) => !d.allowCustom).map((dim) => (
                 <label className="composer-config__field" key={dim.key}>
@@ -357,20 +478,19 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
                   }
                 />
               </label>
-              <ConfirmFoot
-                confirmed={confirmed}
-                disabled={
-                  Object.values((cfg.tagSelections as Record<string, string>) ?? {}).filter(Boolean).length === 0 &&
-                  !String(((cfg.tagCustomTexts as Record<string, string>) ?? {}).custom ?? "").trim()
-                }
-                onConfirm={() => set({ confirmed: true })}
-                t={t}
-              />
+              {!isEntry && (
+                <ConfirmFoot
+                  confirmed={confirmed}
+                  disabled={!inputReady}
+                  onConfirm={() => set({ confirmed: true })}
+                  t={t}
+                />
+              )}
             </>
           )}
 
           {/* ── 输入需求：文件上传（全量迁移 §1.3：真实读取 + IP 预处理流程 IpStageFlow）── */}
-          {node.category === "input" && inputTab === "file" && fileRouting && (
+          {showInputCfg && inputTab === "file" && fileRouting && (
             <ComposerFileEditor
               nodeId={node.id}
               items={uploadedItems}
@@ -382,8 +502,56 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
             />
           )}
 
+          {/* ── 入口节点的三轴：类型 / 题材 / 体量。
+                 第四轴「叙事结构」不出面——后端按类型+题材推导（resolveNarrativeStructure），
+                 让用户在这里再选一次结构，等于要他替模型做一个他没有依据的决定。
+                 游戏品类与单品模块也不在这儿：前者由策划专家组选定，后者由单品助手团队定。 ── */}
+          {showAxesCfg && (
+            <>
+              <label className="composer-config__field">
+                <span className="composer-config__label">{t("composer.cfg.storyType")}</span>
+                <select
+                  className="composer-config__select"
+                  value={(cfg.storyType as string) ?? ""}
+                  onChange={(e) => setField({ storyType: e.target.value || null })}
+                >
+                  <option value="">{t("composer.cfg.tierAuto")}</option>
+                  {axes.types.map((o) => (
+                    <option key={o.code} value={o.code}>{axisOptionLabel(o)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="composer-config__field">
+                <span className="composer-config__label">{t("composer.cfg.storyTheme")}</span>
+                <select
+                  className="composer-config__select"
+                  value={(cfg.storyTheme as string) ?? ""}
+                  onChange={(e) => setField({ storyTheme: e.target.value || null })}
+                >
+                  <option value="">{t("composer.cfg.tierAuto")}</option>
+                  {axes.themes.map((o) => (
+                    <option key={o.code} value={o.code}>{axisOptionLabel(o)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="composer-config__field">
+                <span className="composer-config__label">{t("composer.cfg.scale")}</span>
+                <select
+                  className="composer-config__select"
+                  value={(cfg.complexity as number) ?? ""}
+                  onChange={(e) => setField({ complexity: e.target.value ? Number(e.target.value) : undefined })}
+                >
+                  <option value="">{t("composer.cfg.tierAuto")}</option>
+                  {complexityOptions.map((c) => (
+                    <option key={c.level} value={c.level}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+
           {/* ── 叙事路由：叙事全量 ── */}
-          {node.category === "routing" && routeGroup === "planning" && (
+          {showRoutingCfg && routeGroup === "planning" && (
             <>
               <label className="composer-config__field">
                 <span className="composer-config__label">{t("composer.cfg.tier")}</span>
@@ -437,7 +605,7 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
           )}
 
           {/* ── 叙事路由：叙事单品 ── */}
-          {node.category === "routing" && routeGroup === "narrative" && (
+          {showRoutingCfg && routeGroup === "narrative" && (
             <>
               <label className="composer-config__field">
                 <span className="composer-config__label">{t("composer.cfg.module")}</span>
@@ -470,22 +638,23 @@ function ComposerFlowNodeRaw({ id, data, selected }: NodeProps<ComposerFlowData>
             </>
           )}
 
-          {/* ── 叙事路由：确认（叙事全量 / 叙事单品 共用；确认后条目/生成由顶部统一触发）── */}
-          {node.category === "routing" && (
+          {/* ── 确认（叙事全量 / 叙事单品 / 需求入口 共用；确认后条目/生成由顶部统一触发）。
+                 入口节点走同一枚按钮，但要等需求那一半也填了才点得动。 ── */}
+          {(showRoutingCfg || showAxesCfg) && (
             <ConfirmFoot
               confirmed={confirmed}
-              disabled={false}
+              disabled={isEntry && !inputReady}
               onConfirm={() => set({ confirmed: true })}
               t={t}
             />
           )}
 
           {/* ── 专家 / 助手 / 工程师：只读信息 ── */}
-          {node.category === "expert" && node.pipelineTemplate && (
+          {node.category === "expert" && expertPipeline && (
             <div className="composer-config__field">
               <span className="composer-config__label">{t("composer.cfg.pipeline")}</span>
-              <span className="composer-config__readonly">
-                {TEMPLATE_LABELS[node.pipelineTemplate] ?? node.pipelineTemplate}
+              <span className="composer-config__readonly" title={expertPipeline.id ?? ""}>
+                {expertPipeline.name ?? expertPipeline.id}
                 {node.tier ? ` · ${node.tier.toUpperCase()}` : ""}
               </span>
             </div>

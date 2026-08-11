@@ -54,7 +54,7 @@
           "zh": "技能特效",
           "en": "Skills & VFX"
         },
-        "icon": "⚡",
+        "icon": "Sparkles",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -125,9 +125,9 @@
           "zh": "技能特效",
           "en": "Skills & VFX"
         },
-        "icon": "⚡",
+        "icon": "Sparkles",
         "order": 140,
-        "category": "workbench",
+        "category": "3D",
         "pageType": {
           "extension": "self",
           "id": "skill"

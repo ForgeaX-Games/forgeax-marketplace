@@ -6,6 +6,7 @@ import { getScreenshotService } from '@forgeax/editor-host/backend'
 import { getGlbService } from './glb.service.js'
 import { broadcastToClients } from '../routes/ws.js'
 import { getProjectDir, getProjectRegistry } from '../runtime.js'
+import { normalizeGlbFilename } from '../editor-import.js'
 
 // backend/src/agent/routes.ts → plugin repo root is three dirs up.
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
@@ -49,12 +50,7 @@ async function resolveAgentTarget(
 }
 
 function safeName(raw: unknown): string {
-  const base = (typeof raw === 'string' && raw.trim() ? raw : 'lowpoly-model')
-    .replace(/\.glb$/i, '')
-    .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^[._]+|[._]+$/g, '')
-  return base || 'lowpoly-model'
+  return normalizeGlbFilename(raw).replace(/\.glb$/iu, '')
 }
 
 // Agent-facing screenshot view. We deliberately DROP the base64 `dataUrl`:

@@ -1,18 +1,19 @@
 import { useEffect, useRef, useCallback, useMemo, useState, type ReactNode } from "react";
-import { Download, Trash2 } from "lucide-react";
 import { useT } from "./i18n";
 import { NarrativeCanvas } from "./components/NarrativeCanvas";
 import { TextViewPanel } from "./components/panels/TextViewPanel";
-import { StepDetailPanel } from "./components/panels/StepDetailPanel";
+import { FilePreview } from "./components/panels/FilePreview";
 import { RegeneratePanel } from "./components/panels/RegeneratePanel";
-import { ProjectPanel } from "./components/sidebar/ProjectPanel";
-import { CenterTopNav } from "./components/controls/CenterTopNav";
+import { LeftPane } from "./components/sidebar/LeftPane";
+import { CenterToolbar } from "./components/controls/CenterToolbar";
+import { CenterNote } from "./components/controls/CenterNote";
 import { CenterOverlay } from "./components/controls/CenterOverlay";
 import { WorkbenchProvider } from "./components/workbench/WorkbenchProvider";
 import { ComposerView } from "./components/composer/ComposerView";
 import { useNarrativeStore, useNarrativePhase } from "./store/narrativeStore";
 import type { TierId, ModeId } from "./types";
 import { useAutoAttach } from "./hooks/useAutoAttach";
+import { useFocusedFileFocus } from "./hooks/useFocusedFile";
 import { getPaneMode, isWorkbenchOwner } from "./lib/pane";
 import { notifyReady, sendToHost, onHostMessage } from "./lib/bridge";
 import "reactflow/dist/style.css";
@@ -49,6 +50,7 @@ export function App() {
   const t = useT();
   const pane = useMemo(getPaneMode, []);
   const viewMode = useNarrativeStore((s) => s.viewMode);
+  const focusedFile = useNarrativeStore((s) => s.focusedFile);
   const runningRunId = useNarrativeStore((s) => s.runningRunId);
   const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
   const activeSteps = useNarrativeStore((s) => s.activeSteps);
@@ -69,6 +71,8 @@ export function App() {
 
   // 自动挂载 agent（Kotone）在后台起的 run：让中间预览直播 + 左栏选择器回填，无需 host 转发。
   useAutoAttach();
+  // 左栏点开一份产物时，节点视图跟着挪到产它的节点上（文本侧由 FilePreview 接手）。
+  useFocusedFileFocus();
 
   useEffect(() => {
     notifyReady();
@@ -142,19 +146,6 @@ export function App() {
 
   const statusLabel = displayStatus === "running" ? t("app.status.generating") : displayStatus === "completed" ? t("app.status.done") : displayStatus === "interrupted" ? t("app.status.interrupted") : t("app.status.standby");
 
-  const handleExport = useCallback(() => {
-    const state = useNarrativeStore.getState();
-    const blob = new Blob([JSON.stringify(state.activeResult, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `narrative-${state.activeEntryKey?.slice(0, 16) ?? "draft"}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, []);
-
-  const hasEntry = !!activeEntryKey;
-
   const showSidebar = pane === "left" || pane === "full";
   const showCenter = pane === "center" || pane === "full";
   // 拖拽条仅在左右两栏同时可见（独立/并排 full 模式）时有意义；嵌入平台的 left 全宽模式不需要。
@@ -227,13 +218,13 @@ export function App() {
             style={resizable ? { width: sidebarWidth } : undefined}
           >
             <header className="workbench-pane-header">
-              <span className="workbench-pane-title">{t("tms.project.title")}</span>
+              <span className="workbench-pane-title">{t("left.title")}</span>
               <span className={`workbench-pane-pill ${displayStatus === "running" ? "running" : ""}`}>
                 {statusLabel}
               </span>
             </header>
             <div className="tool-left-panel__body">
-              <ProjectPanel />
+              <LeftPane />
             </div>
           </aside>
         )}
@@ -259,48 +250,29 @@ export function App() {
               </span>
             </header>
             <div className="cw-toolbar">
-              {/* 视图切换并入顶栏第四段「视图模式」，这里不再单列一排 segmented。 */}
-              <CenterTopNav />
+              {/* 第二层：只放三类工具组；视图与缩放归底栏那条居中工具条。 */}
+              <CenterToolbar />
 
-              {hasEntry && (
-                <div className="cw-toolbar-row">
-                  <span className="cw-hint">
-                    {displayStatus === "completed" ? t("app.status.completed") : displayStatus === "running" ? t("app.status.running") : displayStatus === "interrupted" ? t("app.status.interruptedShort") : ""}
-                    {displayStatus ? " · " : ""}
-                    {new Date().toLocaleDateString()} · {t("app.stepsCount", { n: activeSteps.filter((s) => s.status === "completed").length })}
-                  </span>
-                  <div className="cw-action-btns">
-                    <button type="button" className="fx-btn" onClick={handleExport}>
-                      <Download size={13} aria-hidden />
-                      {t("app.export")}
-                    </button>
-                    <button
-                      type="button"
-                      className="fx-btn fx-btn--danger"
-                      onClick={() => {
-                        if (confirm(t("app.clearConfirm"))) useNarrativeStore.getState().reset();
-                      }}
-                    >
-                      <Trash2 size={13} aria-hidden />
-                      {t("app.clear")}
-                    </button>
-                  </div>
-                </div>
-              )}
+              {/* 第三层：看的是哪一份 / 管线多大多深，与左栏路径行成对。 */}
+              <div className="cw-toolbar-row">
+                <CenterNote />
+              </div>
             </div>
 
             <div className="editor-center-body app-content">
               <RegeneratePanel />
               {viewMode === "text" ? (
-                <TextViewPanel />
+                // 左栏点开了某份产物就先看那一份，关掉退回按环节组织的常规文本视图。
+                focusedFile ? <FilePreview /> : <TextViewPanel />
               ) : composerMode ? (
                 <ComposerView />
               ) : (
+                // 节点模式下画布独占整片：内容看的是节点自己展开的那一段，
+                // 不再在下方另开一块文本面板——同一份数据两处摆着，用户得先判断该看哪一处。
                 <div className="graph-layout">
                   <div className="graph-canvas-area">
                     <NarrativeCanvas />
                   </div>
-                  <StepDetailPanel />
                 </div>
               )}
               {/* 浮层压在主体之上：主体永远整片铺开，输入卡与操作条只是盖上去。 */}

@@ -14,7 +14,7 @@
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
-  "icon": "🎨",
+  "icon": "Aperture",
   "keywords": [
     "diffusion-renderer",
     "realtime",
@@ -60,7 +60,7 @@
           "zh": "Diffusion Renderer",
           "en": "Diffusion Renderer"
         },
-        "icon": "🎨",
+        "icon": "Aperture",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -92,9 +92,9 @@
           "zh": "Diffusion Renderer",
           "en": "Diffusion Renderer"
         },
-        "icon": "🎨",
+        "icon": "Aperture",
         "order": 160,
-        "category": "workbench",
+        "category": "3D",
         "pageType": {
           "extension": "self",
           "id": "wb-diffusion-renderer"

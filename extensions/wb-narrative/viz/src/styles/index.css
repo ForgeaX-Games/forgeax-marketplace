@@ -1103,7 +1103,115 @@ body[data-pane="center"] .app-header { display: none; }
   white-space: nowrap;
 }
 
-/* ── 左栏项目管理：列表态 / 项目内部态共用的外框 ─────────────────────── */
+/* ── 左栏：竖图标条 + 当前那一块 ──────────────────────────────────── */
+/* 横向排列：切换器竖着占最左一列，正文吃掉其余宽度。
+   左栏本来就窄，横标签一占就是一整行，竖条只吃一列。 */
+.left-pane {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+}
+
+.left-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 8px 4px;
+  border-right: 1px solid var(--color-divider-subtle);
+}
+
+.left-rail__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--prim-radius-4);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.left-rail__btn:hover { color: var(--color-text-primary); }
+
+.left-rail__btn.is-active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.left-pane__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 第二层：当前这一块的名字。高度与底色对齐右栏那条工具组带（见 forgeax-tokens）。 */
+.left-pane__section {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: var(--pane-band2-h);
+  padding: 0 10px;
+  background: var(--color-background-base);
+  border-bottom: 1px solid var(--color-divider-subtle);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 第三层：选中条目的路径注释——一行到底，越深越靠右，溢出省略。 */
+.left-pane__path {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: var(--pane-band3-h);
+  padding: 0 10px;
+  background: var(--color-background-base);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  border-bottom: 1px solid var(--color-divider-subtle);
+}
+
+/* 中间几段可压缩省略；末段（最深一级）不参与压缩，永远看得全。 */
+.left-pane__crumb {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.left-pane__crumb.is-leaf {
+  flex: 0 0 auto;
+  max-width: 100%;
+  color: var(--color-text-secondary);
+}
+
+.left-pane__sep {
+  padding: 0 4px;
+  font-style: normal;
+  color: var(--color-text-tertiary);
+  opacity: 0.6;
+}
+
+.left-pane__body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .project-panel {
   display: flex;
   flex-direction: column;
@@ -1126,16 +1234,20 @@ body[data-pane="center"] .app-header { display: none; }
   color: var(--color-text-primary);
 }
 
-.project-panel__count {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--color-text-secondary);
-}
-
 .project-panel__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/*
+ * 进了条目内部，这一片就跟右侧创作空间同一档黑（canvas）。
+ *
+ * 列表态是"一叠卡片摆在台面上"，用的是台面色；条目内部是"打开的柜子里面"，
+ * 底该更深一档，浅绿的文件夹标题条压在这片黑上才立得住。两侧同色也让中缝不断。
+ */
+.project-panel--opened .project-panel__body {
+  background: var(--color-background-canvas);
 }
 
 /* 内容类型分区（资源管理 / 资产管理各一段）。 */
@@ -1151,15 +1263,60 @@ body[data-pane="center"] .app-header { display: none; }
 
 .pi-section__title { flex-shrink: 0; }
 
-.pi-bucket { display: flex; flex-direction: column; gap: 4px; }
+/*
+ * 中间层 = 一个文件夹。
+ *
+ * 之前它只是一行 10px 灰字，和底下的文件卡一样细一样淡，两层看着像一层。
+ * 现在把这一层做成整栏宽的实体：外面一圈框，标题条满铺且底色更亮一档，文件卡缩进框内。
+ * 层级靠"谁装着谁"来讲，比靠字号差半格更结实。
+ */
+.pi-bucket {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-divider-subtle);
+  border-radius: var(--prim-radius-6);
+  overflow: hidden;
+}
 
+/* 标题条走浅绿：条目以下整片是画布那档黑，文件夹标题是这片黑里唯一的亮带，一眼能数清有几夹。
+   亮带压到刚够分层：这是中间层，比它上面的条目卡和下面的文件卡都次要，
+   抢过它们的注意力反而让层级读不出来。 */
 .pi-bucket__title {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
-  letter-spacing: 0.05em;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--primary) 7%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--primary) 12%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   color: var(--color-text-secondary);
+}
+
+/* 折叠开关连着名字一起点：标题条本身就是那个开关，不必再瞄准一枚小箭头。 */
+.pi-bucket__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pi-bucket__toggle:hover { color: var(--primary); }
+
+/* 收起时只剩一条标题带，底下那条分隔线就多余了。 */
+.pi-bucket.is-closed .pi-bucket__title { border-bottom: none; }
+
+.pi-bucket .pi-cards {
+  padding: 6px;
 }
 
 .pi-bucket__count {
@@ -1193,11 +1350,16 @@ body[data-pane="center"] .app-header { display: none; }
 }
 
 /* 设计稿 08 的文件卡片网格。 */
+/* 一张卡上除文件名还挂着 @、版本、收集三个键，112px 的格子会把文件名压到只剩两三个字，
+   所以下限提到 160px：左栏这个宽度下自然是一列，栏拉宽了才分两列。 */
 .pi-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 6px;
 }
+
+/* 资产卡比资源卡多一个改归类下拉，挤进 112px 的格子会把文件名压没，所以整行铺开。 */
+.pi-cards--assets { grid-template-columns: 1fr; }
 
 .pi-card {
   display: flex;
@@ -1211,9 +1373,34 @@ body[data-pane="center"] .app-header { display: none; }
 }
 
 .pi-card:hover { border-color: var(--color-border-strong, var(--color-border-default)); }
-.pi-card.is-picked { border-color: var(--primary); }
+/*
+ * 「已收进项目」不再描绿边。
+ *
+ * 绿边与"正在看的那一份"用的是同一个记号，屏幕上于是同时有好几张卡看着像选中的，
+ * 用户合理地问出"为什么能选多个"。收藏是一个状态、选中是一个位置，两者不该同形：
+ * 收藏只把卡片右端那枚文件夹图标点亮（.pi-star.picked），选中才动整张卡。
+ */
+/* 右侧正在看的那一份：整卡点亮，跟左栏对得上。同一时刻只会有一张。 */
+.pi-card.is-focused {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
 
 .pi-card__icon { flex-shrink: 0; opacity: 0.6; }
+
+/* 文件名连同图标是一整个按钮：点它 = 在右侧打开这份产物。 */
+.pi-card__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
 
 .pi-card__name {
   flex: 1;
@@ -1224,6 +1411,109 @@ body[data-pane="center"] .app-header { display: none; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 一条产物 + 它摊开的历史版。 */
+.pi-entry { display: flex; flex-direction: column; gap: 4px; }
+
+.pi-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 10px;
+  padding-left: 6px;
+  border-left: 1px solid var(--color-divider-subtle);
+}
+
+/* 版本数徽标：只在这份产物有多稿时出现。 */
+.pi-vers {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 3px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.pi-vers em { font-style: normal; font-size: 9px; }
+.pi-vers.is-open { border-color: var(--primary); color: var(--primary); }
+
+/* 类别里的空位：点它从任意任务挑一份产物放进来。 */
+.pi-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.pi-slot:hover { border-color: var(--primary); color: var(--primary); }
+
+/* 花名册之外自开一类。 */
+.pi-newcat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pi-newcat:hover { border-color: var(--primary); color: var(--primary); }
+
+/* 新建类别面板：自己起名在上，花名册选项在下（多数时候点一下就够）。 */
+.pi-catadd {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+}
+
+.pi-catadd__foot { display: flex; gap: 6px; }
+
+.pi-catadd__opts { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.pi-catadd__opt {
+  padding: 2px 6px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.pi-catadd__opt:hover { border-color: var(--primary); color: var(--primary); }
+
+/* 类别名整个是按钮（点了改名），但看上去仍是标题，不做成按钮样。 */
+.pi-bucket__name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.pi-bucket__name:hover { color: var(--primary); }
 
 .pi-empty {
   font-size: 10px;
@@ -1289,6 +1579,139 @@ body[data-pane="center"] .app-header { display: none; }
 
 .pi-star:hover { opacity: 1; }
 .pi-star.picked { color: var(--primary); opacity: 1; }
+
+/* 项目内资产的改归类下拉：窄到只占一个图标的位置，展开才看清。 */
+.pi-move {
+  max-width: 66px;
+  padding: 1px 2px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+  background: var(--color-background-base);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+}
+
+/* 收集浮层：就长在触发它的那一行下面，列出项目与其类别，点哪一行就收进哪儿。
+   曾经钉在面板底部（sticky bottom），但那样它和触发点之间可能隔着十几行文件，
+   看着像是凭空冒出来的另一件事。 */
+.tf-collect {
+  margin: 2px 0 6px;
+  border: 1px solid var(--primary);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-floating);
+  box-shadow: var(--shadow-overlay, 0 8px 24px rgb(0 0 0 / 28%));
+}
+
+/* 摊在卡片网格里时占满整行：挤进 160px 的格子会把项目名全压掉。 */
+.pi-cards > .tf-collect { grid-column: 1 / -1; }
+
+.tf-collect__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-divider-subtle);
+}
+
+.tf-collect__title {
+  flex: 1;
+  font-size: 11px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tf-collect__close {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.tf-collect__body {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.tf-collect__project { margin-bottom: 4px; }
+
+.tf-collect__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--prim-radius-4);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tf-collect__row:hover { background: var(--color-background-base); }
+
+.tf-collect__row em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+}
+
+.tf-collect__row--cat {
+  padding-left: 24px;
+  color: var(--color-text-secondary);
+}
+
+.tf-collect__new {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tf-collect__new:hover { border-color: var(--primary); color: var(--primary); }
+
+/* 项目库：新建项目 / 新建类别的行内表单。 */
+.vault-create,
+.vault-newcat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--color-divider-subtle);
+}
+
+.vault-create { flex-wrap: wrap; }
+.vault-newcat { border-bottom: none; padding: 6px 0; }
+
+.vault-create .wb-tag-custom-input,
+.vault-newcat .wb-tag-custom-input { flex: 1; min-width: 96px; }
+
+.vault-edit {
+  padding: 1px 6px;
+  border: 1px solid var(--color-border-default);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.vault-edit:hover { color: var(--primary); border-color: var(--primary); }
+
 .history-loading,
 .history-empty {
   font-size: 11px;
@@ -1305,6 +1728,32 @@ body[data-pane="center"] .app-header { display: none; }
   padding: 2px 0;
   min-width: 0;
 }
+/* 列表最上那张新建卡：与任务卡等宽等高，虚线表示"这里还没有东西，是个坑位"。
+   等高不是凑数：坑位比真卡矮一截时，列表首尾会各塌下去一块，看着像没对齐的边框。
+   68px = 任务卡三行的实测自然高度（5+5 内边距 + 时间行 + 单行简介 + 标签行）。 */
+.history-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: var(--history-row-min-h, 68px);
+  padding: 5px 7px;
+  box-sizing: border-box;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.history-new:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
 .history-item {
   background: var(--dt-dot);
   border: 1px solid var(--dt-green-glow);
@@ -1319,6 +1768,48 @@ body[data-pane="center"] .app-header { display: none; }
 .history-item:hover:not(.selected) {
   background: var(--dt-green-glow);
   border-color: var(--dt-green-faint);
+}
+
+/* 已进入的那一条：留在原位当"我在哪"的标牌，不再有 hover 反馈（它不是个可点的选项）。
+   右侧留出返回键的地盘，正文才不会钻到按钮底下。 */
+.history-item.is-opened {
+  position: relative;
+  margin-bottom: 6px;
+  padding-right: 44px;
+  border-left-color: var(--primary);
+  cursor: default;
+}
+
+.history-item.is-opened:hover { background: var(--dt-dot); }
+
+/* 返回上一级：贴卡片右缘、相对整张卡上下居中。
+   不再挂在时间行右端——那样它的高度只由第一行决定，卡片三行时看着偏上；
+   这是全卡唯一的出口动作，值得独占右侧一竖条。 */
+.hi-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: transparent;
+  color: var(--color-icon-secondary, var(--color-text-secondary));
+  cursor: pointer;
+}
+
+.history-item.is-opened .hi-back {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 0;
+}
+
+.hi-back:hover {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
 }
 .history-item.status-completed { border-left-color: var(--dt-green); }
 .history-item.status-failed    { border-left-color: var(--dt-red); }
@@ -1471,6 +1962,17 @@ body[data-pane="center"] .app-header { display: none; }
   border-radius: var(--prim-radius-4);
   color: var(--dt-green-dim);
   font-size: 10px;
+}
+/* 一项路由都没定：照旧占住第三行的位置，但明说走的是自动，别让人以为漏了。 */
+.hi-tag--auto {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--dt-text-dim);
+}
+/* 上传型条目的第二行前缀图标：与文字同一基线，不吃行高。 */
+.hi-row-icon {
+  vertical-align: -1px;
+  margin-right: 4px;
+  opacity: 0.8;
 }
 .hi-files { color: rgba(255,255,255,0.3); font-size: 10px; }
 .hi-cp-info {
@@ -2225,6 +2727,83 @@ body[data-pane="center"] .app-header { display: none; }
   overflow-y: auto;
   padding: 16px 24px;
   box-sizing: border-box;
+}
+
+/* ── 单份产物的正文：左栏点开一份文件时顶掉常规文本视图 ────────────── */
+/* 父级是 flex 列，光给 height:100% 不够：flex item 默认按内容收缩，
+   正文会被压成只剩标题那一行。要连 flex:1 一起给。 */
+.artifact-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.artifact-view__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-divider-subtle);
+  color: var(--color-text-secondary);
+}
+
+.artifact-view__name {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artifact-view__key {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+
+.artifact-view__close {
+  display: flex;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.artifact-view__close:hover { color: var(--color-text-primary); }
+
+.artifact-view__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+/* 复用文本视图那套可读渲染的排版容器（滚动归 __body，这里只管字号与行距）。 */
+.artifact-view__rendered {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text-primary);
+}
+
+/* 落盘原样（当前不走这条，留给需要原文对照的场合）。 */
+.artifact-view__text {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .empty-state {
@@ -3159,6 +3738,51 @@ body[data-pane="center"] .app-header { display: none; }
   to { opacity: 1; }
 }
 
+/* 管线节点借编排节点的形式（满铺标题条 + 简介行 + 进度），收起态撑满布局算好的那个格子。 */
+.rf-pipeline-node.composer-node {
+  width: 100%;
+  height: 100%;
+}
+
+/* 展开态：同一张卡就地长大——横向放宽到读得下正文，纵向随内容自然增高，
+   起点仍是格子的左上角，所以视线不用重新找卡。溢出格子压住邻居由 z-index 兜（见下方 :has 规则）。 */
+.rf-pipeline-node.is-expanded {
+  width: 320px;
+  height: auto;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.rf-pipeline-node.type-special.is-expanded { width: 360px; }
+
+/* 编排画布的卡片：两态都是固定的模板尺寸。
+   这里的节点没有布局算好的行内尺寸，若吃上面那条 width:100%，百分比会退化成
+   「按内容撑开」——需求文本一长，卡片就摊成一条横幅。 */
+.rf-pipeline-node.composer-node--card {
+  width: 190px;
+  height: auto;
+  min-height: 0;
+}
+.rf-pipeline-node.composer-node--card.is-expanded { width: 244px; }
+
+/* 全量内容段：与上面的简介行隔一条线，自己滚动，不把卡撑到画布外。 */
+.rf-pipeline-detail {
+  cursor: default;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.rf-narrative-card-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--dt-green-faint);
+  overflow-y: auto;
+}
+
+/* 简介与编排侧一样给两行：格子（PL_H）已按两行的高度留好。 */
+
 .rf-pipeline-node::before {
   content: "";
   position: absolute;
@@ -3191,25 +3815,6 @@ body[data-pane="center"] .app-header { display: none; }
 .rf-pipeline-node.status-failed::before { background: var(--dt-red); }
 
 /* Overlay panel for expanded pipeline/card nodes */
-.rf-pipeline-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 320px;
-  max-height: 400px;
-  overflow-y: auto;
-  z-index: 9999;
-  background: var(--dt-bg);
-  border: 1px solid var(--dt-edge-done);
-  border-radius: var(--prim-radius-6);
-  padding: 8px 10px;
-  box-shadow: 0 0 24px var(--dt-green-faint), 0 0 8px var(--dt-green-faint), 0 4px 16px rgba(0,0,0,0.6);
-  font-family: var(--font-mono);
-}
-.rf-narrative-card-overlay {
-  width: 360px;
-}
-
 @keyframes shimmer { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
 
 .rf-pipeline-header {
@@ -3271,9 +3876,8 @@ body[data-pane="center"] .app-header { display: none; }
   font-family: var(--font-mono);
 }
 
-/* Elevate React Flow node wrapper when it contains an expanded overlay */
-.react-flow__node:has(.rf-child-overlay),
-.react-flow__node:has(.rf-pipeline-overlay) {
+/* 展开的那张卡溢出自己的格子，必须压在邻居与连线之上；一次只有一张卡展开，不会互相争。 */
+.react-flow__node:has(.is-expanded) {
   z-index: 9999 !important;
 }
 
@@ -3381,6 +3985,19 @@ body[data-pane="center"] .app-header { display: none; }
   font-family: var(--font-mono);
   letter-spacing: 0.5px;
   white-space: nowrap;
+}
+
+/* 副标题（专家容器报所跑的席位管线）：标题仍占余量，副标题窄且可截断。 */
+.rf-story-group-sublabel {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  font-size: 9px;
+  color: var(--dt-text-sec);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rf-story-group-count {
@@ -3532,22 +4149,22 @@ body[data-pane="center"] .app-header { display: none; }
   box-shadow: 0 0 10px var(--dt-green-glow), 0 0 4px var(--dt-green-glow);
 }
 
-/* Overlay panel for expanded story child nodes */
-.rf-child-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
+/* 展开态：同一张子节点卡就地长大，起点仍是它自己的左上角。 */
+.rf-story-child.is-expanded {
   width: 280px;
-  min-height: 72px;
-  max-height: 360px;
-  overflow-y: auto;
-  z-index: 9999;
-  background: rgba(4, 8, 2, 0.97);
-  border: 1px solid var(--dt-edge-done);
-  border-radius: var(--prim-radius-4);
-  padding: 6px 8px;
+  min-height: 100%;
+  height: auto;
+  border-color: var(--dt-edge-done);
   box-shadow: 0 0 20px var(--color-accent-dim), 0 0 6px var(--dt-green-glow), 0 4px 16px rgba(0,0,0,0.6);
-  font-family: var(--font-mono);
+}
+
+/* 序号 + 标题 + 预览就在上面的 .rf-child-collapsed 里，这一段只补它们装不下的全量内容。 */
+.rf-child-detail {
+  cursor: default;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0 7px 6px;
+  border-top: 1px solid var(--dt-green-faint);
   font-size: 9px;
   color: var(--dt-text);
   line-height: 1.6;
@@ -3697,11 +4314,15 @@ body[data-pane="center"] .app-header { display: none; }
   cursor: pointer;
 }
 
-.rf-child-exp-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--dt-text);
-  margin-bottom: 3px;
+/* 收起标记跟在进度环后面：那一行已经有个 margin-left:auto 把环推到右端，
+   这里再来一个会把两者分到两头，中间裂开一道空档。 */
+.rf-child-header .rf-child-close,
+.composer-node__head .rf-child-close { margin-left: 3px; }
+
+/* 详情段自己已有一条上边线，这一行紧贴其下，不必再画第二条。 */
+.rf-child-detail .rf-child-exp-header {
+  padding-top: 4px;
+  border-bottom: none;
 }
 
 .rf-child-exp-func {

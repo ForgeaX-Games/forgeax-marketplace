@@ -14,7 +14,7 @@
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
-  "icon": "🔭",
+  "icon": "Telescope",
   "keywords": [
     "observatory",
     "agent",
@@ -60,7 +60,7 @@
           "zh": "Observatory · 轨迹观察台",
           "en": "Observatory"
         },
-        "icon": "🔭",
+        "icon": "Telescope",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -92,9 +92,9 @@
           "zh": "Observatory · 轨迹观察台",
           "en": "Observatory"
         },
-        "icon": "🔭",
+        "icon": "Telescope",
         "order": 150,
-        "category": "workbench",
+        "category": "general",
         "pageType": {
           "extension": "self",
           "id": "wb-observatory"

@@ -14,7 +14,7 @@
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
-  "icon": "🧱",
+  "icon": "User",
   "keywords": [
     "character",
     "3d",
@@ -79,7 +79,7 @@
           "zh": "方块人编辑器",
           "en": "LowPoly Humanoid Editor"
         },
-        "icon": "🧱",
+        "icon": "User",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -140,6 +140,22 @@
           "**/.forgeax/games/*/lowpoly-characters/**"
         ],
         "preferredAgent": "@forgeax-extension/agent-cc-coder"
+      }
+    ],
+    "activities": [
+      {
+        "id": "wb-lowpoly-obj.launcher",
+        "title": {
+          "zh": "方块人编辑器",
+          "en": "LowPoly Humanoid Editor"
+        },
+        "icon": "User",
+        "order": 158,
+        "category": "3D",
+        "pageType": {
+          "extension": "self",
+          "id": "wb-lowpoly-obj"
+        }
       }
     ],
     "tools": [

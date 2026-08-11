@@ -12,6 +12,7 @@ import Titlebar from './viewer3d/components/Titlebar'
 import ViewerCanvas from './viewer3d/components/ViewerCanvas'
 import SidePanel from './viewer3d/components/SidePanel'
 import { useViewerStore } from './viewer3d/store/viewerStore'
+import { useViewerI18n } from './viewer3d/i18n/strings'
 import { useViewer3DLiveSync } from './viewer3d/useViewer3DLiveSync'
 import { exportAnimatedGlbBlob, exportStaticGlbBlob, exportSkinnedGlbBlob, exportCharacterGlbBlob } from './viewer3d/three/export-glb'
 import { captureFrameToBlob } from './viewer3d/three/capture-frame'
@@ -20,6 +21,14 @@ import { cloneObject3DForExport, disposeObject3D } from './viewer3d/three/three-
 import { useViewer3DScene } from './viewer3d/three/useViewer3DScene'
 import { useScreenshotCapture } from './viewer3d/useScreenshotCapture'
 import { useGlbExport } from './viewer3d/useGlbExport'
+import {
+  blobToBase64,
+  createDirectImportRequestId,
+  DEFAULT_ENGINE_ASSET_DIRECTORY,
+  normalizeEngineAssetDirectory,
+  normalizeEngineGlbFilename,
+  requestDirectEngineImport,
+} from './viewer3d/direct-engine-import'
 import './viewer3d/theme.css'
 import './viewer3d/Viewer3DSurface.css'
 
@@ -27,6 +36,7 @@ const EDITOR_SELECTION_MESSAGE = 'workbench:editor-selection'
 const PROJECT_CHANGED_MESSAGE = 'workbench:project-changed'
 
 type ExportFormat = 'obj' | 'glb' | 'glb-static' | 'glb-skinned' | 'glb-character' | 'urdf'
+type GlbExportFormat = Extract<ExportFormat, 'glb' | 'glb-static' | 'glb-skinned' | 'glb-character'>
 
 export interface Viewer3DSurfaceProps {
   /** Live-sync transport. Wired in a later task; unused for now. */
@@ -128,6 +138,8 @@ export function Viewer3DSurface(props: Viewer3DSurfaceProps = {}): JSX.Element {
   const sceneSpec = useViewerStore((s) => s.sceneSpec)
   const rigSpec = useViewerStore((s) => s.rigSpec)
   const sourceLabel = useViewerStore((s) => s.sourceLabel)
+  const t = useViewerI18n()
+  const isStudioEmbedded = typeof window !== 'undefined' && window.parent !== window
   const baseUrl = useViewerStore((s) => s.baseUrl)
   const assetRevisionKey = useViewerStore((s) => s.assetRevisionKey)
   const render = useViewerStore((s) => s.render)
@@ -137,6 +149,12 @@ export function Viewer3DSurface(props: Viewer3DSurfaceProps = {}): JSX.Element {
   const errorMessage = useViewerStore((s) => s.errorMessage)
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const [directImportOpen, setDirectImportOpen] = useState(false)
+  const [directImportDirectory, setDirectImportDirectory] = useState<string>(DEFAULT_ENGINE_ASSET_DIRECTORY)
+  const [directImportName, setDirectImportName] = useState('model.glb')
+  const [directImportStatus, setDirectImportStatus] = useState<'idle' | 'working' | 'success' | 'error'>('idle')
+  const [directImportError, setDirectImportError] = useState<string | null>(null)
+  const [directImportTarget, setDirectImportTarget] = useState<string | null>(null)
 
   const {
     spec, error, jointValues, previewJointValues,
@@ -244,6 +262,91 @@ export function Viewer3DSurface(props: Viewer3DSurfaceProps = {}): JSX.Element {
     }
   }, [captureFrame, spec, setErrorMessage])
 
+  /** Shared GLB exporter for both the legacy download menu and direct import. */
+  const exportGlbBlob = useCallback(async (format: GlbExportFormat): Promise<Blob> => {
+    if (format === 'glb-character') {
+      const character = getCharacterExport()
+      if (!character) throw new Error('No character rig is ready to export (load a skinned rig first)')
+      return exportCharacterGlbBlob(character.root, character.clips)
+    }
+
+    const root = getExportObject()
+    if (!root) throw new Error('No 3D object is ready to export')
+    root.updateMatrixWorld(true)
+
+    if (format === 'glb-skinned') {
+      if (!spec) throw new Error('No URDF spec available for GLB export')
+      return exportSkinnedGlbBlob(root, spec, authoredAnimation)
+    }
+
+    const exportRoot = cloneObject3DForExport(root)
+    try {
+      return format === 'glb' && spec
+        ? await exportAnimatedGlbBlob(exportRoot, spec, authoredAnimation)
+        : await exportStaticGlbBlob(exportRoot)
+    } finally {
+      disposeObject3D(exportRoot)
+    }
+  }, [authoredAnimation, getCharacterExport, getExportObject, spec])
+
+  const openDirectImportDialog = useCallback(() => {
+    const baseName = sanitizeBaseName(spec?.name ?? sourceLabel, 'model')
+    setDirectImportDirectory(DEFAULT_ENGINE_ASSET_DIRECTORY)
+    setDirectImportName(`${baseName}.glb`)
+    setDirectImportStatus('idle')
+    setDirectImportError(null)
+    setDirectImportTarget(null)
+    setDirectImportOpen(true)
+  }, [sourceLabel, spec])
+
+  const closeDirectImportDialog = useCallback(() => {
+    if (directImportStatus === 'working') return
+    setDirectImportOpen(false)
+  }, [directImportStatus])
+
+  const handleDirectImport = useCallback(async () => {
+    let directory: string
+    let sourceName: string
+    try {
+      directory = normalizeEngineAssetDirectory(directImportDirectory)
+      sourceName = normalizeEngineGlbFilename(directImportName)
+    } catch (error) {
+      setDirectImportStatus('error')
+      setDirectImportError(error instanceof Error ? error.message : String(error))
+      return
+    }
+
+    setDirectImportDirectory(directory)
+    setDirectImportName(sourceName)
+    setDirectImportStatus('working')
+    setDirectImportError(null)
+    setDirectImportTarget(`${directory}/${sourceName}`)
+    try {
+      const format: GlbExportFormat = mode === 'character'
+        ? 'glb-character'
+        : spec
+          ? 'glb'
+          : 'glb-static'
+      const blob = await exportGlbBlob(format)
+      const base64 = await blobToBase64(blob)
+      await requestDirectEngineImport({
+        requestId: createDirectImportRequestId(),
+        directory,
+        name: sourceName,
+        base64,
+      })
+      setDirectImportStatus('success')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('aborted') || message.includes('AbortError')) {
+        setDirectImportStatus('idle')
+        return
+      }
+      setDirectImportStatus('error')
+      setDirectImportError(message)
+    }
+  }, [directImportDirectory, directImportName, exportGlbBlob, mode, spec])
+
   const handleExport = useCallback(async (format: ExportFormat) => {
     try {
       const baseName = sanitizeBaseName(spec?.name ?? sourceLabel, 'model')
@@ -264,36 +367,30 @@ export function Viewer3DSurface(props: Viewer3DSurfaceProps = {}): JSX.Element {
       root.updateMatrixWorld(true)
 
       if (format === 'glb-character') {
-        // 角色骨骼蒙皮：直接导出活跃 SkinnedMesh + Skeleton 容器 + 骨骼动画 clip。
-        const character = getCharacterExport()
-        if (!character) throw new Error('No character rig is ready to export (load a skinned rig first)')
         await saveGeneratedBlob(
           `${baseName}-character.glb`,
           'Binary glTF (character)',
           'model/gltf-binary',
           'glb',
-          () => exportCharacterGlbBlob(character.root, character.clips),
+          () => exportGlbBlob('glb-character'),
         )
         return
       }
 
       if (format === 'glb-skinned') {
-        // 骨骼蒙皮导出只读活跃场景（自己 clone 独立几何体），不需要像 obj/glb/glb-static
-        // 那样先克隆一份可 dispose 的 exportRoot——见 export-glb.ts 的 exportSkinnedGlbBlob。
-        if (!spec) throw new Error('No URDF spec available for GLB export')
         await saveGeneratedBlob(
           `${baseName}-skinned.glb`,
           'Binary glTF (skinned)',
           'model/gltf-binary',
           'glb',
-          () => exportSkinnedGlbBlob(root, spec, authoredAnimation),
+          () => exportGlbBlob('glb-skinned'),
         )
         return
       }
 
-      const exportRoot = cloneObject3DForExport(root)
-      try {
-        if (format === 'obj') {
+      if (format === 'obj') {
+        const exportRoot = cloneObject3DForExport(root)
+        try {
           await saveGeneratedBlob(
             `${baseName}.obj`,
             'Wavefront OBJ',
@@ -306,30 +403,28 @@ export function Viewer3DSurface(props: Viewer3DSurfaceProps = {}): JSX.Element {
             },
           )
           return
+        } finally {
+          disposeObject3D(exportRoot)
         }
-
-        // 静态版只导出几何 + 材质（不需要 spec）；动画版烘关节预览轨迹（需要 spec）。
-        // 文件名带 `-static` 后缀避免覆盖动画版。静态管线（无 URDF spec）下"glb"退化为
-        // 几何导出——纯静态物体没有关节可烘。
-        const animated = format === 'glb' && !!spec
-        await saveGeneratedBlob(
-          `${baseName}${animated ? '' : '-static'}.glb`,
-          animated ? 'Binary glTF (animated)' : 'Binary glTF (static)',
-          'model/gltf-binary',
-          'glb',
-          () => (animated ? exportAnimatedGlbBlob(exportRoot, spec!, authoredAnimation) : exportStaticGlbBlob(exportRoot)),
-        )
-      } finally {
-        // 导出克隆是 root.clone(true) 的临时副本（geometry/material 在 GLB/OBJ
-        // 导出路径中可能被独立分配），用完即释放，避免每次导出泄漏一棵子树。
-        disposeObject3D(exportRoot)
       }
+
+      // 静态版只导出几何 + 材质（不需要 spec）；动画版烘关节预览轨迹（需要 spec）。
+      // 文件名带 `-static` 后缀避免覆盖动画版。静态管线（无 URDF spec）下"glb"退化为
+      // 几何导出——纯静态物体没有关节可烘。
+      const animated = format === 'glb' && !!spec
+      await saveGeneratedBlob(
+        `${baseName}${animated ? '' : '-static'}.glb`,
+        animated ? 'Binary glTF (animated)' : 'Binary glTF (static)',
+        'model/gltf-binary',
+        'glb',
+        () => exportGlbBlob(animated ? 'glb' : 'glb-static'),
+      )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('aborted') || msg.includes('AbortError')) return
       setErrorMessage(`Export failed: ${msg}`)
     }
-  }, [getExportObject, getCharacterExport, setErrorMessage, source, spec, authoredAnimation, sourceLabel])
+  }, [exportGlbBlob, getExportObject, setErrorMessage, source, spec, sourceLabel])
 
   return (
     <ViewerErrorBoundary>
@@ -337,11 +432,13 @@ export function Viewer3DSurface(props: Viewer3DSurfaceProps = {}): JSX.Element {
         <Titlebar
           onResetView={resetCamera}
           onExport={handleExport}
+          onDirectImport={openDirectImportDialog}
           onScreenshot={handleScreenshot}
           canExportUrdf={source.trim().length > 0}
           canExportScene={!!spec || !!sceneSpec}
           canExportSkinned={!!spec}
           canExportCharacter={mode === 'character'}
+          canDirectImport={isStudioEmbedded && (!!spec || !!sceneSpec || mode === 'character')}
         />
         <div className="viewer-main">
           <div className="viewer-canvas-area">
@@ -374,6 +471,103 @@ export function Viewer3DSurface(props: Viewer3DSurfaceProps = {}): JSX.Element {
             stats={stats}
           />
         </div>
+        {directImportOpen && (
+          <div
+            className="viewer-direct-import-overlay"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeDirectImportDialog()
+            }}
+          >
+            <section className="viewer-direct-import-modal" role="dialog" aria-modal="true" aria-labelledby="viewer-direct-import-title">
+              <header className="viewer-direct-import-header">
+                <span id="viewer-direct-import-title">{t.titlebar.directImportTitle}</span>
+                <button
+                  type="button"
+                  className="viewer-direct-import-close"
+                  onClick={closeDirectImportDialog}
+                  disabled={directImportStatus === 'working'}
+                  aria-label={t.titlebar.cancel}
+                >
+                  ×
+                </button>
+              </header>
+              <div className="viewer-direct-import-body">
+                <p className="viewer-direct-import-description">{t.titlebar.directImportDescription}</p>
+                <label className="viewer-direct-import-field">
+                  <span>{t.titlebar.directImportDirectoryLabel}</span>
+                  <input
+                    value={directImportDirectory}
+                    onChange={(event) => setDirectImportDirectory(event.target.value)}
+                    placeholder={DEFAULT_ENGINE_ASSET_DIRECTORY}
+                    disabled={directImportStatus === 'working'}
+                    spellCheck={false}
+                    autoFocus
+                  />
+                  <small>{t.titlebar.directImportDirectoryHint}</small>
+                </label>
+                <div className="viewer-direct-import-presets" aria-label={t.titlebar.directImportDirectoryLabel}>
+                  {['assets/3d', 'assets', 'assets/models'].map((directory) => (
+                    <button
+                      key={directory}
+                      type="button"
+                      className="viewer-direct-import-preset"
+                      onClick={() => setDirectImportDirectory(directory)}
+                      disabled={directImportStatus === 'working'}
+                    >
+                      {directory}
+                    </button>
+                  ))}
+                </div>
+                <label className="viewer-direct-import-field">
+                  <span>{t.titlebar.directImportFilenameLabel}</span>
+                  <input
+                    value={directImportName}
+                    onChange={(event) => setDirectImportName(event.target.value)}
+                    placeholder="model.glb"
+                    disabled={directImportStatus === 'working'}
+                    spellCheck={false}
+                  />
+                  <small>{t.titlebar.directImportFilenameHint}</small>
+                </label>
+                {directImportTarget && (
+                  <div className="viewer-direct-import-target">
+                    <span>{directImportTarget}</span>
+                  </div>
+                )}
+                {directImportStatus === 'working' && (
+                  <p className="viewer-direct-import-status" role="status">{t.titlebar.directImportWorking}</p>
+                )}
+                {directImportStatus === 'success' && (
+                  <p className="viewer-direct-import-status success" role="status">{t.titlebar.directImportSuccess}</p>
+                )}
+                {directImportStatus === 'error' && directImportError && (
+                  <p className="viewer-direct-import-status error" role="alert">{directImportError}</p>
+                )}
+              </div>
+              <footer className="viewer-direct-import-footer">
+                <button
+                  type="button"
+                  className="viewer-paste-btn-secondary"
+                  onClick={closeDirectImportDialog}
+                  disabled={directImportStatus === 'working'}
+                >
+                  {directImportStatus === 'success' ? t.titlebar.directImportClose : t.titlebar.cancel}
+                </button>
+                {directImportStatus !== 'success' && (
+                  <button
+                    type="button"
+                    className="viewer-paste-btn-primary"
+                    onClick={() => { void handleDirectImport() }}
+                    disabled={directImportStatus === 'working'}
+                  >
+                    {directImportStatus === 'error' ? t.titlebar.directImportRetry : t.titlebar.directImportSubmit}
+                  </button>
+                )}
+              </footer>
+            </section>
+          </div>
+        )}
       </div>
     </ViewerErrorBoundary>
   )

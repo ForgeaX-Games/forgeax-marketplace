@@ -418,15 +418,18 @@ export class LLMClient {
     const retrySuffixEn = (attempt: number, msg: string) =>
       `\n\n⚠️ Previous output was invalid (retry ${attempt}): ${msg}\nRegenerate. Requirements:\n- Valid JSON only; no comments, ellipses, or extra prose\n- Commas between array elements and object properties\n- No trailing comma after the last element\n- Escape newlines in strings as \\n`;
 
+    const rejected: string[] = [];
     for (let i = 0; i < effectiveRetries; i++) {
+      let raw = "";
       try {
-        const raw = onChunk
+        raw = onChunk
           ? await this.callStreamFull(effectiveSystemPrompt, adjustedUserPrompt, options, onChunk)
           : await this.call(effectiveSystemPrompt, adjustedUserPrompt, options);
         if (effectiveParseResult) effectiveParseResult(raw);
         return raw;
       } catch (e) {
         lastError = e as Error;
+        if (raw) rejected.push(raw);
         if (i < effectiveRetries - 1) {
           await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, i)));
         }
@@ -437,8 +440,31 @@ export class LLMClient {
             : retrySuffixZh(i + 1, lastError.message));
       }
     }
-    throw lastError ?? new Error("callWithRetry exhausted all retries");
+    throw new Error(describeRetryExhaustion(lastError, rejected), { cause: lastError });
   }
+}
+
+/**
+ * 重试全部失败时，把"模型到底吐了什么"一并说出来。
+ *
+ * 之前这里只把最后一次的异常原样抛出，落到 manifest 里就是一句
+ * `Expected double-quoted property name in JSON at position 3237` ——
+ * 位置有了、内容没了，事后只能靠重跑去猜是哪种坏法（而重跑往往就好了）。
+ * 报错要能自证：附上出错位置附近的原文和每次尝试的长度。
+ */
+function describeRetryExhaustion(lastError: Error | undefined, rejected: string[]): string {
+  const base = lastError?.message ?? "callWithRetry exhausted all retries";
+  if (rejected.length === 0) return base;
+  const last = rejected[rejected.length - 1];
+  const sizes = rejected.map((r) => `${r.length}`).join("/");
+  const posMatch = /position (\d+)/.exec(base);
+  const pos = posMatch ? parseInt(posMatch[1], 10) : -1;
+  const excerpt =
+    pos >= 0
+      ? last.slice(Math.max(0, pos - 120), pos + 120)
+      : last.slice(-240);
+  const where = pos >= 0 ? `出错处附近` : `输出末尾`;
+  return `${base}（${rejected.length} 次尝试均被拒，输出长度 ${sizes}；${where}: …${excerpt}…）`;
 }
 
 /**

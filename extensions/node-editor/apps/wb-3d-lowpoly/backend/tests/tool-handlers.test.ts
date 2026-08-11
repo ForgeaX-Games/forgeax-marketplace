@@ -30,11 +30,15 @@ describe('ToolRegistry lowpoly handlers', () => {
     expect(legacy.every((entry) => entry.exposedToAI === false)).toBe(true)
     expect(entries.find((entry) => entry.id === 'lowpoly:model.bakeBatch')?.exposedToAI).toBe(true)
     expect(entries.find((entry) => entry.id === 'lowpoly:model.patch')?.exposedToAI).toBe(true)
+    expect(entries.find((entry) => entry.id === 'lowpoly:export-to-engine')?.exposedToAI).toBe(true)
+    expect(entries.find((entry) => entry.id === 'lowpoly:import-glb')).toBeUndefined()
   })
 
   it('registers the batch and source-hash patch handlers', () => {
     expect(tools['lowpoly:model.bakeBatch']).toBeTypeOf('function')
     expect(tools['lowpoly:model.patch']).toBeTypeOf('function')
+    expect(tools['lowpoly:export-to-engine']).toBeTypeOf('function')
+    expect(tools['lowpoly:import-glb']).toBeUndefined()
   })
 
   it('uses the Studio plugin dev backendPort override when proxying tool calls', async () => {

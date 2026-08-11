@@ -1,11 +1,15 @@
 /**
  * blueprint/prompt-resolver.ts
  *
- * ⚠️ 生产状态（P1.2 真值标注）：本解析器是 Blueprint/AgentRunner **实验路径**的提示词引擎，
- *    仅当某 AgentDef 显式设置 `useNewRunner=true` 时才会被 runner 调用——目前**全仓无一处置 true**
- *    （见 pipeline.ts:1179），故本文件在默认/当前生产路径上**不被执行**。
- *    唯一生产提示词引擎是 prompt-composer.ts 的 `composeSystemPrompt`（run() 与 runWithBlueprint
- *    的 legacy 回退均走它）。改提示词请改对应 step 的 PromptComposer.blocks，勿改本文件。
+ * ⚠️ 生产状态：本文件的**两个入口地位不同**。
+ *
+ *    resolveFromComposer  在生产路径上。executeAgent 对每个 useNewRunner 的 agent
+ *                         都经它把内联 PromptComposer 转成 ResolvedPrompts
+ *                         （目前 narrative_card 一席已切；见 agent-exec.resolvePrompts）。
+ *    resolveFromTemplate  实验路径。读 prompts/_archive/agents-promptresolver 下的 .md，
+ *                         那批模板已归档，多数文件不存在（缺文件返回空串）。
+ *
+ *    提示词的事实源始终是各 step 的 PromptComposer.blocks——改提示词改那里，勿改本文件。
  *
  * 提示词模板解析器。从 .md 模板文件读取 → 按分区解析 → 填充 skill 槽位 →
  * 渲染 ctx 变量 → 输出最终 system / user prompt。

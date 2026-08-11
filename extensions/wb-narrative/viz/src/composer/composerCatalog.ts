@@ -35,8 +35,15 @@ export interface ComposerCatalogItem {
   /** 回退中文标签。 */
   label: string;
   icon: string;
-  /** 专家：预制管线模板 + 默认 tier + 路由组。 */
+  /**
+   * @deprecated 旧 step 模板（tpl-*）。四期起专家跑的是席位管线，
+   * 只为反序列化旧画布节点保留；展示与单跑都用 narrativePipelineId。
+   */
   pipelineTemplate?: PipelineTemplateId;
+  /** 专家：该品类实际会跑的席位管线 id（如 pl-film-game）。 */
+  narrativePipelineId?: string;
+  /** 专家：席位管线名（如「叙事管线（分镜）」），卡上作副标题。 */
+  narrativePipelineName?: string;
   tier?: TierId;
   routeGroup?: "planning" | "narrative";
   /** 单品助手：对应 PIPELINE_STEPS 单步 id；modeId 对应生成模式。 */
@@ -61,6 +68,24 @@ export interface ComposerCategoryDef {
 }
 
 /**
+ * 需求入口节点的 catalog id —— 项目自带的那一枚，与平台右侧 chat 栏的那排选项卡同源同参。
+ *
+ * 它只装两样东西，且这两样是同一个决定的两面（只说需求不给轴跑不起来，只给轴没需求也没得跑）：
+ *  - 三类需求输入：直接输入 / 标签选择 / 文件上传
+ *  - 三轴路由：叙事类型 / 叙事题材 / 叙事体量（第四轴「叙事结构」由后端按类型+题材推导，不出面）
+ *
+ * 不装的另外两组参数各有归属，放这儿会让入口替别人做决定：
+ *  - 游戏品类（JRPG/ARPG 那层，含其只读派生的层级）→ 顶栏「叙事策划专家组」，选专家即选品类
+ *  - 叙事单品（单步/单模块生成）→ 顶栏「叙事单品助手团队」，拖哪一席就是跑哪一件
+ */
+export const ENTRY_CATALOG_ID = "input.entry";
+
+/** 这枚节点既是管线锚点（category=input）也承载路由配置。 */
+export function isEntryNode(node: Pick<ComposerNodeData, "catalogId">): boolean {
+  return node.catalogId === ENTRY_CATALOG_ID;
+}
+
+/**
  * 四大类调色板目录。顺序即调色板从左到右的展示顺序。
  *
  * 与创作空间顶栏对齐（PRD v1.4 §5.2）：
@@ -77,6 +102,22 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
     label: "输入需求",
     icon: "⤓",
     items: [
+      {
+        id: ENTRY_CATALOG_ID,
+        category: "input",
+        labelKey: "composer.item.input.entry",
+        label: "需求入口",
+        icon: "⌾",
+        defaultConfig: {
+          inputTab: "text",
+          userInput: "",
+          tagSelections: {},
+          tagCustomTexts: {},
+          storyType: null,
+          storyTheme: null,
+          complexity: undefined,
+        },
+      },
       {
         id: "input.text",
         category: "input",
@@ -144,15 +185,22 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
     label: "叙事策划专家",
     icon: "◆",
     items: [
+      // 四个常用专家的快捷入口。defaultConfig 必须带 genreCode：品类是专家的身份，
+      // 缺了它后端只能按 tier 兜默认 mode（design_auto），跑出全量策划而非叙事管线。
+      // 「其他品类」是唯一无品类项，交给后端自动识别。
+      //
+      // 这里不再挂 pipelineTemplate（tpl-jrpg / tpl-vn-v2 那套旧模板 id）：专家跑的是
+      // 席位管线，管线由品类查表得出，前端抄一份只会像上一版那样在卡上写着 tpl-vn-v2、
+      // 后端跑的却是 pl-film-game。管线名按 genreCode 现查 /genres。
       {
         id: "expert.jrpg",
         category: "expert",
         labelKey: "composer.item.expert.jrpg",
         label: "JRPG 品类叙事专家",
         icon: "◆",
-        pipelineTemplate: "tpl-jrpg",
         tier: "tier1",
         routeGroup: "planning",
+        defaultConfig: { genreCode: "rpg-jrpg", routeGroup: "planning", tier: "tier1" },
       },
       {
         id: "expert.orpg",
@@ -160,9 +208,9 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
         labelKey: "composer.item.expert.orpg",
         label: "ORPG 品类叙事专家",
         icon: "◆",
-        pipelineTemplate: "tpl-open-world",
         tier: "tier1",
         routeGroup: "planning",
+        defaultConfig: { genreCode: "rpg-open-world", routeGroup: "planning", tier: "tier1" },
       },
       {
         id: "expert.film_game",
@@ -170,9 +218,9 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
         labelKey: "composer.item.expert.film_game",
         label: "影游品类叙事专家",
         icon: "◆",
-        pipelineTemplate: "tpl-vn-v2",
         tier: "tier1",
         routeGroup: "planning",
+        defaultConfig: { genreCode: "adv-interactive", routeGroup: "planning", tier: "tier1" },
       },
       {
         id: "expert.other",
@@ -180,7 +228,6 @@ export const COMPOSER_CATALOG: ComposerCategoryDef[] = [
         labelKey: "composer.item.expert.other",
         label: "其他品类叙事专家",
         icon: "◆",
-        pipelineTemplate: "tpl-rpg",
         tier: "tier1",
         routeGroup: "planning",
       },
@@ -226,19 +273,26 @@ export const COMPOSER_DND_MIME = "application/x-forgeax-composer-role";
  * 15 个游戏类型下的品类是后端数据，写不进静态目录，所以按需现造；
  * id 带 code，拖进画布后仍能溯源到具体品类。
  */
-export function genreExpertItem(g: {
-  code: string;
-  name: string;
-  tier: TierId;
-  pipeline_template: string;
-}): ComposerCatalogItem {
+export function genreExpertItem(
+  g: {
+    code: string;
+    name: string;
+    tier: TierId;
+    /** 该品类实际会跑的席位管线（后端 /genres 给，前端不推算）。 */
+    narrative_pipeline?: string;
+    narrative_pipeline_name?: string;
+  },
+  /** 显示名由调用方给（顶栏已按 locale 加过「专家」后缀），缺省退回品类名。 */
+  label?: string,
+): ComposerCatalogItem {
   return {
     id: `expert.genre.${g.code}`,
     category: "expert",
     labelKey: "",
-    label: `${g.name} 品类叙事专家`,
+    label: label ?? g.name,
     icon: "◆",
-    pipelineTemplate: g.pipeline_template as PipelineTemplateId,
+    narrativePipelineId: g.narrative_pipeline,
+    narrativePipelineName: g.narrative_pipeline_name,
     tier: g.tier,
     routeGroup: "planning",
     defaultConfig: { genreCode: g.code, routeGroup: "planning", tier: g.tier },
@@ -283,7 +337,10 @@ export interface ComposerNodeData {
   position: { x: number; y: number };
   /** 节点级配置（输入文本 / 路由参数 / 专家与单品助手选项）。 */
   config: Record<string, unknown>;
+  /** @deprecated 旧画布节点里存的 tpl-*；展示与单跑不再读它。 */
   pipelineTemplate?: PipelineTemplateId;
+  narrativePipelineId?: string;
+  narrativePipelineName?: string;
   tier?: TierId | null;
   routeGroup?: "planning" | "narrative";
   stepId?: string;
@@ -329,6 +386,8 @@ export function instantiateComposerNode(
     position,
     config: { ...(item.defaultConfig ?? {}) },
     pipelineTemplate: item.pipelineTemplate,
+    narrativePipelineId: item.narrativePipelineId,
+    narrativePipelineName: item.narrativePipelineName,
     tier: item.tier ?? null,
     routeGroup: item.routeGroup,
     stepId: item.stepId,
@@ -365,7 +424,10 @@ export function computeAnchoredPipelines(
         queue.push(next);
       }
     }
-    const routingNode = ordered.find((n) => n.category === "routing");
+    // 入口节点自带路由：它同时是锚点与路由，这条管线里不必再有独立的路由节点。
+    // 画布上另接了路由节点时以那一枚为准——显式编排优先于入口自带的默认值。
+    const routingNode =
+      ordered.find((n) => n.category === "routing") ?? (isEntryNode(input) ? input : undefined);
     pipelines.push({
       inputNode: input,
       nodeIds: [...visited],

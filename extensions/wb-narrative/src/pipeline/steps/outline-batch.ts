@@ -24,6 +24,7 @@ import type { LLMClient } from "../llm-client.js";
 import { extractJSON } from "../llm-client.js";
 import { appendUserInstructions, buildIpSourceReference } from "./design-context-helper.js";
 import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, STRATEGY_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
+import { expansionPrinciples, TOPOLOGY_DISCIPLINE } from "../prompt/narrative-craft.js";
 import {
   buildCharacterDigest,
   buildItemDigest,
@@ -54,6 +55,12 @@ import {
   type StructurePlanItem,
 } from "../layer-threshold-config.js";
 import { deviationFromLegacy } from "../../types/index.js";
+import {
+  deriveTreeFields,
+  mergeTreeSemantics,
+  treeSemanticsPromptSpec,
+  type TreeSemantics,
+} from "../outline-tree.js";
 
 function outlineToText(outline: InitialOutline | undefined): string {
   if (!outline) return "（无）";
@@ -92,7 +99,13 @@ interface StructurePlan {
   has_branch?: boolean;
 }
 
-const STEP1_SYSTEM = `你是叙事结构规划师。根据L0框架节点，为每个框架节点规划L1大纲子节点数量和分支。所有输出使用中文。`;
+const OUTLINE_PRINCIPLES = expansionPrinciples({
+  upstream: "宏观框架",
+  here: "大纲层",
+  convergence: "不得因此产生新的结局",
+});
+
+const STEP1_SYSTEM = `你是叙事结构规划师。读上游的宏观框架节点，为每个节点规划它要展开成几个大纲节点、在哪里分岔。所有输出使用中文。`;
 
 export const OUTLINE_PLAN_COMPOSER: PromptComposer = {
   stepId: "outline_batch",
@@ -138,10 +151,11 @@ export const OUTLINE_PLAN_COMPOSER: PromptComposer = {
     base: STEP1_SYSTEM,
     strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
+    craft: TOPOLOGY_DISCIPLINE,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints", "cot"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "craft", "style_guide", "constraints", "cot"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -152,10 +166,12 @@ export const OUTLINE_FILL_COMPOSER: PromptComposer = {
     base: "你是叙事结构设计师。",
     strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
+    // 填充阶段也要吃分支纪律：边条件与代价档是在这一步向模型索要的
+    craft: TOPOLOGY_DISCIPLINE,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "craft", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -187,7 +203,7 @@ ${ctx.user_preference_summary ?? "（无）"}
 ## 初步大纲
 ${outlineToText(ctx.initial_story_outline)}
 
-## L0框架节点
+## 上游宏观框架节点
 ${fwDesc}
 
 ${nodeCountSection}
@@ -338,7 +354,7 @@ function buildSkeleton(plans: StructurePlan[]): SkeletonNode[] {
 
 // ─── Step 1.5b: 按 L0 父节点分组 LLM 填充 ───
 
-interface PartialOutlineFill {
+interface PartialOutlineFill extends TreeSemantics {
   node_id: string;
   name: string;
   narrative_stage: string;
@@ -347,6 +363,7 @@ interface PartialOutlineFill {
   };
   content: string;
 }
+
 
 async function step1_5b_batchFill(
   ctx: NarrativeContext,
@@ -373,14 +390,11 @@ async function step1_5b_batchFill(
       `- [${s.node_id}] prev=${JSON.stringify(s.prev_node)} next=${JSON.stringify(s.next_node)} ${s.is_branch ? "(分支)" : ""} ${s.is_merge_point ? "(合并点)" : ""}`
     ).join("\n");
 
-    const prompt = `你是叙事结构设计师。请为以下L1大纲节点组填充详细内容。所有输出必须使用中文。
+    const prompt = `你是叙事结构设计师。请为以下一组大纲节点填充详细内容。所有输出必须使用中文。
 
-## 核心设计原则
-- **命运必然论**：L0框架层预设所有命运分支和结局，大纲层在框架内细化
-- **有限突变论**：大纲层可产生独立新分支（Y轴可能性维度），但不创造新结局
-- **双维度嵌套展开**：X轴顺序维度将L0的1个节点拆解为N个连续L1子节点；Y轴可能性维度在L1内部独立产生新分支
+${OUTLINE_PRINCIPLES}
 
-## 所属L0框架节点
+## 所属宏观框架节点
 - ID: ${parentId}
 - 名称: ${parentName}
 - 叙事功能: ${parentFunction}
@@ -413,7 +427,7 @@ ${JSON.stringify(ctx.global_control_params ?? {})}
 
 ## 节点骨架
 ${skeletonDesc}
-
+${treeSemanticsPromptSpec(group)}
 ## Layer1 大纲层 6 槽位
 - L1_01 个人故事: 角色个人线
 - L1_02 性格弧光: 角色成长轨迹
@@ -464,7 +478,7 @@ ${skeletonDesc}
 
 // ─── Step 2: 全局补漏（仅补充 Step 1.5b 遗漏/不足的节点） ───
 
-const STEP2_SYSTEM = `你是叙事结构设计师，请基于L0框架和L1结构骨架，为内容不足的大纲节点补充详细内容。所有输出必须使用中文。
+const STEP2_SYSTEM = `你是叙事结构设计师，请基于宏观框架与已定的节点骨架，为内容不足的大纲节点补充详细内容。所有输出必须使用中文。
 
 ## Layer1 大纲层 6 槽位
 - L1_01 个人故事: 角色个人线
@@ -474,10 +488,7 @@ const STEP2_SYSTEM = `你是叙事结构设计师，请基于L0框架和L1结构
 - L1_05 表现手法: 叙事表现技巧
 - L1_06 表达方式: 语言表达风格
 
-## 核心设计原则
-- **命运必然论**：L0框架层预设所有命运分支和结局，大纲层在框架内细化
-- **有限突变论**：大纲层可产生独立新分支（Y轴可能性维度），但不创造新结局
-- **双维度嵌套展开**：X轴顺序维度将L0的1个节点拆解为N个连续L1子节点；Y轴可能性维度在L1内部独立产生新分支
+${OUTLINE_PRINCIPLES}
 
 ## 输出要求
 输出 JSON 对象，包含 outlines 数组。
@@ -665,10 +676,14 @@ export async function outlineBatch(
     }
   }
 
+  // 剧情树字段：拓扑部分从骨架推导，语义部分取模型给的（见 outline-tree.ts 的分工）
+  const treeFields = deriveTreeFields(skeleton);
+
   // 合并骨架 + 内容（骨架的图结构优先）
   const outlines: OutlineNode[] = skeleton.map((skel) => {
     const fill = fillMap.get(skel.node_id);
     const plot = fill?.story_elements?.plot;
+    const tree = mergeTreeSemantics(treeFields.get(skel.node_id)!, fill);
 
     return {
       node_id: skel.node_id,
@@ -687,6 +702,10 @@ export async function outlineBatch(
       },
       content: fill?.content ?? "",
       on_optimal_path: skel.on_optimal_path,
+      node_function: tree.node_function,
+      edges: tree.edges,
+      branch_type: tree.branch_type,
+      ending: tree.ending,
     };
   });
 

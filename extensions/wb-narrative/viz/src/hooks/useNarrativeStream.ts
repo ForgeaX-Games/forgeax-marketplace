@@ -29,7 +29,14 @@ export interface GenreInfo {
   tier: TierId;
   narrative_ratio: string;
   narrative_type: string;
+  /** @deprecated 旧 step 模板（tpl-*）；四期起该品类实际跑的是 narrative_pipeline。 */
   pipeline_template: string;
+  /** 该品类实际会跑的席位管线 id（如 pl-film-game）。 */
+  narrative_pipeline?: string;
+  /** 席位管线名（如「叙事管线（分镜）」）。 */
+  narrative_pipeline_name?: string;
+  /** 专家显示名（与顶栏「{品类}专家」同一构词，由后端给以免两处漂）。 */
+  expert_name?: string;
   needs: Record<string, 0 | 1 | 2 | 3>;
   keywords: string[];
 }
@@ -258,6 +265,9 @@ export async function startEntryPipelines(body: {
     tier?: TierId;
     mode?: ModeId;
     genreCode?: string | null;
+    /** 三轴：类型/题材由需求入口给出，结构由后端推导（故此处不传）。 */
+    storyType?: string | null;
+    storyTheme?: string | null;
     complexity?: number;
     routeGroup?: "planning" | "narrative";
     autoDetect?: boolean;
@@ -714,6 +724,13 @@ export interface HistoryEntry {
   complexity?: number;
   parentKey?: string;
   forkReason?: string;
+  /** 条目卡第二行（需求输入 / 文件上传）与第三行（叙事路由）用；由 /history 投影。 */
+  genreCode?: string;
+  inputType?: string;
+  uploadedFileNames?: string[];
+  storyType?: string;
+  storyTheme?: string;
+  narrativeStructure?: string;
   /** 运行类型标记（"ip-dna" = IP 摄入/改编运行）。 */
   kind?: string;
   /**

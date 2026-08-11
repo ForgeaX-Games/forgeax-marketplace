@@ -19,6 +19,7 @@ import type {
   StepBlueprint,
 } from "./blueprint/types.js";
 import { STEP_REGISTRY } from "./step-registry.js";
+import { PromptResolver } from "./blueprint/prompt-resolver.js";
 
 export interface ExecuteAgentOptions {
   /** 步骤在所属序列中的顺序号，仅用于 Runner 内部日志。 */
@@ -43,6 +44,25 @@ export interface ExecuteAgentOutcome {
 
 export function emptyResolvedPrompts(): ResolvedPrompts {
   return { systemPrompt: "", userPromptTemplate: "" };
+}
+
+/**
+ * 该 agent 的提示词：调用方给了就用，没给就从它的 PromptComposer 现场解析。
+ *
+ * 兜底这一步是必需的而非保险：内联 PromptComposer 是生产提示词的事实源，
+ * 而 runner 只认 resolvedPrompts。少了这一步，任何 useNewRunner 的 step 从
+ * run() 派发时都会拿到空提示词——空提示词不会报错，只会让模型胡说，
+ * 是最难发现的一类故障。
+ */
+function resolvePrompts(
+  agentId: string,
+  ctx: NarrativeContext,
+  provided?: ResolvedPrompts,
+): ResolvedPrompts {
+  if (provided) return provided;
+  const composer = STEP_REGISTRY.get(agentId)?.composer;
+  if (!composer) return emptyResolvedPrompts();
+  return PromptResolver.resolveFromComposer(composer, ctx);
 }
 
 /**
@@ -72,7 +92,7 @@ export async function executeAgent(
       stepId: def.id,
       index: opts.index ?? 0,
       agentDef: def,
-      resolvedPrompts: opts.resolvedPrompts ?? emptyResolvedPrompts(),
+      resolvedPrompts: resolvePrompts(agentId, ctx, opts.resolvedPrompts),
       nestAncestors: [...ancestors, agentId],
       executionParams: {
         temperature: config?.temperature ?? 0.7,
@@ -81,7 +101,9 @@ export async function executeAgent(
         responseFormat: config?.responseFormat ?? "json",
       },
     };
-    opts.callbacks?.onProgress?.(def.id, `running ${def.name}`);
+    // 措辞与全量管线一致：本回调在全量管线与单 agent SSE 两处都直达用户，
+    // 走 runner 还是 step 函数属于实现细节，由 outcome.via 供程序判别，不进文案。
+    opts.callbacks?.onProgress?.(def.id, `正在执行：${def.name}...`);
     const output = await runner.execute(step, ctx, llm, {
       ...opts.callbacks,
       // 子步进度沿用子步自己的 id，父 composite 不覆写。
@@ -101,7 +123,7 @@ export async function executeAgent(
       `Agent '${agentId}' has no useNewRunner AgentDef and no legacy step function`,
     );
   }
-  opts.callbacks?.onProgress?.(agentId, `running legacy ${desc.name}`);
+  opts.callbacks?.onProgress?.(agentId, `正在执行：${desc.name}...`);
   await desc.fn(ctx, llm);
   const outputField = agent.io.outputField;
   const output = (ctx as Record<string, unknown>)[outputField];

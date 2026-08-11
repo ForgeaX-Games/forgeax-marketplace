@@ -57,7 +57,7 @@ import { ImpactPreviewModal } from "../controls/ImpactPreviewModal";
  * 于是所有"写"集中在这里：本组件只挂在 owner（pane=left 或独立 full）那一侧，
  * 中栏通过 store.pendingCommand 请求执行。
  *
- * 对外暴露的 context 只有项目清单相关的东西——那是左栏 ProjectPanel 独占的。
+ * 对外暴露的 context 只有任务清单相关的东西——那是左栏 TaskPanel 独占的。
  * 表单态一律走 store，任何组件都能直接读写，不必经 context。
  */
 
@@ -85,7 +85,7 @@ export interface WorkbenchContextValue {
 
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
 
-/** 左栏 ProjectPanel 用。中栏没有 Provider，调用会拿到 null。 */
+/** 左栏 TaskPanel 用。中栏没有 Provider，调用会拿到 null。 */
 export function useWorkbench(): WorkbenchContextValue | null {
   return useContext(WorkbenchContext);
 }
@@ -553,7 +553,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       // 预铺 preloadSteps（fromStepId 之前=completed/绿，之后=pending/灰）
       const staleSet = new Set(livePipelineOrder.slice(earliestIdx));
       const preloadSteps: StepState[] = [
-        { id: "pipeline_config", label: STEP_LABEL_MAP.get("pipeline_config") ?? tGlobal("tms.pipelineConfig"), status: "completed" as const },
+        { id: "pipeline_config", label: STEP_LABEL_MAP.get("pipeline_config") ?? tGlobal("tms.pipelineConfig"), status: "completed" as const, isMeta: true },
         ...livePipelineOrder.map((id) => ({
           id,
           label: STEP_LABEL_MAP.get(id) ?? id,
@@ -605,7 +605,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
       // 后端 /regenerate 会返回最终 staleSteps（更精确），覆盖前端 affectedSet。
       const finalStaleSet = new Set(res.staleSteps ?? pendingForkPlan.affectedStepIds);
       const finalPreload: StepState[] = [
-        { id: "pipeline_config", label: STEP_LABEL_MAP.get("pipeline_config") ?? tGlobal("tms.pipelineConfig"), status: "completed" as const },
+        { id: "pipeline_config", label: STEP_LABEL_MAP.get("pipeline_config") ?? tGlobal("tms.pipelineConfig"), status: "completed" as const, isMeta: true },
         ...pendingForkPlan.pipelineOrder.map((id) => ({
           id,
           label: STEP_LABEL_MAP.get(id) ?? id,
@@ -852,6 +852,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
         result: ctx,
         status: resolvedStatus,
         steps,
+        stepGroups: data.stepGroups,
         config: {
           userInput: savedInput,
           routeGroup: savedRouteGroup,

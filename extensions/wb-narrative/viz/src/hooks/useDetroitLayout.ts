@@ -1,27 +1,42 @@
 /**
  * Detroit-style pipeline layout for React Flow.
  *
- * Pipeline steps flow left-to-right. Story groups expand inline.
- * quest + scene is visualised as a FORK: two parallel branches
- * (quest storyGroup on top, scene container on bottom).
+ * 两条铁律，越过它们画面就开始说谎：
  *
- * Scene container hierarchy (3-level nesting):
- *   qsg::scene (storyGroup container)
- *     ├── qsg::scene::p1  (pipelineStep — 骨架)
- *     ├── qsg::scene::p2  (storyGroup  — 展开, expandable)
- *     │     └── scene children (storyChild)
- *     └── qsg::scene::p3  (pipelineStep — 合并)
+ * 1. 横向次序 = 管线执行次序。只有同一个 step 内部真的并行产出两支（legacy 的
+ *    script_scene_generation 同时给出任务与场景），才画成上下并列的分叉；
+ *    相隔数个席位、串行执行的两步不许并列——那是凭空捏出来的并行关系。
+ * 2. 结构由产物推导。没有产物的步骤就是一张普通卡，不预先长出空容器与 `(0)` 卡片。
+ *
+ * 场景生成的内部分段（骨架层 → 展开 → 合并）来自后端 scene_map 的真实字段，
+ * 有几层骨架就画几张卡；节点 id 一律是 `<容器id>::段名`，容器 id 就是 step id。
+ *
+ * 容器几何只有一个裁决者：resolveContainerGeometry（自内向外的包围盒）。
+ * 各 builder 的算术式只负责"还没有子节点时的初始摆位"。
  */
 import { useMemo } from "react";
 import type { Node, Edge } from "reactflow";
 import type { StepState } from "../store/narrativeStore";
-import type { NarrativeContext, StoryNode, SceneNode, SkeletonLayerScene } from "../types";
+import type { NarrativeContext, StoryNode, SceneNode, SkeletonLayerScene, AnnounceStepGroup, StepStatus } from "../types";
 import { PIPELINE_STEPS } from "../types";
+import type { EntryCard } from "./useEntryCard";
 
 // ── Dimensions ──────────────────────────────────────────────────────────────
-const PL_W = 140;
-const PL_H = 68;
-const H_GAP = 44;
+/*
+ * 管线节点的格子尺寸 = 编排节点那张卡的尺寸（.composer-node 宽 190）。
+ * 两侧共用一副形式，就得共用一副尺寸：格子还按老的 140×68 留，卡片被压窄、简介只剩一行，
+ * 看上去仍是旧的小卡，"统一"就只统一在 DOM 里。
+ */
+const PL_W = 190;
+const PL_H = 78;
+/**
+ * 同级节点的水平间距。
+ *
+ * 从 44 加倍到 88：两层容器（专家 > 席位 > 实现步）同时在场时，每层边框都要吃掉
+ * 一点间隙，44 的时候外层边框与邻卡之间只剩几个像素，读起来像贴在一起。
+ * 间距也是层级的视觉线索——留够了，嵌套关系才看得出来。
+ */
+const H_GAP = 88;
 const INIT_X = 32;
 const INIT_Y = 80;
 
@@ -34,6 +49,27 @@ const BIG_PAD = 16;
 
 const GROUP_MIN_W = 300;
 const GROUP_MIN_H = 180;
+
+/**
+ * 各类节点的"标题栏"选择器 —— 拖动只认标题栏。
+ *
+ * 卡身上的点击另有含义（展开详情、折叠容器）；若整张卡都能拖，
+ * 一次手抖就把"看一眼"变成"挪一格"。标题栏是那条既显眼又没有别的语义的把手。
+ */
+const DRAG_HANDLE: Record<string, string> = {
+  pipelineStep: ".rf-pipeline-header",
+  narrativeCard: ".rf-pipeline-header",
+  storyChild: ".rf-child-header",
+  storyGroup: ".rf-story-group-header",
+};
+
+/**
+ * 除"标题栏下沿"以外的方向上，子节点的活动范围实际不设限。
+ *
+ * ReactFlow 的 extent 要求四个具体数字，这里用一个足够大的有限值代替无穷——
+ * Infinity 会在它内部的 clamp 运算里变成 NaN。
+ */
+const DRAG_FREE = 100_000;
 
 const FORK_V_GAP = 36;
 const INNER_GAP = 44;
@@ -1145,6 +1181,89 @@ function sceneGroupToStoryNodes(
   });
 }
 
+/**
+ * 场景树（uid / parent_uid 的层级结构）→ 剧情节点。
+ *
+ * 这是场景列表助手当前的产物形态：一棵从世界到房间的场景树，父子就是包含关系。
+ * 拓扑照搬 parent_uid：世界在最左，房间在最右。
+ *
+ * _layoutId 写成「深度 + 兄弟序字母」（如 3c）而不是 uid：列是按"不同 xKey 的排序序号"
+ * 分配的，uid 每个都不同就会一个节点占一列——15 个场景摊成 15 列的对角阶梯，同一层
+ * 的四个孩子分散在四列上。同深度共用一个 xKey，画出来才是"世界 | 城区 | 建筑 | 房间"
+ * 这样按层分列的树。字母只用于同层内的稳定排序（超过 26 个就不给字母，退回插入序）。
+ */
+function sceneTreeToStoryNodes(scenes: SceneNode[]): StoryNode[] {
+  const known = new Set(scenes.map((s) => String(s.uid)));
+  const parentOf = new Map<string, string>();
+  const childrenOf = new Map<string, string[]>();
+  for (const s of scenes) {
+    const parent = s.parent_uid == null ? "" : String(s.parent_uid);
+    if (!parent || !known.has(parent)) continue;
+    parentOf.set(String(s.uid), parent);
+    const list = childrenOf.get(parent);
+    if (list) list.push(String(s.uid));
+    else childrenOf.set(parent, [String(s.uid)]);
+  }
+
+  // 深度以 parent_uid 链为准：scene_level 是后端顺手带的，缺了或对不上时不能作为唯一依据。
+  const depthOf = (uid: string): number => {
+    let depth = 0;
+    let cur = parentOf.get(uid);
+    while (cur && depth < 64) {
+      depth++;
+      cur = parentOf.get(cur);
+    }
+    return depth;
+  };
+  const byDepth = new Map<number, string[]>();
+  for (const s of scenes) {
+    const uid = String(s.uid);
+    const d = depthOf(uid);
+    const list = byDepth.get(d);
+    if (list) list.push(uid);
+    else byDepth.set(d, [uid]);
+  }
+  const layoutIdOfUid = new Map<string, string>();
+  for (const [depth, uids] of byDepth) {
+    const ordered = [...uids].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    for (let i = 0; i < ordered.length; i++) {
+      const letter = ordered.length <= 26 ? String.fromCharCode(97 + i) : "";
+      layoutIdOfUid.set(ordered[i], `${depth}${letter}`);
+    }
+  }
+
+  const textOf = (value: unknown): string => {
+    if (typeof value === "string") return value;
+    if (value && typeof value === "object") {
+      const d = value as Record<string, unknown>;
+      const first = d.location_description ?? d.semantics_description ?? d.art_style_description;
+      if (typeof first === "string") return first;
+    }
+    return "";
+  };
+
+  return scenes.map((s) => {
+    const uid = String(s.uid);
+    const parent = s.parent_uid == null ? "" : String(s.parent_uid);
+    const labels = Array.isArray(s.label) ? s.label.map(String) : s.label ? [String(s.label)] : [];
+    return {
+      node_id: uid,
+      content_id: uid,
+      _layoutId: layoutIdOfUid.get(uid) ?? uid,
+      name: s.name,
+      narrative_function: labels.join(" · ") || `L${s.scene_level ?? s.level ?? 0}`,
+      main_content: textOf(s.description).slice(0, 140),
+      prev_node: parent && known.has(parent) ? [parent] : [],
+      next_node: childrenOf.get(uid) ?? [],
+      // 一个场景装着几个子场景是包含关系，不是剧情分叉：这两项若留空，卡面会按
+      // 兄弟序字母盖 ⑂A、按子场景数量盖 ⑂，把"里面有四个地方"读成"这里有四条路"。
+      is_branch: false,
+      is_fork: false,
+      _rawData: s as unknown as Record<string, unknown>,
+    };
+  });
+}
+
 function sceneFallbackFromMerged(
   scenes: SceneNode[],
   plots: PlotLike[],
@@ -1253,7 +1372,12 @@ function toStoryNodes(
     }
     const scenes = d.scenes as SceneNode[] | undefined;
     if (Array.isArray(scenes) && scenes.length > 0) {
-      return sceneFallbackFromMerged(scenes, plots ?? []);
+      // story_units 是"场景按剧情节点展开"那一版的产物；场景列表助手（2.3.6）现在直接
+      // 给一棵 uid/parent_uid 的场景树，没有 story_units。认树优先，别把真产物当没有。
+      if (scenes.some((s) => (s.story_units?.length ?? 0) > 0)) {
+        return sceneFallbackFromMerged(scenes, plots ?? []);
+      }
+      return sceneTreeToStoryNodes(scenes);
     }
     return [];
   }
@@ -1997,7 +2121,7 @@ function renderStoryChildren(
     if (!childPos) continue;
 
     const isMerge = (incomingCounts.get(sn.node_id) ?? 0) > 1;
-    const isFork = (sn.next_node?.length ?? 0) > 1;
+    const isFork = sn.is_fork ?? (sn.next_node?.length ?? 0) > 1;
     const parsedId = parseNodeIdForPosition(sn.node_id);
     const branchLetter = parsedId.branchKey || undefined;
 
@@ -2013,10 +2137,8 @@ function renderStoryChildren(
     rfNodes.push({
       id: `${groupId}__${sn.node_id}`,
       type: "storyChild",
-      draggable: false,
       position: { x: childPos.x, y: childPos.y },
       parentNode: groupId,
-      extent: "parent" as const,
       data: {
         nodeId: sn.node_id, contentId: sn.content_id,
         name: sn.name, narrativeFunction: sn.narrative_function,
@@ -2109,10 +2231,17 @@ interface ForkBranch {
   expand: boolean;
 }
 
+/**
+ * 场景生成的内部分段。每一段都必须有产物才会出现在这里 —— 没跑过的步骤不该凭空
+ * 长出三层嵌套。骨架层同理：有几层数据就画几张卡，`L2 骨架 (0)` 这种卡不该存在。
+ */
 interface ScenePhaseData {
   containerExpand: boolean;
+  /** 有数据的骨架层（l0/l1/l2 中非空者），空数组表示这一段整段不存在。 */
+  p1Layers: { key: "l0" | "l1" | "l2"; count: number }[];
+  /** 骨架层是否值得套一层子容器：只有一层时不套（与席位容器"独苗不套框"同一条规矩）。 */
+  p1Grouped: boolean;
   p1Expand: boolean;
-  p1SceneCounts: { l0: number; l1: number; l2: number };
   p1W: number;
   p1H: number;
   p2Nodes: StoryNode[];
@@ -2120,12 +2249,15 @@ interface ScenePhaseData {
   p2W: number;
   p2H: number;
   p2Expand: boolean;
+  /** 合并卡：只有"骨架 + 展开"两段都在时才有东西可合并。 */
+  hasMerge: boolean;
   containerW: number;
   containerH: number;
 }
 
 interface ForkData {
-  quest: ForkBranch;
+  /** 任务分支只在同一个 step 同时产出任务与场景时才存在（legacy script_scene_generation）。 */
+  quest?: ForkBranch;
   scene: ScenePhaseData;
   totalW: number;
   totalH: number;
@@ -2162,73 +2294,106 @@ interface PreStep {
   h: number;
   storyPixels: ReturnType<typeof colRowToPixels> | null;
   fork?: ForkData;
+  /** fork/场景嵌套这一块在图上的节点 id（见 buildSceneNestPreStep）。 */
+  sceneContainerId?: string;
   outlineNest?: OutlineNestData;
 }
 
-function buildForkPreStep(
+/**
+ * 场景生成（含 legacy「任务+场景」合并 step）的嵌套结构。
+ *
+ * 全部由数据推导：哪一段有产物就画哪一段，一段都没有则返回 null，
+ * 由调用方退化成一张普通管线卡。这是"画布如实反映后端产出"的底线——
+ * 上一版这里的展开条件只看用户有没有折叠，于是从未运行的步骤也会稳定长出
+ * 「骨架提取 + L0/L1/L2 (0) + 空的场景展开 + 合并」七个节点。
+ *
+ * containerId 决定这一块在图上的身份：独立的 scene_generation 用它自己的 step id
+ * （席位/专家容器是按 step id 收成员的，用合成 id 会让它落在容器外面），
+ * legacy 合并 step 仍用 qsg::scene，以免用户已有的折叠状态失效。
+ */
+function buildSceneNestPreStep(
   stepId: string, label: string, status: string,
   questNodes: StoryNode[], sceneNodes: StoryNode[],
   collapsedIds: Set<string>,
+  containerId: string,
   p1LayerData?: { l0: SkeletonLayerScene[]; l1: SkeletonLayerScene[]; l2: SkeletonLayerScene[] } | null,
-): PreStep {
-  // Quest branch (top)
-  const questExpand = questNodes.length > 0 && !collapsedIds.has("qsg::quest");
-  const qLayout = computeStoryLayout(questNodes);
-  const qPixels = colRowToPixels(qLayout);
-  const qW = questExpand ? Math.max(GROUP_MIN_W, qPixels.width) : PL_W;
-  const qH = questExpand ? Math.max(GROUP_MIN_H, qPixels.height) : PL_H;
+): PreStep | null {
+  const p1Layers = ([["l0", p1LayerData?.l0], ["l1", p1LayerData?.l1], ["l2", p1LayerData?.l2]] as const)
+    .filter(([, arr]) => Array.isArray(arr) && arr.length > 0)
+    .map(([key, arr]) => ({ key, count: arr!.length }));
 
-  // Scene container (bottom)
-  const containerExpand = !collapsedIds.has("qsg::scene");
+  const hasQuest = questNodes.length > 0;
+  const hasScenes = sceneNodes.length > 0;
+  if (p1Layers.length === 0 && !hasScenes && !hasQuest) return null;
 
-  let containerW = PL_W;
-  let containerH = PL_H;
-  let p2W = PL_W;
-  let p2H = PL_H;
-  let p2Expand = false;
-  let p2Pixels: ReturnType<typeof colRowToPixels> | null = null;
+  // ── 任务分支（上）──
+  let quest: ForkBranch | undefined;
+  if (hasQuest) {
+    const qPixels = colRowToPixels(computeStoryLayout(questNodes));
+    const questExpand = !collapsedIds.has(`${containerId}::quest`) && !collapsedIds.has("qsg::quest");
+    quest = {
+      nodes: questNodes,
+      pixels: qPixels,
+      w: questExpand ? Math.max(GROUP_MIN_W, qPixels.width) : PL_W,
+      h: questExpand ? Math.max(GROUP_MIN_H, qPixels.height) : PL_H,
+      expand: questExpand,
+    };
+  }
 
-  // P1: simplified — 4 pipeline nodes horizontally (L0, L1, L2, merge)
-  const p1Expand = containerExpand && !collapsedIds.has("qsg::scene::p1");
-  const p1SceneCounts = {
-    l0: p1LayerData?.l0?.length ?? 0,
-    l1: p1LayerData?.l1?.length ?? 0,
-    l2: p1LayerData?.l2?.length ?? 0,
-  };
+  // ── 场景容器（下）──
+  const containerExpand = !collapsedIds.has(containerId);
+  // 只有一层骨架时不套子容器：一个框裹一张卡只是多一层边框。
+  const p1Grouped = p1Layers.length > 1;
+  const p1Expand = containerExpand && p1Grouped && !collapsedIds.has(`${containerId}::p1`);
+  const hasMerge = p1Layers.length > 0 && hasScenes;
+
   let p1W = PL_W;
   let p1H = PL_H;
   if (p1Expand) {
-    p1W = Math.max(GROUP_MIN_W, BIG_PAD + 4 * PL_W + 3 * INNER_GAP + BIG_PAD);
+    // 有几层就几张卡，外加一张骨架合并卡。
+    const cards = p1Layers.length + 1;
+    p1W = BIG_PAD + cards * PL_W + (cards - 1) * INNER_GAP + BIG_PAD;
     p1H = BIG_TITLE_H + BIG_PAD + PL_H + BIG_PAD;
   }
 
+  let p2W = PL_W;
+  let p2H = PL_H;
+  let p2Pixels: ReturnType<typeof colRowToPixels> | null = null;
+  const p2Expand = containerExpand && hasScenes && !collapsedIds.has(`${containerId}::p2`);
+  if (p2Expand) {
+    p2Pixels = colRowToPixels(computeStoryLayout(sceneNodes));
+    p2W = Math.max(GROUP_MIN_W, p2Pixels.width);
+    p2H = Math.max(GROUP_MIN_H, p2Pixels.height);
+  }
+
+  let containerW = PL_W;
+  let containerH = PL_H;
   if (containerExpand) {
-    p2Expand = sceneNodes.length > 0 && !collapsedIds.has("qsg::scene::p2");
-    if (p2Expand) {
-      const cLayout = computeStoryLayout(sceneNodes);
-      p2Pixels = colRowToPixels(cLayout);
-      p2W = Math.max(GROUP_MIN_W, p2Pixels.width);
-      p2H = Math.max(GROUP_MIN_H, p2Pixels.height);
-    }
-    const innerW = p1W + INNER_GAP + p2W + INNER_GAP + PL_W;
-    const innerH = Math.max(p1H, p2H, PL_H);
+    const segW: number[] = [];
+    if (p1Layers.length > 0) segW.push(p1W);
+    if (hasScenes) segW.push(p2W);
+    if (hasMerge) segW.push(PL_W);
+    const innerW = segW.reduce((sum, w) => sum + w, 0) + Math.max(0, segW.length - 1) * INNER_GAP;
+    const innerH = Math.max(p1Layers.length > 0 ? p1H : 0, hasScenes ? p2H : 0, PL_H);
     containerW = Math.max(GROUP_MIN_W, BIG_PAD + innerW + BIG_PAD);
     containerH = BIG_TITLE_H + BIG_PAD + innerH + BIG_PAD;
   }
 
-  const totalW = Math.max(qW, containerW);
-  const totalH = qH + FORK_V_GAP + containerH;
+  const totalW = Math.max(quest?.w ?? 0, containerW);
+  const totalH = quest ? quest.h + FORK_V_GAP + containerH : containerH;
 
   return {
     stepId, label, status,
     isStory: false, storyNodes: [], shouldExpand: false,
     w: totalW, h: totalH, storyPixels: null,
+    sceneContainerId: containerId,
     fork: {
-      quest: { nodes: questNodes, pixels: qPixels, w: qW, h: qH, expand: questExpand },
+      quest,
       scene: {
         containerExpand,
-        p1Expand, p1SceneCounts, p1W, p1H,
+        p1Layers, p1Grouped, p1Expand, p1W, p1H,
         p2Nodes: sceneNodes, p2Pixels, p2W, p2H, p2Expand,
+        hasMerge,
         containerW, containerH,
       },
       totalW, totalH,
@@ -2352,6 +2517,521 @@ function buildOutlineActsPreStep(
   };
 }
 
+// ── 专家容器（席位管线嵌套渲染）─────────────────────────────────────────────
+
+/**
+ * 容器标题条的高度，与 CSS 的 .rf-story-group-header{height:32px} 同一个数。
+ *
+ * 布局是唯一知道"子节点该从哪儿开始"的地方，而标题条高度写在 CSS 里；
+ * 两边各写一个数就会漂：上一版顶部内边距只比标题条高 2px，子卡看起来就贴在标题上。
+ * 这里显式取"标题条 + 一段呼吸位"，任何一层容器都不许让子节点压到标题条下沿以上。
+ */
+const GROUP_HEADER_H = 32;
+/** 标题条与内容之间、以及内容与容器底边之间的呼吸位。 */
+const GROUP_INNER_GAP = 16;
+
+const EXPERT_PAD_X = 24;
+const EXPERT_PAD_TOP = GROUP_HEADER_H + GROUP_INNER_GAP;
+const EXPERT_PAD_BOTTOM = GROUP_INNER_GAP;
+
+/**
+ * 席位容器：左右比专家窄一圈（层级由外到内应当收紧），但顶部一样要让开整条标题条——
+ * 顶部这一项没有"省一点"的余地，省下来的就是子卡压在标题上。
+ */
+const SEAT_PAD_X = 14;
+const SEAT_PAD_TOP = GROUP_HEADER_H + GROUP_INNER_GAP;
+const SEAT_PAD_BOTTOM = GROUP_INNER_GAP;
+
+function nodeW(n: Node): number {
+  const w = n.style?.width;
+  return typeof w === "number" ? w : PL_W;
+}
+
+function nodeH(n: Node): number {
+  const h = n.style?.height;
+  return typeof h === "number" ? h : PL_H;
+}
+
+/**
+ * 卡片标题的取名顺序：后端给的名字最优先。
+ *
+ * StepState.label 来自 SSE 的 stage 或 announce 的 stepNames，两者都出自后端
+ * STEP_REGISTRY —— 那是环节名的唯一真值。前端静态步表只在后端没给名字时兜底
+ * （老存档回放、旧后端），最后才退回 id。以前这里只读静态表，于是后端改了名、
+ * 画布还写着旧名，得两边一起改才对得上。
+ */
+function stepTitle(step: StepState, staticLabel?: string): string {
+  if (step.label && step.label !== step.id) return step.label;
+  return staticLabel ?? step.id;
+}
+
+/** 一组步骤的合并状态：有败即败，有跑即跑，全成才成，否则待跑。 */
+function aggregateStatus(statuses: StepStatus[]): StepStatus {
+  if (statuses.some((s) => s === "failed")) return "failed";
+  if (statuses.some((s) => s === "running")) return "running";
+  if (statuses.length > 0 && statuses.every((s) => s === "completed")) return "completed";
+  return "pending";
+}
+
+/**
+ * 把同属一个专家席位管线的顶层步骤收进一个可展开的容器节点。
+ *
+ * 做成主布局之后的后置 pass，而不是插进上面那段选步逻辑里：
+ * story / fork / vn 那几套嵌套已经把主循环占满了，在里面再叠一层专家分组
+ * 会牵动所有既有分支的坐标。这里只做两件与选步无关的事——算包围盒、改父子，
+ * 于是无论成员是普通管线步还是本身就带子图的 storyGroup 都一视同仁。
+ *
+ * 归属真值来自后端 announce 的 stepGroups（席位管线定义），前端不猜。
+ */
+/** 一层容器的规格：标题、副标题、以及这一层的直接成员。 */
+interface ContainerSpec {
+  id: string;
+  label: string;
+  sublabel?: string;
+  /** 席位容器专用：渲染层据此查 i18n 名，label 只作缺键兜底。 */
+  seatId?: string;
+  /** 直接成员：可以是 step 节点，也可以是更内一层的容器。 */
+  memberIds: string[];
+  pad: { x: number; top: number; bottom: number };
+}
+
+function applyExpertGrouping(
+  rfNodes: Node[],
+  rfEdges: Edge[],
+  groups: AnnounceStepGroup[],
+  collapsedIds: Set<string>,
+  steps: StepState[],
+): { nodes: Node[]; edges: Edge[] } {
+  if (groups.length === 0) return { nodes: rfNodes, edges: rfEdges };
+
+  // 容器状态要能层层聚合，所以 statusOf 是可写的：内层容器算完把自己的状态登记进来，
+  // 外层再据此聚合，不必重新遍历后代。
+  const statusOf = new Map<string, StepStatus>(steps.map((s) => [s.id, s.status]));
+
+  /**
+   * 席位（feature list 2.3.x）是画布的单位，step 只是它的实现。
+   *
+   * 单步席位：卡的标题直接换成席位名。剩下 step 名会让用户在「需求清单」这一席上
+   * 读到「偏好总结」——那是四期前的词，新架构里这一席就叫需求清单。
+   * 多步席位：给一层席位容器，实现层的两张卡收在里面，容器标题才是席位名。
+   */
+  let nodes = rfNodes;
+  const seatSpecs: ContainerSpec[] = [];
+  const seatLevelMembers = new Map<string, string[]>();
+
+  for (const group of groups) {
+    const seats = group.seats ?? [];
+    if (seats.length === 0) {
+      seatLevelMembers.set(group.id, group.steps);
+      continue;
+    }
+    const members: string[] = [];
+    for (const seat of seats) {
+      if (seat.steps.length === 1) {
+        const stepId = seat.steps[0];
+        members.push(stepId);
+        nodes = nodes.map((n) =>
+          n.id === stepId && n.type === "pipelineStep"
+            ? { ...n, data: { ...n.data, seatId: seat.id, seatName: seat.name } }
+            : n,
+        );
+        continue;
+      }
+      const seatContainerId = `seat::${seat.id}`;
+      members.push(seatContainerId);
+      seatSpecs.push({
+        // 本地化留给渲染层（seatId + i18n 键）：布局是 memo 出来的，
+        // 在这里定死语言的话切换语言不会重算，标题会停在旧语种上。
+        id: seatContainerId,
+        label: seat.name,
+        seatId: seat.id,
+        memberIds: seat.steps,
+        pad: { x: SEAT_PAD_X, top: SEAT_PAD_TOP, bottom: SEAT_PAD_BOTTOM },
+      });
+    }
+    // announce 只报了席位归属、没报全部步时，剩下的步（元节点之外的散步）仍留在专家层。
+    const claimed = new Set(seats.flatMap((s) => s.steps));
+    for (const stepId of group.steps) {
+      if (!claimed.has(stepId)) members.push(stepId);
+    }
+    seatLevelMembers.set(group.id, members);
+  }
+
+  const expertSpecs: ContainerSpec[] = groups.map((group) => ({
+    id: `expert::${group.id}`,
+    label: group.label,
+    // 管线名做副标题：标题回答"谁在跑"（专家），副标题回答"跑的是哪条管线"。
+    sublabel: group.pipelineName,
+    memberIds: seatLevelMembers.get(group.id) ?? group.steps,
+    pad: { x: EXPERT_PAD_X, top: EXPERT_PAD_TOP, bottom: EXPERT_PAD_BOTTOM },
+  }));
+
+  // 由内向外：席位容器先成形，专家容器才能把它们当成员收进去。
+  const inner = applyContainers({ nodes, edges: rfEdges }, seatSpecs, collapsedIds, statusOf);
+  return applyContainers(inner, expertSpecs, collapsedIds, statusOf);
+}
+
+function applyContainers(
+  input: { nodes: Node[]; edges: Edge[] },
+  specs: ContainerSpec[],
+  collapsedIds: Set<string>,
+  statusOf: Map<string, StepStatus>,
+): { nodes: Node[]; edges: Edge[] } {
+  let nodes = input.nodes;
+  let edges = input.edges;
+  if (specs.length === 0) return { nodes, edges };
+
+  for (const spec of specs) {
+    const containerId = spec.id;
+    if (nodes.some((n) => n.id === containerId)) continue;
+
+    const member = new Set(spec.memberIds);
+    const children = nodes.filter((n) => !n.parentNode && member.has(n.id));
+    // 独苗不值得套容器：一个容器裹一个节点只是多一层边框。
+    if (children.length < 2) continue;
+
+    const minX = Math.min(...children.map((c) => c.position.x));
+    const minY = Math.min(...children.map((c) => c.position.y));
+    const maxX = Math.max(...children.map((c) => c.position.x + nodeW(c)));
+    const maxY = Math.max(...children.map((c) => c.position.y + nodeH(c)));
+
+    const origin = { x: minX - spec.pad.x, y: minY - spec.pad.top };
+    const childIds = new Set(children.map((c) => c.id));
+    const memberStatuses = children.map((c) => statusOf.get(c.id) ?? "pending");
+    const status = aggregateStatus(memberStatuses);
+    const doneCount = memberStatuses.filter((s) => s === "completed").length;
+    const expanded = !collapsedIds.has(containerId);
+    // 登记自身状态，供外一层聚合。
+    statusOf.set(containerId, status);
+
+    const container: Node = {
+      id: containerId,
+      type: "storyGroup",
+      draggable: true,
+      position: origin,
+      data: {
+        label: spec.label,
+        sublabel: spec.sublabel,
+        seatId: spec.seatId,
+        status,
+        childCount: children.length,
+        expanded,
+        progress: doneCount / children.length,
+        // 内边距随节点一起走：拖动时要靠它算"标题栏以下那块画布"的边界。
+        pad: spec.pad,
+      },
+      style: expanded
+        ? {
+            width: maxX - minX + spec.pad.x * 2,
+            height: maxY - minY + spec.pad.top + spec.pad.bottom,
+          }
+        : { width: PL_W, height: PL_H },
+    };
+
+    const firstIdx = nodes.findIndex((n) => childIds.has(n.id));
+
+    if (!expanded) {
+      // 折叠：成员及其后代一并撤下，指向成员的边改指容器，组内边丢掉——
+      // 否则 ReactFlow 会为找不到端点的边报警并留下悬空连线。
+      const dropped = new Set<string>();
+      const collect = (id: string) => {
+        dropped.add(id);
+        for (const n of nodes) if (n.parentNode === id) collect(n.id);
+      };
+      children.forEach((c) => collect(c.id));
+      nodes = nodes.filter((n) => !dropped.has(n.id));
+      nodes.splice(firstIdx, 0, container);
+      nodes = [...nodes];
+      edges = edges
+        .filter((e) => !(dropped.has(e.source) && dropped.has(e.target)))
+        .map((e) => ({
+          ...e,
+          source: dropped.has(e.source) ? containerId : e.source,
+          target: dropped.has(e.target) ? containerId : e.target,
+        }));
+      continue;
+    }
+
+    // 展开：成员坐标转为相对容器。成员自己的后代仍相对各自父节点，无需动。
+    nodes = nodes.map((n) =>
+      childIds.has(n.id)
+        ? {
+            ...n,
+            parentNode: containerId,
+            extent: "parent" as const,
+            position: { x: n.position.x - origin.x, y: n.position.y - origin.y },
+          }
+        : n,
+    );
+    // 父节点必须排在子节点之前，否则 ReactFlow 解析不到 parentNode。
+    nodes.splice(firstIdx, 0, container);
+    nodes = [...nodes];
+
+    // 跨容器的边收到容器把手上：展开态若让 pipeline_config 直连组内第一步，
+    // 线会从边框外面穿进去戳到内层卡上，读起来像"外面那步是组里的"。
+    // 专家容器与它外面的元节点是同一层的两个东西，连线就该连在这一层。
+    // 组内边不动——它们本就在同一层（容器内部）。
+    const inside = new Set<string>();
+    const collectInside = (nodeId: string) => {
+      inside.add(nodeId);
+      for (const n of nodes) if (n.parentNode === nodeId) collectInside(n.id);
+    };
+    children.forEach((c) => collectInside(c.id));
+    // 只在被改指的边之间去重：多条入边收到同一把手后会重合。组内既有的平行边
+    // （故事子图那种同一对节点多条连线）不在此列，不能连它们一起去掉。
+    const rewired = new Set<string>();
+    const next: Edge[] = [];
+    for (const e of edges) {
+      const sIn = inside.has(e.source);
+      const tIn = inside.has(e.target);
+      if (sIn === tIn) {
+        next.push(e);
+        continue;
+      }
+      const moved = {
+        ...e,
+        source: sIn ? containerId : e.source,
+        target: tIn ? containerId : e.target,
+      };
+      if (moved.source === moved.target) continue;
+      const key = `${moved.source}->${moved.target}`;
+      if (rewired.has(key)) continue;
+      rewired.add(key);
+      next.push(moved);
+    }
+    edges = next;
+  }
+
+  return { nodes, edges };
+}
+
+// ── 人手拖动 ────────────────────────────────────────────────────────────────
+
+/**
+ * 把人手拖出来的位移叠回布局标准位。
+ *
+ * 存的是差值，所以在哪个坐标系里加都成立（子节点相对父节点、顶层相对画布）。
+ * 时机很关键：容器成形之前叠给成员，容器的包围盒就会连拖走的位置一起算进去，
+ * 松手后框自然长大把它包住；容器自身的位移则只能在成形之后叠。
+ */
+function applyNodeDrags(
+  nodes: Node[],
+  drags: Record<string, { dx: number; dy: number }>,
+  accept: (node: Node) => boolean,
+): Node[] {
+  const ids = Object.keys(drags);
+  if (ids.length === 0) return nodes;
+  return nodes.map((n) => {
+    const d = drags[n.id];
+    if (!d || !accept(n)) return n;
+    return { ...n, position: { x: n.position.x + d.dx, y: n.position.y + d.dy } };
+  });
+}
+
+function isContainerId(id: string): boolean {
+  return id.startsWith("expert::") || id.startsWith("seat::");
+}
+
+const FALLBACK_PAD = { x: BIG_PAD, top: BIG_TITLE_H + BIG_PAD, bottom: BIG_PAD };
+
+interface Pad { x: number; top: number; bottom: number }
+
+/** 布局重算过程中的可变几何：位置对父节点相对，尺寸绝对。 */
+interface Geo { x: number; y: number; w: number; h: number }
+
+function padOf(node: Node | undefined): Pad {
+  return (node?.data as { pad?: Pad } | undefined)?.pad ?? FALLBACK_PAD;
+}
+
+/** 长大后的容器与邻居之间至少留出的缝。 */
+const SPREAD_MARGIN = 16;
+
+/**
+ * 容器长大之后，把被它压到的同排邻居让开，两个方向都让。
+ *
+ * 容器撑大是"装得下子节点"的必然结果，但它不该拿邻居的位置去装自己的内容：
+ * 上一版拖大一个容器，它的右边框就直接盖进下一步的格子里，两个框叠在一起——
+ * 这正是用户最初抱怨的那种"叠在一起"，只不过换了个成因。
+ *
+ * 两类让位，方向相反，缺一不可：
+ * - 向右长的容器：把后面的节点往右推（anchored 之外的常规情形）。
+ * - 向左扩张的容器（anchored）：它的原点已经跟着手指往左移了，这时候再把它推回右边，
+ *   等于把人的拖动悄悄吃掉——现象是"拖了半天什么都没动，只有框越来越宽"。
+ *   所以锚住它，改推它左边的节点继续往左，一路级联。管线整条向左变长，但拖到哪就停在哪。
+ *
+ * x 与 y 都相交才算压到，所以被竖向挪开的节点不受牵连。
+ */
+function spreadTopLevelOverlaps(nodes: Node[], geo: Map<string, Geo>, anchored: Set<string>): void {
+  const tops = nodes
+    .filter((n) => !n.parentNode && geo.has(n.id))
+    .map((n) => ({ id: n.id, g: geo.get(n.id)! }))
+    .sort((a, b) => a.g.x - b.g.x);
+  if (tops.length < 2) return;
+
+  const hits = (a: Geo, b: Geo): boolean =>
+    a.y < b.y + b.h && b.y < a.y + a.h && a.x < b.x + b.w && b.x < a.x + a.w;
+
+  // 先处理向左扩张：从锚住的节点往前级联，逐个把左邻挤到 16px 之外。
+  for (let i = 0; i < tops.length; i++) {
+    if (!anchored.has(tops[i].id)) continue;
+    let limitLeft = tops[i].g.x;
+    for (let j = i - 1; j >= 0; j--) {
+      const g = tops[j].g;
+      const overlapsY = g.y < tops[i].g.y + tops[i].g.h && tops[i].g.y < g.y + g.h;
+      if (!overlapsY) continue;
+      if (g.x + g.w + SPREAD_MARGIN > limitLeft) g.x = limitLeft - SPREAD_MARGIN - g.w;
+      limitLeft = Math.min(limitLeft, g.x);
+    }
+  }
+
+  // 再处理向右：按 x 升序，每个节点躲开已经就位的前面那些。
+  const placed: Geo[] = [];
+  for (const { id, g } of tops) {
+    if (anchored.has(id)) { placed.push(g); continue; }
+    let minX = g.x;
+    for (const p of placed) {
+      if (hits(g, p)) minX = Math.max(minX, p.x + p.w + SPREAD_MARGIN);
+    }
+    // 子节点是相对坐标，父节点一挪它们自然跟着走，这里不必逐个改。
+    if (minX > g.x) g.x = minX;
+    placed.push(g);
+  }
+}
+
+/**
+ * 容器几何的唯一裁决者：尺寸 = 子节点包围盒 + 内边距，自内向外递归。
+ *
+ * 为什么要有这么一遍：容器尺寸原先有两个来源——各 builder 的算术式，和子节点实际落点。
+ * 平时两者恰好相等，所以看不出问题；人手一拖，算术式不动、子节点跑了，框就装不住内容。
+ * 让包围盒当唯一裁决之后，算术式退化成"还没有子节点时的初始摆位"，不再参与最终几何。
+ *
+ * 递归方向必须自内向外：孙节点撑大子容器，子容器再撑大父容器。故按深度倒序处理。
+ *
+ * 向左越界时不是把子节点推回去，而是把容器原点往左挪、内部子节点整体重新基准化——
+ * "内层始终在外层内"有两种实现，这里选的是撑大外层而不是压回内层。
+ * 唯一的硬墙是标题栏下沿：任何子节点都不许压到父节点的标题上，那是层级的前后台关系。
+ */
+function resolveContainerGeometry(nodes: Node[]): Node[] {
+  const kids = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (!n.parentNode) continue;
+    const list = kids.get(n.parentNode);
+    if (list) list.push(n.id);
+    else kids.set(n.parentNode, [n.id]);
+  }
+  if (kids.size === 0) return nodes;
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const geo = new Map(
+    nodes.map((n) => [n.id, { x: n.position.x, y: n.position.y, w: nodeW(n), h: nodeH(n) }]),
+  );
+
+  const depthOf = (id: string): number => {
+    let depth = 0;
+    let cur = byId.get(id)?.parentNode;
+    // 上限只是防环，正常嵌套不超过四五层。
+    while (cur && depth < 32) {
+      depth++;
+      cur = byId.get(cur)?.parentNode;
+    }
+    return depth;
+  };
+
+  const containerIds = [...kids.keys()]
+    .filter((id) => byId.has(id))
+    .sort((a, b) => depthOf(b) - depthOf(a));
+
+  const anchored = new Set<string>();
+
+  for (const containerId of containerIds) {
+    const container = byId.get(containerId)!;
+    // 折叠态的框是一张卡的尺寸，成员已被撤下，没有包围盒可言。
+    if ((container.data as { expanded?: boolean } | undefined)?.expanded === false) continue;
+
+    const pad = padOf(container);
+    const childIds = kids.get(containerId)!;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const childId of childIds) {
+      const g = geo.get(childId);
+      if (!g) continue;
+      minX = Math.min(minX, g.x);
+      minY = Math.min(minY, g.y);
+      maxX = Math.max(maxX, g.x + g.w);
+      maxY = Math.max(maxY, g.y + g.h);
+    }
+    if (!Number.isFinite(minX)) continue;
+
+    // 只往外长，不往里收：左/上边缘保持在布局给的位置，否则容器会跟着子节点四处漂，
+    // 整行的推进节奏（H_GAP）就没有了准头。
+    const growLeft = Math.max(0, pad.x - minX);
+    const growTop = Math.max(0, pad.top - minY);
+    if (growLeft > 0 || growTop > 0) {
+      const own = geo.get(containerId)!;
+      own.x -= growLeft;
+      own.y -= growTop;
+      // 顶层容器往左长出去了：让位那一步不许再把它推回来（否则拖动被悄悄吃掉）。
+      if (growLeft > 0 && !container.parentNode) anchored.add(containerId);
+      // 子节点是相对坐标：容器原点外移了，子节点要同量内移才留在原来的绝对位置。
+      for (const childId of childIds) {
+        const g = geo.get(childId);
+        if (!g) continue;
+        g.x += growLeft;
+        g.y += growTop;
+      }
+      minX += growLeft; maxX += growLeft;
+      minY += growTop; maxY += growTop;
+    }
+
+    // 取"布局给的尺寸"与"装得下子节点的尺寸"的较大者：不拖动时与 builder 完全一致
+    // （整行按 builder 的宽度推进，收缩会让 H_GAP 变得参差），一拖动就跟着长。
+    const own = geo.get(containerId)!;
+    own.w = Math.max(own.w, maxX + pad.x);
+    own.h = Math.max(own.h, maxY + pad.bottom);
+  }
+
+  spreadTopLevelOverlaps(nodes, geo, anchored);
+
+  return nodes.map((n) => {
+    const g = geo.get(n.id);
+    if (!g) return n;
+    const samePos = g.x === n.position.x && g.y === n.position.y;
+    const sameSize = g.w === nodeW(n) && g.h === nodeH(n);
+    if (samePos && sameSize) return n;
+    return {
+      ...n,
+      position: { x: g.x, y: g.y },
+      style: { ...n.style, width: g.w, height: g.h },
+    };
+  });
+}
+
+/**
+ * 给每个节点装上"标题栏当把手"，并划定子节点的活动范围。
+ *
+ * 范围只有一条硬墙：父容器标题栏的下沿（pad.top）。子节点再怎么拖也压不到父节点的
+ * 标题上——那是层级的前后台关系，不是能商量的美观问题。其余三个方向一律放开，
+ * 越界由 resolveContainerGeometry 把父容器撑大来吸收；把子节点钳在当前边框内的话，
+ * "容器跟着长"这件事永远没有机会发生。
+ */
+function applyDragAffordances(nodes: Node[]): Node[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  return nodes.map((n) => {
+    const handle = n.type ? DRAG_HANDLE[n.type] : undefined;
+    if (!handle) return n;
+    const next: Node = { ...n, draggable: true, dragHandle: handle };
+    if (!n.parentNode) return next;
+
+    const parent = byId.get(n.parentNode);
+    if (!parent) return next;
+    const pad = padOf(parent);
+    next.extent = [
+      [-DRAG_FREE, pad.top],
+      [DRAG_FREE, DRAG_FREE],
+    ];
+    return next;
+  });
+}
+
 // ── Main hook ───────────────────────────────────────────────────────────────
 
 export function useDetroitLayout(
@@ -2362,11 +3042,15 @@ export function useDetroitLayout(
   progressMap?: Map<string, number>,
   revealTimestamps?: Map<string, number>,
   pipelineStatus?: string,
+  expertGroups: AnnounceStepGroup[] = [],
+  nodeDrags: Record<string, { dx: number; dy: number }> = {},
+  entryCard: EntryCard | null = null,
 ): { layoutNodes: Node[]; layoutEdges: Edge[] } {
   return useMemo(() => {
     try {
       return computeLayoutImpl(
         steps, result, collapsedIds, selectedStepId, progressMap, revealTimestamps, pipelineStatus,
+        expertGroups, nodeDrags, entryCard,
       );
     } catch (err) {
       // 任何下游崩溃都精准 log + 返回空 layout（避免整个画布因为某个 step 数据异常而瘫掉）。
@@ -2395,7 +3079,7 @@ export function useDetroitLayout(
       window.dispatchEvent(new CustomEvent("narrative-layout-error", { detail: w.__narrativeLayoutError__ }));
       return { layoutNodes: [], layoutEdges: [] };
     }
-  }, [steps, result, collapsedIds, selectedStepId, progressMap, revealTimestamps, pipelineStatus]);
+  }, [steps, result, collapsedIds, selectedStepId, progressMap, revealTimestamps, pipelineStatus, expertGroups, nodeDrags, entryCard]);
 }
 
 function computeLayoutImpl(
@@ -2406,6 +3090,9 @@ function computeLayoutImpl(
   progressMap: Map<string, number> | undefined,
   revealTimestamps: Map<string, number> | undefined,
   pipelineStatus: string | undefined,
+  expertGroups: AnnounceStepGroup[],
+  nodeDrags: Record<string, { dx: number; dy: number }> = {},
+  entryCard: EntryCard | null = null,
 ): { layoutNodes: Node[]; layoutEdges: Edge[] } {
   const rfNodes: Node[] = [];
   const rfEdges: Edge[] = [];
@@ -2419,11 +3106,6 @@ function computeLayoutImpl(
 
     const preSteps: PreStep[] = [];
 
-    const hasQuestStep = steps.some((s) => s.id === "quest_generation");
-    const hasSceneStep = steps.some((s) => s.id === "scene_generation");
-    const questSceneForkPair = hasQuestStep && hasSceneStep;
-    const forkConsumed = { quest: false, scene: false };
-
     const STEP_ID_FIX: Record<string, string> = {
       initial_story_outline: "initial_outline",
       core_settings_extraction: "core_settings",
@@ -2435,10 +3117,15 @@ function computeLayoutImpl(
       const stepId = STEP_ID_FIX[stepState.id] ?? stepState.id;
       const stepDef = PIPELINE_STEPS.find((s) => s.id === stepId);
 
+      // 运行横幅不上画布：它报的是本次 Tier/Mode/总步数，没有产物，卡上永远写着
+      // "无节点数据"。用户在入口节点已经选定了专家，画布第一眼就该是那位专家。
+      // 哪些帧算横幅由后端声明（announce.metaSteps / 帧上的 meta），这里不认 id 字符串。
+      if (stepState.isMeta) continue;
+
       // 互动影游 E1-02 三幕扩写：专属嵌套大节点（三幕剧本子组 + 人物小传/关键道具）
       if (stepId === "vn_outline_acts") {
         preSteps.push(buildOutlineActsPreStep(
-          stepId, stepDef?.label ?? "三幕扩写", stepState.status,
+          stepId, stepTitle(stepState, stepDef?.label ?? "三幕扩写"), stepState.status,
           stepState.data, result, collapsedIds,
         ));
         continue;
@@ -2465,37 +3152,46 @@ function computeLayoutImpl(
         const compositeP1 = sceneData && typeof sceneData === "object"
           ? (sceneData as Record<string, unknown>)._phase1_by_layer as { l0: SkeletonLayerScene[]; l1: SkeletonLayerScene[]; l2: SkeletonLayerScene[] } | undefined
           : undefined;
-        preSteps.push(buildForkPreStep(
-          stepId, stepDef?.label ?? "任务+场景", stepState.status,
-          questNodes, sceneNodes, collapsedIds, compositeP1 ?? result?.scene_map?._phase1_by_layer,
-        ));
-        continue;
+        // 这一个 step 确实同时产出任务与场景，所以它内部才有"两支并行"的说法。
+        const combined = buildSceneNestPreStep(
+          stepId, stepTitle(stepState, stepDef?.label ?? "任务+场景"), stepState.status,
+          questNodes, sceneNodes, collapsedIds, "qsg::scene",
+          compositeP1 ?? result?.scene_map?._phase1_by_layer,
+        );
+        if (combined) {
+          preSteps.push(combined);
+          continue;
+        }
+        // 无产物 → 落到下面的通用路径，画一张普通卡。
       }
 
-      if (questSceneForkPair && (stepId === "quest_generation" || stepId === "scene_generation")) {
-        if (stepId === "quest_generation") forkConsumed.quest = true;
-        if (stepId === "scene_generation") forkConsumed.scene = true;
-
-        if (!forkConsumed.quest || !forkConsumed.scene) {
-          const questStep = steps.find((s) => s.id === "quest_generation")!;
-          const sceneStep = steps.find((s) => s.id === "scene_generation")!;
-          const questNodes = prepareStoryNodes(
-            getStoryNodes("quest_generation", questStep.data, result, steps),
-          );
-          const sceneNodes = prepareStoryNodes(
-            getStoryNodes("scene_generation", sceneStep.data, result, steps),
-          );
-          const worstStatus = sceneStep.status === "failed" || questStep.status === "failed" ? "failed"
-            : sceneStep.status === "running" || questStep.status === "running" ? "running"
-            : sceneStep.status === "completed" && questStep.status === "completed" ? "completed"
-            : "pending";
-          const forkP1 = result?.scene_map?._phase1_by_layer ?? null;
-          preSteps.push(buildForkPreStep(
-            "quest_scene_fork", "任务+场景", worstStatus,
-            questNodes, sceneNodes, collapsedIds, forkP1,
-          ));
+      /*
+       * 场景生成的内部分段（骨架层 → 展开 → 合并）来自后端 scene_map 的真实产物，
+       * 所以它单独有一个嵌套 builder。但它就是管线里的一步，位置由 pipelineOrder 决定：
+       * 上一版把它和相隔四个席位的 quest_generation 强行并成一列上下叠放，
+       * 而两者从来不并行（管线是串行 for 循环），并列排布是凭空捏的。
+       */
+      if (stepId === "scene_generation") {
+        // 运行期 result 还是 null，骨架层随 SSE 帧挂在 step 数据上（可能再包一层 scene_map）；
+        // 只读 result 的话，跑的时候骨架那一段永远不出现。
+        const live = stepState.data && typeof stepState.data === "object"
+          ? stepState.data as Record<string, unknown>
+          : undefined;
+        const liveMap = live?.scene_map && typeof live.scene_map === "object"
+          ? live.scene_map as Record<string, unknown>
+          : live;
+        const p1 = (liveMap?._phase1_by_layer ?? result?.scene_map?._phase1_by_layer) as
+          { l0: SkeletonLayerScene[]; l1: SkeletonLayerScene[]; l2: SkeletonLayerScene[] } | undefined;
+        const sceneNest = buildSceneNestPreStep(
+          stepId, stepTitle(stepState, stepDef?.label), stepState.status,
+          [], prepareStoryNodes(getStoryNodes("scene_generation", stepState.data, result, steps)),
+          collapsedIds, stepId,
+          p1 ?? null,
+        );
+        if (sceneNest) {
+          preSteps.push(sceneNest);
+          continue;
         }
-        continue;
       }
 
       const isStory = stepId in STEP_STORY_EXTRACT;
@@ -2532,7 +3228,7 @@ function computeLayoutImpl(
         }
       }
 
-      preSteps.push({ stepId, label: stepDef?.label ?? stepId, status: stepState.status,
+      preSteps.push({ stepId, label: stepTitle(stepState, stepDef?.label), status: stepState.status,
         isStory, storyNodes: safeStoryNodes, shouldExpand: safeShouldExpand, w, h, storyPixels });
     }
 
@@ -2545,6 +3241,34 @@ function computeLayoutImpl(
     let prevNodeIds: string[] = [];
     let prevStatus = "pending";
     const pipelineNodeRects = new Map<string, ObstacleRect>();
+
+    /*
+     * 入口节点跟着进画布：它是这张图的锚点（后端拿它的 id 当 startNodeId），
+     * 一开跑就消失会让人以为"我配的东西丢了"。
+     *
+     * 它不是 step，所以数据不来自 SSE，而来自编排态那枚 input.entry 节点 +
+     * 本次运行的上下文（需求、三轴、品类）——见 useEntryCard。摆在第一列、
+     * 连一条边到第一步，跨容器的那一段由 applyContainers 收到容器把手上。
+     */
+    if (entryCard) {
+      const entryY = Math.round(centerY - PL_H / 2);
+      rfNodes.push({
+        id: entryCard.id,
+        type: "pipelineStep",
+        position: { x: INIT_X, y: entryY },
+        data: {
+          label: entryCard.label,
+          status: "completed",
+          stepType: "special",
+          stepData: entryCard.fields,
+        },
+        style: { width: PL_W, height: PL_H },
+      });
+      pipelineNodeRects.set(entryCard.id, { x: INIT_X, y: entryY, w: PL_W, h: PL_H });
+      curX = INIT_X + PL_W + H_GAP;
+      prevNodeIds = [entryCard.id];
+      prevStatus = "completed";
+    }
 
     function outerBendFraction(srcId: string, tgtId: string): number | undefined {
       const src = pipelineNodeRects.get(srcId);
@@ -2567,9 +3291,13 @@ function computeLayoutImpl(
       if (ps.fork) {
         const topY = Math.round(centerY - ps.h / 2);
         const fd = ps.fork;
-        pipelineNodeRects.set("qsg::quest", { x: posX, y: topY, w: fd.quest.w, h: fd.quest.h });
-        const scnY = topY + fd.quest.h + FORK_V_GAP;
-        pipelineNodeRects.set("qsg::scene", { x: posX, y: scnY, w: fd.scene.containerW, h: fd.scene.containerH });
+        const cid = ps.sceneContainerId ?? ps.stepId;
+        let scnY = topY;
+        if (fd.quest) {
+          pipelineNodeRects.set(`${cid}::quest`, { x: posX, y: topY, w: fd.quest.w, h: fd.quest.h });
+          scnY = topY + fd.quest.h + FORK_V_GAP;
+        }
+        pipelineNodeRects.set(cid, { x: posX, y: scnY, w: fd.scene.containerW, h: fd.scene.containerH });
       } else {
         const posY = Math.round(centerY - ps.h / 2);
         pipelineNodeRects.set(ps.stepId, { x: posX, y: posY, w: ps.w, h: ps.h });
@@ -2579,15 +3307,17 @@ function computeLayoutImpl(
       if (prevNodeIds.length > 0) {
         const edgeStatus = prevStatus === "completed" ? "done" : prevStatus === "running" ? "running" : "pending";
         if (ps.fork) {
+          // 入边连到这一块真正存在的顶层节点上：只有场景时就一条，
+          // legacy 合并 step 同时有任务与场景时才是两条。
+          const cid = ps.sceneContainerId ?? ps.stepId;
+          const targets = ps.fork.quest ? [`${cid}::quest`, cid] : [cid];
           for (const pId of prevNodeIds) {
-            rfEdges.push({
-              id: `e_pipeline_${pId}_qsg::quest`, source: pId, target: "qsg::quest",
-              type: "detroit", data: { status: edgeStatus, level: "outer", bendFraction: outerBendFraction(pId, "qsg::quest") },
-            });
-            rfEdges.push({
-              id: `e_pipeline_${pId}_qsg::scene`, source: pId, target: "qsg::scene",
-              type: "detroit", data: { status: edgeStatus, level: "outer", bendFraction: outerBendFraction(pId, "qsg::scene") },
-            });
+            for (const target of targets) {
+              rfEdges.push({
+                id: `e_pipeline_${pId}_${target}`, source: pId, target,
+                type: "detroit", data: { status: edgeStatus, level: "outer", bendFraction: outerBendFraction(pId, target) },
+              });
+            }
           }
         } else {
           for (const pId of prevNodeIds) {
@@ -2625,9 +3355,8 @@ function computeLayoutImpl(
           // 线路1（上）：三幕剧本子组（第一→二→三幕串行）
           rfNodes.push({
             id: "vn_outline_acts::acts", type: "storyGroup",
-            draggable: false,
             position: { x: BIG_PAD, y: padTop },
-            parentNode: "vn_outline_acts", extent: "parent" as const,
+            parentNode: "vn_outline_acts",
             data: {
               label: "三幕剧本", status: ps.status,
               childCount: od.actNodes.length, expanded: od.actsExpand,
@@ -2651,9 +3380,8 @@ function computeLayoutImpl(
               rfNodes.push({
                 id: `vn_outline_acts__${ln.node_id}`,
                 type: "storyChild",
-                draggable: false,
                 position: { x: childX, y: y2 },
-                parentNode: "vn_outline_acts", extent: "parent" as const,
+                parentNode: "vn_outline_acts",
                 data: {
                   nodeId: ln.node_id, contentId: ln.content_id,
                   name: ln.name, narrativeFunction: ln.narrative_function,
@@ -2682,161 +3410,185 @@ function computeLayoutImpl(
       } else if (ps.fork) {
         const fd = ps.fork;
         const topY = Math.round(centerY - ps.h / 2);
+        const cid = ps.sceneContainerId ?? ps.stepId;
+        const stepProgress = progressMap?.get(ps.stepId) ?? (ps.status === "completed" ? 100 : 0);
+        const emitted: string[] = [];
 
-        // ─── Quest branch (top): storyGroup ───
-        const questY = topY;
-        rfNodes.push({
-          id: "qsg::quest", type: "storyGroup",
-          position: { x: posX, y: questY },
-          data: {
-            label: "任务生成", status: ps.status,
-            childCount: fd.quest.nodes.length, expanded: fd.quest.expand,
-            progress: progressMap?.get(ps.stepId) ?? (ps.status === "completed" ? 100 : 0),
-          },
-          style: { width: fd.quest.w, height: fd.quest.h },
-        });
-        pipelineNodeRects.set("qsg::quest", { x: posX, y: questY, w: fd.quest.w, h: fd.quest.h });
-
-        if (fd.quest.expand) {
-          renderStoryChildren(
-            "qsg::quest", fd.quest.nodes, fd.quest.pixels,
-            ps.status, revealTimestamps, pipelineStatus, complexity, rfNodes, rfEdges,
-          );
+        // ─── 任务分支（上）：只有同一 step 真的产出了任务树才存在 ───
+        let sceneY = topY;
+        if (fd.quest) {
+          const questId = `${cid}::quest`;
+          rfNodes.push({
+            id: questId, type: "storyGroup",
+            position: { x: posX, y: topY },
+            data: {
+              label: "任务生成", status: ps.status,
+              childCount: fd.quest.nodes.length, expanded: fd.quest.expand,
+              progress: stepProgress,
+            },
+            style: { width: fd.quest.w, height: fd.quest.h },
+          });
+          pipelineNodeRects.set(questId, { x: posX, y: topY, w: fd.quest.w, h: fd.quest.h });
+          if (fd.quest.expand) {
+            renderStoryChildren(
+              questId, fd.quest.nodes, fd.quest.pixels,
+              ps.status, revealTimestamps, pipelineStatus, complexity, rfNodes, rfEdges,
+            );
+          }
+          emitted.push(questId);
+          sceneY = topY + fd.quest.h + FORK_V_GAP;
         }
 
-        // ─── Scene branch (bottom): container with P1→P2→P3 inside ───
-        const sceneY = questY + fd.quest.h + FORK_V_GAP;
+        // ─── 场景容器：骨架层 → 展开 → 合并，每段都以产物为前提 ───
         const sd = fd.scene;
         const sceneChildCount = sd.p2Nodes.length;
 
         rfNodes.push({
-          id: "qsg::scene", type: "storyGroup",
+          id: cid, type: "storyGroup",
           position: { x: posX, y: sceneY },
           data: {
-            label: "场景生成", status: ps.status,
+            label: fd.quest ? "场景生成" : ps.label, status: ps.status,
             childCount: sceneChildCount, expanded: sd.containerExpand,
-            progress: progressMap?.get(ps.stepId) ?? (ps.status === "completed" ? 100 : 0),
+            progress: stepProgress,
           },
           style: { width: sd.containerW, height: sd.containerH },
         });
-        pipelineNodeRects.set("qsg::scene", { x: posX, y: sceneY, w: sd.containerW, h: sd.containerH });
+        pipelineNodeRects.set(cid, { x: posX, y: sceneY, w: sd.containerW, h: sd.containerH });
+        emitted.push(cid);
 
         if (sd.containerExpand) {
           const padTop = BIG_TITLE_H + BIG_PAD;
-          const innerH = Math.max(sd.p1H, sd.p2H, PL_H);
+          const hasP1 = sd.p1Layers.length > 0;
+          const innerH = Math.max(hasP1 ? sd.p1H : 0, sceneChildCount > 0 ? sd.p2H : 0, PL_H);
 
           const p1Status = ps.status === "pending" ? "pending" : "completed";
           const p3Status = ps.status === "completed" ? "completed" : "pending";
           const phaseEdgeStatus = ps.status === "completed" ? "done" : ps.status === "running" ? "running" : "pending";
 
-          const p1ChildCount = sd.p1SceneCounts.l0 + sd.p1SceneCounts.l1 + sd.p1SceneCounts.l2;
+          // 段与段之间从左往右推进；每段是否存在由产物决定，所以宽度要一段段累加，
+          // 不能像上一版那样按"固定三段"算偏移。
+          let segX = BIG_PAD;
+          /** 段的出口节点 id：段内边从上一段的出口连到下一段。 */
+          let prevSegId: string | null = null;
+          const linkSeg = (segId: string) => {
+            if (prevSegId) {
+              rfEdges.push({
+                id: `e_${prevSegId}__${segId}`, source: prevSegId, target: segId,
+                type: "detroit", zIndex: 1000, data: { status: phaseEdgeStatus, level: "inner" },
+              });
+            }
+            prevSegId = segId;
+          };
 
-          // P1 骨架提取 (storyGroup container with 4 horizontal pipeline nodes)
-          rfNodes.push({
-            id: "qsg::scene::p1", type: "storyGroup",
-            draggable: false,
-            position: { x: BIG_PAD, y: padTop + Math.round((innerH - sd.p1H) / 2) },
-            parentNode: "qsg::scene",
-            extent: "parent" as const,
-            data: {
-              label: "骨架提取", status: p1Status,
-              childCount: p1ChildCount, expanded: sd.p1Expand,
-              progress: p1Status === "completed" ? 100 : 0,
-            },
-            style: { width: sd.p1W, height: sd.p1H },
-          });
+          // ── 骨架层：有几层数据就几张卡；多于一层才套「骨架提取」子容器 ──
+          if (hasP1) {
+            const layerCards = sd.p1Layers.map((layer) => ({
+              id: `${cid}::p1::${layer.key}`,
+              label: `${layer.key.toUpperCase()} 骨架 (${layer.count})`,
+            }));
 
-          if (sd.p1Expand) {
-            const p1PadTop = BIG_TITLE_H + BIG_PAD;
-            const p1NodeY = p1PadTop;
-
-            const P1_NODES: { id: string; label: string }[] = [
-              { id: "qsg::scene::p1::l0", label: `L0 骨架 (${sd.p1SceneCounts.l0})` },
-              { id: "qsg::scene::p1::l1", label: `L1 骨架 (${sd.p1SceneCounts.l1})` },
-              { id: "qsg::scene::p1::l2", label: `L2 骨架 (${sd.p1SceneCounts.l2})` },
-              { id: "qsg::scene::p1::merge", label: "骨架合并" },
-            ];
-
-            for (let pi = 0; pi < P1_NODES.length; pi++) {
-              const pn = P1_NODES[pi];
-              const nodeX = BIG_PAD + pi * (PL_W + INNER_GAP);
+            if (sd.p1Grouped) {
+              const p1Id = `${cid}::p1`;
               rfNodes.push({
-                id: pn.id, type: "pipelineStep",
-                draggable: false,
-                position: { x: nodeX, y: p1NodeY },
-                parentNode: "qsg::scene::p1",
-                extent: "parent" as const,
+                id: p1Id, type: "storyGroup",
+                position: { x: segX, y: padTop + Math.round((innerH - sd.p1H) / 2) },
+                parentNode: cid,
                 data: {
-                  label: pn.label, status: p1Status,
+                  label: "骨架提取", status: p1Status,
+                  childCount: sd.p1Layers.reduce((sum, l) => sum + l.count, 0),
+                  expanded: sd.p1Expand,
+                  progress: p1Status === "completed" ? 100 : 0,
+                },
+                style: { width: sd.p1W, height: sd.p1H },
+              });
+
+              if (sd.p1Expand) {
+                const cards = [...layerCards, { id: `${cid}::p1::merge`, label: "骨架合并" }];
+                for (let pi = 0; pi < cards.length; pi++) {
+                  rfNodes.push({
+                    id: cards[pi].id, type: "pipelineStep",
+                    position: { x: BIG_PAD + pi * (PL_W + INNER_GAP), y: BIG_TITLE_H + BIG_PAD },
+                    parentNode: p1Id,
+                    data: {
+                      label: cards[pi].label, status: p1Status,
+                      stepType: "pipeline", isSelected: false,
+                      progress: p1Status === "completed" ? 100 : 0,
+                    },
+                    style: { width: PL_W, height: PL_H },
+                  });
+                  if (pi > 0) {
+                    rfEdges.push({
+                      id: `e_p1_${cards[pi - 1].id}__${cards[pi].id}`,
+                      source: cards[pi - 1].id, target: cards[pi].id,
+                      type: "detroit", zIndex: 1000, data: { status: phaseEdgeStatus, level: "inner" },
+                    });
+                  }
+                }
+              }
+              segX += sd.p1W + INNER_GAP;
+              linkSeg(p1Id);
+            } else {
+              // 独苗骨架层：直接摆那张卡，不套框。
+              const only = layerCards[0];
+              rfNodes.push({
+                id: only.id, type: "pipelineStep",
+                position: { x: segX, y: padTop + Math.round((innerH - PL_H) / 2) },
+                parentNode: cid,
+                data: {
+                  label: only.label, status: p1Status,
                   stepType: "pipeline", isSelected: false,
                   progress: p1Status === "completed" ? 100 : 0,
                 },
                 style: { width: PL_W, height: PL_H },
               });
-            }
-
-            // Edges: L0 → L1 → L2 → merge
-            for (let pi = 0; pi < P1_NODES.length - 1; pi++) {
-              rfEdges.push({
-                id: `e_p1_${P1_NODES[pi].id}_${P1_NODES[pi + 1].id}`,
-                source: P1_NODES[pi].id, target: P1_NODES[pi + 1].id,
-                type: "detroit", zIndex: 1000, data: { status: phaseEdgeStatus, level: "inner" },
-              });
+              segX += PL_W + INNER_GAP;
+              linkSeg(only.id);
             }
           }
 
-          // P2 展开 (storyGroup, expandable)
-          const p2X = BIG_PAD + sd.p1W + INNER_GAP;
-          rfNodes.push({
-            id: "qsg::scene::p2", type: "storyGroup",
-            draggable: false,
-            position: { x: p2X, y: padTop + Math.round((innerH - sd.p2H) / 2) },
-            parentNode: "qsg::scene",
-            extent: "parent" as const,
-            data: {
-              label: "场景展开", status: ps.status,
-              childCount: sceneChildCount, expanded: sd.p2Expand,
-              progress: progressMap?.get(ps.stepId) ?? (ps.status === "completed" ? 100 : 0),
-            },
-            style: { width: sd.p2W, height: sd.p2H },
-          });
-
-          if (sd.p2Expand && sd.p2Pixels) {
-            renderStoryChildren(
-              "qsg::scene::p2", sd.p2Nodes, sd.p2Pixels,
-              ps.status, revealTimestamps, pipelineStatus, complexity, rfNodes, rfEdges,
-            );
+          // ── 场景展开：有场景树才有这一段；用户折叠时留一张折叠卡（不是撤掉） ──
+          if (sceneChildCount > 0) {
+            const p2Id = `${cid}::p2`;
+            rfNodes.push({
+              id: p2Id, type: "storyGroup",
+              position: { x: segX, y: padTop + Math.round((innerH - sd.p2H) / 2) },
+              parentNode: cid,
+              data: {
+                label: "场景展开", status: ps.status,
+                childCount: sceneChildCount, expanded: sd.p2Expand,
+                progress: stepProgress,
+              },
+              style: { width: sd.p2W, height: sd.p2H },
+            });
+            if (sd.p2Expand && sd.p2Pixels) {
+              renderStoryChildren(
+                p2Id, sd.p2Nodes, sd.p2Pixels,
+                ps.status, revealTimestamps, pipelineStatus, complexity, rfNodes, rfEdges,
+              );
+            }
+            segX += sd.p2W + INNER_GAP;
+            linkSeg(p2Id);
           }
 
-          // P3 合并
-          const p3X = p2X + sd.p2W + INNER_GAP;
-          rfNodes.push({
-            id: "qsg::scene::p3", type: "pipelineStep",
-            draggable: false,
-            position: { x: p3X, y: padTop + Math.round((innerH - PL_H) / 2) },
-            parentNode: "qsg::scene",
-            extent: "parent" as const,
-            data: {
-              label: "合并", status: p3Status,
-              stepType: "pipeline", isSelected: false,
-              progress: p3Status === "completed" ? 100 : 0,
-            },
-            style: { width: PL_W, height: PL_H },
-          });
-
-          // Internal edges: P1 → P2 → P3
-          rfEdges.push({
-            id: "e_scene_p1_p2", source: "qsg::scene::p1", target: "qsg::scene::p2",
-            type: "detroit", zIndex: 1000, data: { status: phaseEdgeStatus, level: "inner" },
-          });
-          rfEdges.push({
-            id: "e_scene_p2_p3", source: "qsg::scene::p2", target: "qsg::scene::p3",
-            type: "detroit", zIndex: 1000, data: { status: phaseEdgeStatus, level: "inner" },
-          });
+          // ── 合并：两段都在才有东西可合 ──
+          if (sd.hasMerge) {
+            const p3Id = `${cid}::p3`;
+            rfNodes.push({
+              id: p3Id, type: "pipelineStep",
+              position: { x: segX, y: padTop + Math.round((innerH - PL_H) / 2) },
+              parentNode: cid,
+              data: {
+                label: "合并", status: p3Status,
+                stepType: "pipeline", isSelected: false,
+                progress: p3Status === "completed" ? 100 : 0,
+              },
+              style: { width: PL_W, height: PL_H },
+            });
+            linkSeg(p3Id);
+          }
         }
 
-        // After fork: connect from quest + scene container
-        prevNodeIds = ["qsg::quest", "qsg::scene"];
+        prevNodeIds = emitted;
 
       } else if (ps.shouldExpand && ps.storyPixels) {
         const posY = Math.round(centerY - ps.h / 2);
@@ -2908,7 +3660,14 @@ function computeLayoutImpl(
       curX = posX + ps.w + H_GAP;
     }
 
-    return { layoutNodes: rfNodes, layoutEdges: rfEdges };
+    // 顺序即因果：成员的位移先叠（席位/专家容器成形时才会把拖走的位置算进包围盒），
+    // 容器自身的位移后叠，最后由 resolveContainerGeometry 自内向外把每层框重新裁到
+    // "装得下所有子节点"。前两步只动位置，尺寸的事只有它一家说了算。
+    const dragged = applyNodeDrags(rfNodes, nodeDrags, (n) => !isContainerId(n.id));
+    const grouped = applyExpertGrouping(dragged, rfEdges, expertGroups, collapsedIds, steps);
+    const withContainerDrags = applyNodeDrags(grouped.nodes, nodeDrags, (n) => isContainerId(n.id));
+    const resolved = resolveContainerGeometry(withContainerDrags);
+    return { layoutNodes: applyDragAffordances(resolved), layoutEdges: grouped.edges };
   }
 }
 

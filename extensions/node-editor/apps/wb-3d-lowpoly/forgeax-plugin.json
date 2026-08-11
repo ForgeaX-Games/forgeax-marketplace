@@ -806,6 +806,49 @@
         }
       },
       {
+        "id": "lowpoly:export-to-engine",
+        "args": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "引擎资产文件名（不含扩展名）"
+            },
+            "directory": {
+              "type": "string",
+              "description": "项目相对目标目录，默认 assets/3d；禁止绝对路径和 .."
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "animated",
+                "static",
+                "skinned",
+                "character"
+              ],
+              "description": "GLB 导出模式；不传则沿用 export-glb 默认模式"
+            },
+            "animated": {
+              "type": "boolean",
+              "description": "兼容旧参数；mode 未传时 false 表示静态 GLB"
+            },
+            "timeout": {
+              "type": "number",
+              "description": "GLB 生成超时毫秒数，默认 30000，上限 60000"
+            }
+          },
+          "additionalProperties": false
+        },
+        "returns": {
+          "type": "object"
+        },
+        "exposedToAI": true,
+        "description": {
+          "zh": "一站式把当前 lowpoly 模型生成 GLB，并通过 Editor 统一导入到项目目录。默认 assets/3d；返回导出和导入两段结构化回执，不把二进制塞回对话。",
+          "en": "One-shot workflow: bake the current lowpoly model to GLB and import it through the Editor into the project directory. Defaults to assets/3d and returns structured export/import receipts without putting binary data in chat."
+        }
+      },
+      {
         "id": "lowpoly:export-glb",
         "args": {
           "type": "object",

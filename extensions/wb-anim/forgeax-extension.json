@@ -47,7 +47,7 @@
           "zh": "动画设计",
           "en": "Animation"
         },
-        "icon": "🎬",
+        "icon": "Film",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -120,9 +120,9 @@
           "zh": "动画设计",
           "en": "Animation"
         },
-        "icon": "🎬",
+        "icon": "Film",
         "order": 160,
-        "category": "workbench",
+        "category": "2D",
         "pageType": {
           "extension": "self",
           "id": "anim"

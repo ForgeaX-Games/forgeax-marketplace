@@ -14,7 +14,7 @@
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
-  "icon": "🔊",
+  "icon": "Music2",
   "keywords": [
     "audio",
     "bgm",
@@ -66,7 +66,7 @@
           "zh": "音乐音效",
           "en": "BGM & SFX"
         },
-        "icon": "🔊",
+        "icon": "Music2",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -102,9 +102,9 @@
           "zh": "音乐音效",
           "en": "BGM & SFX"
         },
-        "icon": "🔊",
+        "icon": "Music2",
         "order": 170,
-        "category": "workbench",
+        "category": "general",
         "pageType": {
           "extension": "self",
           "id": "bgm"

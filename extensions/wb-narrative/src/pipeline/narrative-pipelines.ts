@@ -207,3 +207,21 @@ export function expandPipelineSteps(
 export function pendingSeats(pipeline: NarrativePipeline): string[] {
   return pipeline.seats.filter((id) => getSeat(id)?.status === "planned");
 }
+
+/**
+ * 品类 + 层级 → 该跑的步序。运行时（pipeline.run）与预览（/plan）共用的唯一入口。
+ *
+ * 这是四期路由的落地点：PRD v1.4 §3.2.3 规定所有品类走同一条通用流程，品类差异
+ * 来自提示词槽位 / 策略卡 / 产出模板，不来自各写一条链。所以这里不再按 needs 或
+ * 原型族现算步序，只按（层级 + 影游特例）取四条之一。
+ *
+ * 步序是纯串行的：CSV 的环节本就一环接一环，并行组由具体 agent 内部的批处理承担，
+ * 不在管线层展开。
+ */
+export function resolveSeatStepGroups(
+  genreCode: string | null | undefined,
+  tier: TierId,
+): { pipeline: NarrativePipeline; stepGroups: string[] } {
+  const pipeline = resolveNarrativePipeline(genreCode ?? "", tier);
+  return { pipeline, stepGroups: expandPipelineSteps(pipeline) };
+}

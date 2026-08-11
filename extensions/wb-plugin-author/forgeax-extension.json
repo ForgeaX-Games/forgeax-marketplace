@@ -32,7 +32,7 @@
           "zh": "插件作者",
           "en": "Plugin Author"
         },
-        "icon": "📝",
+        "icon": "Plug",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -58,6 +58,22 @@
         "matchProduces": [
           ".forgeax/extensions/**"
         ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "plugin-author.launcher",
+        "title": {
+          "zh": "插件作者",
+          "en": "Plugin Author"
+        },
+        "icon": "Plug",
+        "order": 220,
+        "category": "general",
+        "pageType": {
+          "extension": "self",
+          "id": "plugin-author"
+        }
       }
     ]
   }

@@ -6,7 +6,6 @@
  */
 import { randomUUID } from "node:crypto";
 import { findGenreByCode } from "../knowledge/genre-taxonomy.js";
-import { getNarrativeType } from "../knowledge/genre-narrative-type.js";
 import { resolveNarrativeStructure } from "../knowledge/narrative-axes/index.js";
 import type { ModeId, TierId, ContentLocale } from "../types/index.js";
 import {
@@ -18,11 +17,10 @@ import {
   isCompositionComplete,
   emptyLifecycle,
 } from "../types/run-manifest.js";
-import { planPipeline } from "./planner/index.js";
+import { resolveSeatStepGroups } from "./narrative-pipelines.js";
 import { getModeConfig, TIER_DEFAULT_MODE } from "./modes.js";
 import { injectVnV2E2Steps } from "./vn-v2-e2.js";
-import { PIPELINE_TEMPLATES, type PipelineTemplateId } from "./templates.js";
-import type { NeedsKey, NeedsScore } from "./universal-agent/types.js";
+import { type PipelineTemplateId } from "./templates.js";
 import { getNarrativeAgent } from "./agent-registry.js";
 import { type AgentLifecycle, prototypeFromStructure } from "./agent-contract.js";
 import { STEP_REGISTRY } from "./step-registry.js";
@@ -39,29 +37,6 @@ export interface PlanManifestRequest {
   requestedSteps?: string[];
   /** tpl-vn-v2 E2：已上传剧本时步序走 normalize/confirm 旁路（与运行时同一实现）。 */
   hasUploadedScript?: boolean;
-}
-
-function resolveNeeds(
-  genreCode: string | null | undefined,
-  tier: TierId | null | undefined,
-): Partial<Record<NeedsKey, NeedsScore>> {
-  if (genreCode) {
-    const g = findGenreByCode(genreCode);
-    if (g?.needs) return g.needs as Partial<Record<NeedsKey, NeedsScore>>;
-  }
-  // tier 兜底（与 tier-router 一致的粗粒度）
-  switch (tier) {
-    case "tier1":
-      return { W: 3, C: 3, S: 3, D: 3, Q: 2, E: 2, I: 2, U: 2, L: 2 };
-    case "tier2":
-      return { W: 2, C: 2, S: 2, D: 2, Q: 1, E: 1, I: 1, U: 1, L: 1 };
-    case "tier3":
-      return { W: 2, C: 1, S: 1, D: 1, Q: 0, E: 0, I: 1, U: 1, L: 0 };
-    case "tier4":
-      return { W: 1, C: 0, S: 0, D: 0, Q: 0, E: 0, I: 0, U: 1, L: 0 };
-    default:
-      return { W: 2, C: 2, S: 2, D: 2 };
-  }
 }
 
 function agentName(id: string): string {
@@ -96,23 +71,10 @@ function concatGroupsDeduped(
   return out;
 }
 
-/**
- * 该 tier 的专属模板（`tiers` 恰为 [tier] 的那一个）。
- * 用于「选了层级但还没选品类」的预览：tier4 → tpl-narrative-card、tier3 → tpl-light。
- * 从 PIPELINE_TEMPLATES 的 tiers 声明推导，不另立一份 tier→template 映射。
- */
-function exclusiveTemplateForTier(tier: TierId): PipelineTemplateId | undefined {
-  for (const tpl of Object.values(PIPELINE_TEMPLATES)) {
-    if (tpl.tiers.length === 1 && tpl.tiers[0] === tier) return tpl.id;
-  }
-  return undefined;
-}
-
 interface ResolveStepsInput {
   mode: ModeId | null | undefined;
   tier: TierId;
   genreCode: string | undefined;
-  narrativeType: ReturnType<typeof getNarrativeType>;
   pipelineTemplate: PipelineTemplateId | undefined;
   hasUploadedScript: boolean;
 }
@@ -133,18 +95,16 @@ function resolveStepGroups(input: ResolveStepsInput): {
   stepGroups: (string | string[])[];
   resolvedTemplate: string;
 } {
-  const { tier, genreCode, narrativeType, pipelineTemplate } = input;
-  // 无品类时不假装是 jrpg：品类未定则按 tier 的专属模板预览（tier4→叙事卡 / tier3→轻量），
-  // tier1/2 无专属模板，才退回 jrpg 这一代表性重叙事链。
-  const template = pipelineTemplate ?? (genreCode ? undefined : exclusiveTemplateForTier(tier));
-  const plan = () =>
-    planPipeline({
-      genre_code: genreCode ?? (template ? "" : "rpg-jrpg"),
-      tier,
-      needs: resolveNeeds(genreCode, tier),
-      narrative_type: narrativeType,
-      pipelineTemplate: template,
-    });
+  const { tier, genreCode, pipelineTemplate } = input;
+  // 预览与运行时读同一个步序真值：品类 + 层级 → 四条席位管线之一。
+  // 这两侧一旦各算一份，用户在「待生成」看到的链就会与实际跑的不符。
+  const seat = resolveSeatStepGroups(genreCode, tier);
+  // 提示词库版本仍由品类的 pipelineTemplate 决定 —— 它与"跑哪些步"正交，
+  // 换步序不该顺手把 V1/V2 槽位库也换掉。
+  const seatTemplate =
+    pipelineTemplate ??
+    (genreCode ? findGenreByCode(genreCode)?.pipelineTemplate : undefined) ??
+    "needs-driven";
 
   const mode = (input.mode ?? TIER_DEFAULT_MODE[tier]) as ModeId;
   let modeConfig: ReturnType<typeof getModeConfig> | undefined;
@@ -158,15 +118,13 @@ function resolveStepGroups(input: ResolveStepsInput): {
   let resolvedTemplate: string;
 
   if (!modeConfig || mode === "narrative_auto") {
-    // 全自动：步序完全由 Planner 按品类 needs 决定（与运行时 usePlanner 路径一致）。
-    const planned = plan();
-    stepGroups = planned.stepGroups;
-    resolvedTemplate = String(planned.metadata.resolvedTemplate);
+    // 专家组（纯叙事）：席位管线即全部步序。
+    stepGroups = [...seat.stepGroups];
+    resolvedTemplate = seatTemplate;
   } else if (modeConfig.isDynamic) {
-    // design_*：modeConfig.steps（D0-D4）在前，叙事段由 Planner 决定。
-    const planned = plan();
-    stepGroups = concatGroupsDeduped([...modeConfig.steps], planned.stepGroups);
-    resolvedTemplate = String(planned.metadata.resolvedTemplate);
+    // design_*：modeConfig.steps（D0-D4）在前，叙事段接同一条席位管线。
+    stepGroups = concatGroupsDeduped([...modeConfig.steps], seat.stepGroups);
+    resolvedTemplate = seatTemplate;
   } else {
     // 静态叙事单品（worldview / script / vn_script ...）：modeConfig.steps 即真值。
     stepGroups = concatGroupsDeduped([...modeConfig.steps]);
@@ -239,9 +197,6 @@ export function buildRunManifest(req: PlanManifestRequest): RunManifest {
   const tier = ((genreCode ? findGenreByCode(genreCode)?.tier : undefined) ??
     cfg.tier ??
     "tier1") as TierId;
-  const narrativeType = genreCode
-    ? getNarrativeType(genreCode)
-    : ("linear" as const);
 
   // 三轴综合出叙事结构，结论写回 config 供提示词层与前端读取。
   const structure = resolveNarrativeStructure({
@@ -269,7 +224,6 @@ export function buildRunManifest(req: PlanManifestRequest): RunManifest {
       mode: cfg.mode,
       tier,
       genreCode,
-      narrativeType,
       pipelineTemplate,
       hasUploadedScript: !!req.hasUploadedScript,
     });

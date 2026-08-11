@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
-  Controls,
-  ControlButton,
   MiniMap,
   useNodesState,
   useEdgesState,
@@ -16,9 +14,7 @@ import ReactFlow, {
   type NodeChange,
   type EdgeChange,
 } from "reactflow";
-import { RefreshCw } from "lucide-react";
 import { useNarrativeStore } from "../../store/narrativeStore";
-import { useT } from "../../i18n";
 import { useRegisterCanvasControls } from "../../lib/canvasControls";
 import {
   COMPOSER_DND_MIME,
@@ -45,7 +41,6 @@ interface ComposerCanvasProps {
  * 孤立节点（无输入节点可达）置灰提示。
  */
 export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
-  const t = useT();
   const composerNodes = useNarrativeStore((s) => s.composerNodes);
   const composerEdges = useNarrativeStore((s) => s.composerEdges);
   const addComposerNode = useNarrativeStore((s) => s.addComposerNode);
@@ -54,9 +49,10 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
   const removeComposerNode = useNarrativeStore((s) => s.removeComposerNode);
   const removeComposerEdge = useNarrativeStore((s) => s.removeComposerEdge);
   const relayoutComposer = useNarrativeStore((s) => s.relayoutComposer);
-  const { project, fitView } = useReactFlow();
+  const { project } = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement>(null);
-  useRegisterCanvasControls();
+  // 底栏那枚「复原」按的就是这里：分层重排 + 视窗归位（后半段由 canvasControls 统一追上）。
+  useRegisterCanvasControls({ relayout: relayoutComposer });
 
   const isolatedIds = useMemo(() => {
     const anchored = computeAnchoredPipelines(composerNodes, composerEdges);
@@ -173,12 +169,6 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
 
   const onPaneClick = useCallback(() => { onSelect(null); }, [onSelect]);
 
-  const handleRelayout = useCallback(() => {
-    relayoutComposer();
-    // 重排后自适应视图，与管线状态一致。
-    window.setTimeout(() => fitView({ padding: 0.15, duration: 400 }), 60);
-  }, [relayoutComposer, fitView]);
-
   return (
     <div ref={wrapperRef} style={{ width: "100%", height: "100%" }} onDrop={onDrop} onDragOver={onDragOver}>
       <ReactFlow
@@ -199,29 +189,17 @@ export function ComposerCanvas({ selectedId, onSelect }: ComposerCanvasProps) {
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.1} color="rgba(77,255,160,0.05)" />
-        {/* 缩放/复位归浮层的画布控件；这里只留一枚重排，且空画布上什么都不摆（设计稿 01）。 */}
+        {/* 缩放/复原/重排全归底栏那条居中工具条；画布角上只留缩略图，空画布上连它也不摆。 */}
         {composerNodes.length > 0 && (
-          <>
-            <Controls
-              showInteractive={false}
-              showZoom={false}
-              showFitView={false}
-              className="composer-controls"
-            >
-              <ControlButton onClick={handleRelayout} title={t("composer.relayout")} aria-label={t("composer.relayout")}>
-                <RefreshCw size={12} aria-hidden />
-              </ControlButton>
-            </Controls>
-            <MiniMap
-              position="top-right"
-              nodeColor={(n) => {
-                const node = composerNodes.find((c) => c.id === n.id);
-                return node ? CATEGORY_COLOR[node.category] : "rgba(77,255,160,0.2)";
-              }}
-              maskColor="rgba(4,8,2,0.8)"
-              style={{ background: "rgba(6,10,4,0.95)" }}
-            />
-          </>
+          <MiniMap
+            position="top-right"
+            nodeColor={(n) => {
+              const node = composerNodes.find((c) => c.id === n.id);
+              return node ? CATEGORY_COLOR[node.category] : "rgba(77,255,160,0.2)";
+            }}
+            maskColor="rgba(4,8,2,0.8)"
+            style={{ background: "rgba(6,10,4,0.95)" }}
+          />
         )}
       </ReactFlow>
     </div>

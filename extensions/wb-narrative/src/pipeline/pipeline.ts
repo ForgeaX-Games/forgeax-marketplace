@@ -5,6 +5,7 @@ import type {
   TierId,
   ModeId,
   StepMeta,
+  AnnounceStepGroup,
 } from "../types/index.js";
 import { LLMClient } from "./llm-client.js";
 import { getDefaultModel } from "../utils/plugin-env.js";
@@ -38,6 +39,7 @@ import { initialStoryOutline } from "./steps/initial-story-outline.js";
 import { coreSettingsExtraction } from "./steps/core-settings-extraction.js";
 import { plotSynopsis } from "./steps/plot-synopsis.js";
 import { structureValidationL1, structureValidationL2, structureValidationL3 } from "./steps/structure-validation.js";
+import { structureCheck } from "./steps/structure-check.js";
 
 // 策划步骤 (D0-D4)
 import { coreConcept } from "./design-steps/core-concept.js";
@@ -73,9 +75,26 @@ import { buildAutoSteps } from "./design-steps/auto-narrative-builder.js";
 
 // Phase 1: StepDescriptor 注册表（副作用导入，注册所有 step 元数据）
 import "./step-registrations.js";
-import { STEP_REGISTRY, getStepOutputFields as registryGetOutputFields } from "./step-registry.js";
+import {
+  STEP_REGISTRY,
+  BANNER_STEP_IDS,
+  getStepOutputFields as registryGetOutputFields,
+  stepDisplayName,
+  stepDisplayNames,
+} from "./step-registry.js";
 
-// Planner engine: needs-driven step selection
+// 四期步序真值：品类 + 层级 → 四条席位管线之一（事实源 = 叙事策划专家组 CSV）
+// 本文件的 NarrativePipeline 是执行器类，席位管线定义同名，故取别名区分。
+import {
+  resolveSeatStepGroups,
+  resolveNarrativePipeline,
+  expandPipelineSteps,
+  type NarrativePipeline as SeatPipelineDef,
+} from "./narrative-pipelines.js";
+import { expertDisplayName } from "./expert-agents.js";
+import { seatGroupsForSteps } from "./seat-attribution.js";
+
+// Planner engine: needs-driven step selection（仅 use_legacy_pipeline 回退路径）
 import { planPipeline } from "./planner/index.js";
 import type { PlannerInput } from "./planner/index.js";
 
@@ -86,9 +105,8 @@ import { prepareInjection } from "../ip-dna/injection/operator-injection.js";
 // Blueprint + Agent Framework (Phase 4 integration)
 import type { PipelineBlueprint, StepBlueprint } from "./blueprint/types.js";
 import { assembleBlueprint } from "./blueprint/assembler.js";
-import { hasAgentDef } from "./blueprint/agent-def-registry.js";
 import { shouldSkipAgent } from "./run-manifest-runtime.js";
-import { getRunnerForStructure } from "./blueprint/runners/index.js";
+import { executeAgent } from "./agent-exec.js";
 // Side-effect: register AgentDefs + validators
 import "./blueprint/agent-def-registrations.js";
 
@@ -184,58 +202,102 @@ function buildRelevantInstructions(
 
 const S = STEP_IDS;
 
-const ALL_STEPS = new Map<string, { name: string; fn: PipelineStep }>([
-  // 偏好分析
-  [S.PREFERENCE_SUMMARY,    { name: "偏好总结",           fn: userPreferenceSummary }],
-  [S.PREFERENCE_ANALYSIS,   { name: "偏好分析",           fn: userPreferenceAnalysis }],
+/**
+ * id → 执行函数。这张表**只**回答"哪个 step 由哪个函数跑"。
+ *
+ * 显示名不在这里写第二遍：registerStep 的 name 是唯一真值，取名一律走
+ * stepDisplayName()。以前这里带一列 name，与注册表逐字重复 36 行，
+ * 改一个环节名要同时改两处，漏一处就是"日志里新名、画布上旧名"。
+ */
+const STEP_FNS = new Map<string, PipelineStep>([
+  // 需求清单席（两步实现）
+  [S.PREFERENCE_SUMMARY, userPreferenceSummary],
+  [S.PREFERENCE_ANALYSIS, userPreferenceAnalysis],
   // 初步方案（合并步骤）
-  [S.INITIAL_PLAN,          { name: "初步方案",           fn: initialPlan }],
+  [S.INITIAL_PLAN, initialPlan],
   // 叙事步骤
-  [S.WORLDVIEW,             { name: "世界观构建",         fn: worldviewConstruction }],
-  [S.CHARACTER_ENRICHMENT,  { name: "角色档案",           fn: characterEnrichment }],
-  [S.ITEM_DATABASE,         { name: "道具清单",           fn: itemDatabase }],
-  [S.STORY_FRAMEWORK,       { name: "L0 故事框架",        fn: storyFramework }],
-  [S.OUTLINE_BATCH,         { name: "L1 故事大纲",        fn: outlineBatch }],
-  [S.DETAILED_OUTLINE,      { name: "L2 故事细纲",        fn: detailedOutlineBatch }],
-  [S.PLOT_GENERATION,       { name: "L3 情节生成",        fn: plotGeneration }],
-  [S.SCRIPT_GENERATION,     { name: "L4 剧本生成",        fn: scriptGeneration }],
-  [S.QUEST_GENERATION,      { name: "L5 任务生成",        fn: questGeneration }],
-  [S.SCENE_GENERATION,      { name: "场景生成",           fn: sceneGeneration }],
-  [S.SCRIPT_SCENE_GENERATION, { name: "剧本+场景耦合生成", fn: scriptSceneGeneration }],
-  [S.NARRATIVE_CARD,        { name: "叙事卡",             fn: narrativeCardGeneration }],
-  [S.LORE_GENERATION,       { name: "Lore 碎片",          fn: loreGeneration }],
+  [S.WORLDVIEW, worldviewConstruction],
+  [S.CHARACTER_ENRICHMENT, characterEnrichment],
+  [S.ITEM_DATABASE, itemDatabase],
+  [S.STORY_FRAMEWORK, storyFramework],
+  [S.OUTLINE_BATCH, outlineBatch],
+  [S.DETAILED_OUTLINE, detailedOutlineBatch],
+  [S.PLOT_GENERATION, plotGeneration],
+  [S.SCRIPT_GENERATION, scriptGeneration],
+  [S.QUEST_GENERATION, questGeneration],
+  [S.SCENE_GENERATION, sceneGeneration],
+  [S.SCRIPT_SCENE_GENERATION, scriptSceneGeneration],
+  [S.NARRATIVE_CARD, narrativeCardGeneration],
+  [S.LORE_GENERATION, loreGeneration],
+  // 质检段（席位管线的收尾）。只在 STEP_REGISTRY 登记是不够的：run() 靠本表取 fn，
+  // 缺项会被 resolveStepId 静默丢掉 —— 预览里有质检、实跑却没有。
+  ["structure_check", structureCheck],
+  ["vn_structure_check", structureCheck],
   // 策划步骤 (D0-D4)
-  [S.CORE_CONCEPT,          { name: "D0 核心概念",        fn: coreConcept }],
-  [S.SYSTEM_ARCHITECTURE,   { name: "D1 系统架构",        fn: systemArchitecture }],
-  [S.SYSTEM_DETAIL,         { name: "D2 玩法设计",        fn: systemDetail }],
-  [S.VALUE_FRAMEWORK,       { name: "D3 数值框架",        fn: valueFramework }],
-  [S.DESIGN_DOC,            { name: "D4 策划案整合",      fn: designDoc }],
+  [S.CORE_CONCEPT, coreConcept],
+  [S.SYSTEM_ARCHITECTURE, systemArchitecture],
+  [S.SYSTEM_DETAIL, systemDetail],
+  [S.VALUE_FRAMEWORK, valueFramework],
+  [S.DESIGN_DOC, designDoc],
   // 新管线模板步骤（B3，P0 stubs）
-  ["branch_tree",           { name: "剧情分支树",         fn: branchTree }],
-  ["dialogue_script",       { name: "对话脚本",           fn: dialogueScript }],
-  ["cinematic_storyboard",  { name: "电影分镜",           fn: cinematicStoryboard }],
+  ["branch_tree", branchTree],
+  ["dialogue_script", dialogueScript],
+  ["cinematic_storyboard", cinematicStoryboard],
   // 影游叙事 v2 专属管线（tpl-vn-v2）— E1+E2+G 9 步
-  [S.VN_LOGLINE,            { name: "E1-01 一句话故事梗概",   fn: vnLogline }],
-  [S.VN_OUTLINE_ACTS,       { name: "E1-02 三幕扩写", fn: vnOutlineActs }],
-  [S.VN_BEATS,              { name: "E1-04 情节点搭建",       fn: vnBeats }],
-  [S.VN_SCRIPT_NORMALIZE,   { name: "E2-01 用户剧本预处理",   fn: vnScriptNormalize }],
-  [S.VN_SEGMENT_CONFIRM,    { name: "E2-02 影游化文本段确认", fn: vnSegmentConfirm }],
-  [S.VN_BRANCHED_BEATS,     { name: "G-01 剧情树改造",        fn: vnBranchedBeats }],
-  [S.VN_STATE_LEDGER,       { name: "G-01.5 世界状态账本",    fn: vnStateLedger }],
-  [S.VN_SCREENPLAY,         { name: "G-02 剧本创作",          fn: vnScreenplay }],
-  [S.VN_STORYBOARD,         { name: "G-03 分镜设计",          fn: vnStoryboard }],
-  ["region_design",         { name: "区域设计",           fn: regionDesign }],
-  ["emergent_event",        { name: "涌现事件模板",       fn: emergentEvent }],
-  ["card_lore",             { name: "卡牌 Lore",          fn: cardLore }],
-  ["event_pool",            { name: "事件池",             fn: eventPool }],
+  [S.VN_LOGLINE, vnLogline],
+  [S.VN_OUTLINE_ACTS, vnOutlineActs],
+  [S.VN_BEATS, vnBeats],
+  [S.VN_SCRIPT_NORMALIZE, vnScriptNormalize],
+  [S.VN_SEGMENT_CONFIRM, vnSegmentConfirm],
+  [S.VN_BRANCHED_BEATS, vnBranchedBeats],
+  [S.VN_STATE_LEDGER, vnStateLedger],
+  [S.VN_SCREENPLAY, vnScreenplay],
+  [S.VN_STORYBOARD, vnStoryboard],
+  ["region_design", regionDesign],
+  ["emergent_event", emergentEvent],
+  ["card_lore", cardLore],
+  ["event_pool", eventPool],
   // 向后兼容：旧存档中这些独立步骤仍可执行
-  [S.INITIAL_OUTLINE,       { name: "初步大纲（旧）",     fn: initialStoryOutline }],
-  [S.CORE_SETTINGS,         { name: "核心设定（旧）",     fn: coreSettingsExtraction }],
-  [S.PLOT_SYNOPSIS,         { name: "剧情简介（旧）",     fn: plotSynopsis }],
-  [S.STRUCTURE_VALIDATION_L1, { name: "L1 结构验证（旧）", fn: structureValidationL1 }],
-  [S.STRUCTURE_VALIDATION_L2, { name: "L2 结构验证（旧）", fn: structureValidationL2 }],
-  [S.STRUCTURE_VALIDATION_L3, { name: "L3 结构验证（旧）", fn: structureValidationL3 }],
+  [S.INITIAL_OUTLINE, initialStoryOutline],
+  [S.CORE_SETTINGS, coreSettingsExtraction],
+  [S.PLOT_SYNOPSIS, plotSynopsis],
+  [S.STRUCTURE_VALIDATION_L1, structureValidationL1],
+  [S.STRUCTURE_VALIDATION_L2, structureValidationL2],
+  [S.STRUCTURE_VALIDATION_L3, structureValidationL3],
 ]);
+
+/**
+ * 这个 step id 在 run() 里真的跑得起来吗？
+ *
+ * 「在 STEP_REGISTRY 登记」与「run() 跑得起来」是两件事：前者供 planner 拓扑、
+ * rerun 清字段、提示词组装读元数据，后者要本表里有 fn。少了后者 resolveStepId
+ * 返回 null，那一步被静默丢掉，于是 /plan 预览里有、实跑却没有。
+ * 席位管线的步序由 narrative-pipelines.ts 决定，两边由测试盯住不许漂移。
+ */
+export function isExecutableStep(id: string): boolean {
+  return STEP_FNS.has(id);
+}
+
+/**
+ * run() 能跑起来的全部 step id。
+ *
+ * 供测试守住「可执行 ⊆ 已登记」：执行派发经 executeAgent 走注册表查形态与 io，
+ * 本表里有 fn 但注册表里没登记的 step，一派发就抛错。
+ */
+export function executableStepIds(): string[] {
+  return [...STEP_FNS.keys()];
+}
+
+/**
+ * 本表为该 step 登记的函数。
+ *
+ * 存在的唯一理由是让测试能断言「本表的 fn 与 StepDescriptor.fn 是同一个函数」——
+ * 执行派发已改走 executeAgent（读 StepDescriptor.fn），两处若指向不同实现，
+ * 换派发口径就等于悄悄换了实现。
+ */
+export function executableStepFn(id: string): PipelineStep | undefined {
+  return STEP_FNS.get(id);
+}
 
 /** E2 旁路由「是否有上传剧本」决定；规则实现见 vn-v2-e2.ts（与 /plan 预览同源）。 */
 function injectVnV2E2StepsForCtx(
@@ -370,20 +432,21 @@ export class NarrativePipeline {
     const modeConfig = getModeConfig(mode);
     let stepGroups = [...modeConfig.steps];
 
+    // 本次跑的是哪条席位管线。announce 帧靠它告诉画布「这几步同属一个专家」，
+    // 画布才能画成专家容器而非一排同级节点。design_auto 在 D4 后追加时也会填上。
+    let seatPipeline: SeatPipelineDef | null = null;
+
     const usePlanner = this.config.usePlanner !== false;
 
     if (usePlanner && mode === "narrative_auto" && ctx.demand_analysis) {
-      // ─── Planner path: narrative_auto ───
-      // Use the Planner engine to select steps based on genre needs matrix.
-      const plannerInput: PlannerInput = {
-        genre_code: ctx.demand_analysis.genre_code,
-        tier,
-        needs: ctx.demand_analysis.narrative_needs ?? {},
-        narrative_type: ctx.demand_analysis.narrative_type,
-        pipelineTemplate: findGenreByCode(ctx.demand_analysis.genre_code)?.pipelineTemplate,
-      };
-      const planResult = planPipeline(plannerInput);
-      stepGroups = planResult.stepGroups;
+      // ─── 四期路由：品类 + 层级 → 四条席位管线之一 ───
+      // 步序真值是 narrative-pipelines.ts（事实源 = 叙事策划专家组 CSV 第 7 列）。
+      // 旧 Planner 按 needs / 原型族现算每品类各自的链，与 PRD v1.4 §3.2.3
+      // 「所有品类走同一条通用流程、差异在提示词槽位」相反，故不再作为路由目标；
+      // 它仍留在 use_legacy_pipeline=true 的回退路径上。
+      const seat = resolveSeatStepGroups(ctx.demand_analysis.genre_code, tier);
+      stepGroups = [...seat.stepGroups];
+      seatPipeline = seat.pipeline;
     } else if (!usePlanner || !modeConfig.isDynamic) {
       // ─── Legacy path (static modes + old dynamic fallback) ───
       /** @deprecated Use usePlanner=true (default) for new runs. Legacy path retained for backward compatibility. */
@@ -426,8 +489,8 @@ export class NarrativePipeline {
     type ResolvedGroup = ResolvedStep | ResolvedStep[];
 
     const resolveStepId = (id: string): ResolvedStep | null => {
-      const step = ALL_STEPS.get(id);
-      return step ? { id, ...step } : null;
+      const fn = STEP_FNS.get(id);
+      return fn ? { id, name: stepDisplayName(id), fn } : null;
     };
 
     const activeGroups: ResolvedGroup[] = stepGroups
@@ -443,6 +506,29 @@ export class NarrativePipeline {
     const flatStepIds = (): string[] =>
       activeGroups.flatMap(g => Array.isArray(g) ? g.map(s => s.id) : [g.id]);
     const getTotal = () => flatStepIds().length;
+
+    /**
+     * 告诉画布哪几步同属本次的专家席位管线。
+     * 只报实际进入 activeGroups 的步（planned 席位、缺执行函数的步都已被滤掉），
+     * 否则画布会为跑不到的步留空位。非席位路径（legacy / 静态模式）返回空——
+     * 没有专家归属可言，画布退回一排同级节点。
+     */
+    const announceStepGroups = (): AnnounceStepGroup[] => {
+      if (!seatPipeline) return [];
+      const live = new Set(flatStepIds());
+      const steps = expandPipelineSteps(seatPipeline).filter((id) => live.has(id));
+      if (steps.length === 0) return [];
+      // 容器标题用专家名而非管线内部名：用户拖进画布的是「互动叙事专家」，
+      // 生成后容器顶上写「叙事管线（分镜）」会让人以为跑错了专家。
+      return [{
+        id: seatPipeline.id,
+        label: expertDisplayName(ctx.demand_analysis?.genre_code),
+        steps,
+        pipelineId: seatPipeline.id,
+        pipelineName: seatPipeline.name,
+        seats: seatGroupsForSteps(steps),
+      }];
+    };
 
     const resumeAfter = this.config.resumeAfterStep;
     const agentLifecycle = this.config.agentLifecycle;
@@ -462,6 +548,8 @@ export class NarrativePipeline {
       step: 0,
       totalSteps: initTotal,
       status: "completed",
+      // 运行横幅，不是 agent：报本次的 Tier/Mode/总步数，没有产物。
+      meta: true,
       message: resuming
         ? `Tier=${tier}, Mode=${mode}(${modeConfig.label}), 共 ${initTotal} 步${dynamicHint} — ${
             useLifecycleSkip
@@ -482,7 +570,10 @@ export class NarrativePipeline {
         step: 0,
         totalSteps: initTotal + 1,
         status: "pending",
-        steps: ["pipeline_config", ...flatStepIds()],
+        steps: [...BANNER_STEP_IDS, ...flatStepIds()],
+        stepNames: stepDisplayNames(flatStepIds()),
+        metaSteps: [...BANNER_STEP_IDS],
+        stepGroups: announceStepGroups(),
         pipelineTemplate: announceTemplate,
         genreCode: announceGenreCode,
       });
@@ -528,22 +619,30 @@ export class NarrativePipeline {
       await prepareInjection(ctx, step.id, this.llm);
 
       try {
-        await step.fn(ctx, this.llm);
+        // 单一派发点：全量管线、单 agent HTTP 入口、composite 子步都经 executeAgent，
+        // 由它按 AgentDef 决定走 runner 还是 step 函数。这里不再直接调 step.fn——
+        // 否则「席位声明了什么形态」在全量管线里永远不生效（形态只在单跑时被看见）。
+        // 不转发 onProgress：那条回调承载的是执行层标记（runner 的 stage 序号、
+        // composite 的子步名），与本 step 已经发过的「正在执行」帧重复。
+        // 分片进度走 onSubEmit，流式增量走 onStream，两者都在下面接着。
+        await executeAgent(step.id, ctx, this.llm, {
+          index: stepNum,
+          callbacks: {
+            onStream: streamEmit,
+            onSubEmit: (nodeId, done, nodeTotal) => subEmit(nodeId, done, nodeTotal),
+          },
+        });
 
         if (step.id === S.DESIGN_DOC && modeConfig.isDynamic && ctx.narrative_requirements) {
           if (usePlanner) {
-            // ─── Planner path: design_auto after D4 ───
+            // ─── design_* 的叙事段：D4 之后接同一条席位管线 ───
+            // 与 narrative_auto 共用 resolveSeatStepGroups，避免"策划+叙事"与"纯叙事"
+            // 两条路跑出不同步序。D0-D4 段仍由 modeConfig.steps 提供。
             const liveGenreCode = ctx.demand_analysis?.genre_code ?? "";
-            const plannerInput: PlannerInput = {
-              genre_code: liveGenreCode,
-              tier,
-              needs: ctx.demand_analysis?.narrative_needs ?? {},
-              narrative_type: ctx.demand_analysis?.narrative_type ?? "linear",
-              pipelineTemplate: findGenreByCode(liveGenreCode)?.pipelineTemplate,
-            };
-            const planResult = planPipeline(plannerInput);
+            const seatAfterDesign = resolveSeatStepGroups(liveGenreCode, tier);
+            seatPipeline = seatAfterDesign.pipeline;
             const existingIds = new Set(flatStepIds());
-            for (const entry of planResult.stepGroups) {
+            for (const entry of seatAfterDesign.stepGroups as (string | string[])[]) {
               if (Array.isArray(entry)) {
                 const resolved = entry.map(resolveStepId).filter((s): s is ResolvedStep => s !== null);
                 const newInGroup = resolved.filter((s) => !existingIds.has(s.id));
@@ -570,8 +669,8 @@ export class NarrativePipeline {
             const existingIds = new Set(flatStepIds());
             for (const autoId of autoSteps) {
               if (!existingIds.has(autoId)) {
-                const autoStep = ALL_STEPS.get(autoId);
-                if (autoStep) activeGroups.push({ id: autoId, ...autoStep });
+                const autoFn = STEP_FNS.get(autoId);
+                if (autoFn) activeGroups.push({ id: autoId, name: stepDisplayName(autoId), fn: autoFn });
               }
             }
           }
@@ -585,7 +684,10 @@ export class NarrativePipeline {
             step: 0,
             totalSteps: getTotal() + 1,
             status: "pending",
-            steps: ["pipeline_config", ...flatStepIds()],
+            steps: [...BANNER_STEP_IDS, ...flatStepIds()],
+            stepNames: stepDisplayNames(flatStepIds()),
+            metaSteps: [...BANNER_STEP_IDS],
+            stepGroups: announceStepGroups(),
             pipelineTemplate: liveTemplate,
             genreCode: liveGenreCode,
           });
@@ -665,27 +767,15 @@ export class NarrativePipeline {
     const usePlanner = this.config.usePlanner !== false;
     const rerunAutoBuildOptions = { genreCode: ctx.demand_analysis?.genre_code };
 
+    // 重跑的步序必须与首跑同源，否则"只重跑受影响环节"会错位到别的步上。
+    // 两个分支都走 resolveSeatStepGroups，与 run() 里的两处一一对应。
     if (usePlanner && modeConfig.isDynamic && mode === "narrative_auto" && ctx.demand_analysis) {
-      const plannerInput: PlannerInput = {
-        genre_code: ctx.demand_analysis.genre_code,
-        tier,
-        needs: ctx.demand_analysis.narrative_needs ?? {},
-        narrative_type: ctx.demand_analysis.narrative_type,
-        pipelineTemplate: findGenreByCode(ctx.demand_analysis.genre_code)?.pipelineTemplate,
-      };
-      stepGroups = planPipeline(plannerInput).stepGroups;
+      stepGroups = [...resolveSeatStepGroups(ctx.demand_analysis.genre_code, tier).stepGroups];
     } else if (usePlanner && modeConfig.isDynamic && (ctx.narrative_requirements || ctx.demand_analysis)) {
       const liveGenreCode = ctx.demand_analysis?.genre_code ?? "";
-      const plannerInput: PlannerInput = {
-        genre_code: liveGenreCode,
-        tier,
-        needs: ctx.demand_analysis?.narrative_needs ?? {},
-        narrative_type: ctx.demand_analysis?.narrative_type ?? "linear",
-        pipelineTemplate: findGenreByCode(liveGenreCode)?.pipelineTemplate,
-      };
-      const planResult = planPipeline(plannerInput);
+      const seatRerun = resolveSeatStepGroups(liveGenreCode, tier);
       const existingIds = new Set(stepGroups.flat());
-      for (const entry of planResult.stepGroups) {
+      for (const entry of seatRerun.stepGroups as (string | string[])[]) {
         if (Array.isArray(entry)) {
           const newEntries = entry.filter((id: string) => !existingIds.has(id));
           if (newEntries.length) {
@@ -725,8 +815,8 @@ export class NarrativePipeline {
     type ResolvedGroup = ResolvedStep | ResolvedStep[];
 
     const resolveStepId = (id: string): ResolvedStep | null => {
-      const step = ALL_STEPS.get(id);
-      return step ? { id, ...step } : null;
+      const fn = STEP_FNS.get(id);
+      return fn ? { id, name: stepDisplayName(id), fn } : null;
     };
 
     const activeGroups: ResolvedGroup[] = stepGroups
@@ -837,7 +927,15 @@ export class NarrativePipeline {
           snapshot = snapshotStepNodes(ctx, step.id);
         }
 
-        await step.fn(ctx, this.llm);
+        // 与 run() 同一派发点：重跑走的形态必须和全量管线一致，
+        // 否则同一个 step 在首跑与重跑下由不同执行路径产出。
+        await executeAgent(step.id, ctx, this.llm, {
+          index: stepNum,
+          callbacks: {
+            onStream: streamEmit,
+            onSubEmit: (nodeId, done, nodeTotal) => subEmit(nodeId, done, nodeTotal),
+          },
+        });
 
         if (nodeIds?.length && snapshot) {
           mergeNodesBack(ctx, step.id, nodeIds, snapshot);
@@ -913,28 +1011,14 @@ export class NarrativePipeline {
 
     if (usePlanner && modeConfig.isDynamic && ctx) {
       const liveGenreCode = ctx.demand_analysis?.genre_code ?? "";
+      const staleTier = ctx.tier_detection?.tier ?? this.config.tier ?? "tier1";
+      // 影响面预判读的必须是真正会跑的那条步序，否则"哪些环节会失效"算在旧链上。
       if (mode === "narrative_auto" && ctx.demand_analysis) {
-        const plannerInput: PlannerInput = {
-          genre_code: liveGenreCode,
-          tier: ctx.tier_detection?.tier ?? this.config.tier ?? "tier1",
-          needs: ctx.demand_analysis.narrative_needs ?? {},
-          narrative_type: ctx.demand_analysis.narrative_type,
-          pipelineTemplate: findGenreByCode(liveGenreCode)?.pipelineTemplate,
-        };
-        allIds = planPipeline(plannerInput).stepGroups.flatMap(
-          (g) => Array.isArray(g) ? g : [g],
-        );
+        allIds = [...resolveSeatStepGroups(liveGenreCode, staleTier).stepGroups];
       } else if (ctx.narrative_requirements || ctx.demand_analysis) {
-        const plannerInput: PlannerInput = {
-          genre_code: liveGenreCode,
-          tier: ctx.tier_detection?.tier ?? this.config.tier ?? "tier1",
-          needs: ctx.demand_analysis?.narrative_needs ?? {},
-          narrative_type: ctx.demand_analysis?.narrative_type ?? "linear",
-          pipelineTemplate: findGenreByCode(liveGenreCode)?.pipelineTemplate,
-        };
-        const planResult = planPipeline(plannerInput);
+        const seatStale = resolveSeatStepGroups(liveGenreCode, staleTier);
         const existing = new Set(allIds);
-        for (const entry of planResult.stepGroups) {
+        for (const entry of seatStale.stepGroups as (string | string[])[]) {
           if (Array.isArray(entry)) {
             for (const id of entry) {
               if (!existing.has(id)) { allIds.push(id); existing.add(id); }
@@ -1088,6 +1172,23 @@ export class NarrativePipeline {
 
     const total = blueprint.steps.length;
 
+    // 与 run() 同一件事：告诉画布这几步同属哪位专家。blueprint 的动态步序本就来自
+    // resolveSeatStepGroups，所以按同一条席位管线取交集即可，不必再算一遍步序。
+    const blueprintStepGroups = (): AnnounceStepGroup[] => {
+      const pipeline = resolveNarrativePipeline(genreCode, tier);
+      const live = new Set(blueprint.steps.map((s) => s.stepId));
+      const steps = expandPipelineSteps(pipeline).filter((id) => live.has(id));
+      if (steps.length === 0) return [];
+      return [{
+        id: pipeline.id,
+        label: expertDisplayName(genreCode),
+        steps,
+        pipelineId: pipeline.id,
+        pipelineName: pipeline.name,
+        seats: seatGroupsForSteps(steps),
+      }];
+    };
+
     // SSE: announce blueprint
     this.emit({
       type: "pipeline_steps_announce",
@@ -1096,7 +1197,10 @@ export class NarrativePipeline {
       step: 0,
       totalSteps: total + 1,
       status: "pending",
-      steps: ["pipeline_config", ...blueprint.steps.map((s) => s.stepId)],
+      steps: [...BANNER_STEP_IDS, ...blueprint.steps.map((s) => s.stepId)],
+      stepNames: stepDisplayNames(blueprint.steps.map((s) => s.stepId)),
+      metaSteps: [...BANNER_STEP_IDS],
+      stepGroups: blueprintStepGroups(),
       pipelineTemplate: blueprint.pipelineTemplate === "needs-driven"
         ? undefined
         : blueprint.pipelineTemplate,
@@ -1106,7 +1210,7 @@ export class NarrativePipeline {
 
     this.emit({
       stage: "管线配置", stepId: "pipeline_config", step: 0, totalSteps: total,
-      status: "completed",
+      status: "completed", meta: true,
       message: `Blueprint 组装完成: Tier=${tier}, Mode=${mode}, ${total} 步`,
     });
 
@@ -1138,57 +1242,34 @@ export class NarrativePipeline {
       // 缺此调用会导致 Blueprint 路径静默丢失算子注入（名实不符），故必须对齐。
       await prepareInjection(ctx, step.stepId, this.llm);
 
+      const subEmit = (nodeId: string, nodeDone: number, nodeTotal: number, message?: string) => {
+        this.emit({
+          stage: step.agentDef.name, stepId: step.stepId, step: stepNum, totalSteps: total,
+          status: "running", message: message ?? `${step.agentDef.name}: ${nodeDone}/${nodeTotal}`,
+          nodeId, nodeDone, nodeTotal,
+        });
+      };
+      const streamEmit = (chunk: string, accumulated: string) => {
+        this.emit({
+          stage: step.agentDef.name, stepId: step.stepId, step: stepNum, totalSteps: total,
+          status: "running", type: "streaming", chunk, accumulated,
+        });
+      };
+      // legacy step 函数从 ctx 上取回调，不走 AgentRunnerCallbacks。
+      (ctx as Record<string, unknown>)._subEmit = subEmit;
+      (ctx as Record<string, unknown>)._streamEmit = streamEmit;
+
       try {
-        if (hasAgentDef(step.stepId) && step.agentDef.useNewRunner) {
-          const runner = getRunnerForStructure(step.agentDef.structure.type);
-          const result = await runner.execute(step, ctx, this.llm, {
-            onProgress: (sid, msg) => {
-              this.emit({
-                stage: step.agentDef.name, stepId: sid, step: stepNum, totalSteps: total,
-                status: "running", message: msg,
-              });
-            },
-            onStream: (chunk, accumulated) => {
-              this.emit({
-                stage: step.agentDef.name, stepId: step.stepId, step: stepNum, totalSteps: total,
-                status: "running", type: "streaming", chunk, accumulated,
-              });
-            },
-            onSubEmit: (nodeId, done, nodeTotal) => {
-              this.emit({
-                stage: step.agentDef.name, stepId: step.stepId, step: stepNum, totalSteps: total,
-                status: "running", message: `${step.agentDef.name}: ${done}/${nodeTotal}`,
-                nodeId, nodeDone: done, nodeTotal,
-              });
-            },
-          });
-          (ctx as Record<string, unknown>)[step.agentDef.io.outputField] = result;
-        } else {
-          // Fallback to legacy step function
-          const legacyStep = ALL_STEPS.get(step.stepId);
-          if (!legacyStep) {
-            throw new Error(`Step '${step.stepId}' has no AgentDef and no legacy step function`);
-          }
-
-          const subEmit = (nodeId: string, nodeDone: number, nodeTotal: number, message?: string) => {
-            this.emit({
-              stage: step.agentDef.name, stepId: step.stepId, step: stepNum, totalSteps: total,
-              status: "running", message: message ?? `${step.agentDef.name}: ${nodeDone}/${nodeTotal}`,
-              nodeId, nodeDone, nodeTotal,
-            });
-          };
-          (ctx as Record<string, unknown>)._subEmit = subEmit;
-
-          const streamEmit = (chunk: string, accumulated: string) => {
-            this.emit({
-              stage: step.agentDef.name, stepId: step.stepId, step: stepNum, totalSteps: total,
-              status: "running", type: "streaming", chunk, accumulated,
-            });
-          };
-          (ctx as Record<string, unknown>)._streamEmit = streamEmit;
-
-          await legacyStep.fn(ctx, this.llm);
-        }
+        // 与 run()/rerunFromStep() 同一派发点。Blueprint 路径的提示词已预解析，
+        // 显式传进去——runner 路径要靠它，不传会渲染出空提示词。
+        await executeAgent(step.stepId, ctx, this.llm, {
+          index: stepNum,
+          resolvedPrompts: step.resolvedPrompts,
+          callbacks: {
+            onStream: streamEmit,
+            onSubEmit: (nodeId, done, nodeTotal) => subEmit(nodeId, done, nodeTotal),
+          },
+        });
 
         this.config.onStepComplete?.(step.stepId, ctx);
         this.emit({

@@ -1,9 +1,10 @@
 /**
  * 落盘文件 → 内容类别的映射。
  *
- * 类别就是「叙事单品助手」花名册：二十席各占一类，两库固定有这么多条子条目，
- * 一条也不因为这一跑没产就消失 —— 库里的类别表与顶栏「叙事工具 → 叙事单品助手」
- * 是同一张表，用户据此知道还有哪些东西没生成。
+ * 类别就是「叙事单品助手」花名册：二十席各占一类，与顶栏「叙事工具 → 叙事单品助手」
+ * 同出一张表。本函数一律铺满全表，空类别也留着——两库对空类别的态度不同，
+ * 任务库只列这一跑真跑出来的（跑了世界观设定助手才有世界观设定这一条），
+ * 项目库则照全表铺开供用户往里放东西，各自在渲染时决定滤不滤，故不在这里预先裁剪。
  *
  * 整张表由后端席位注册表投影而来（seats.generated.ts），文件名前缀是后端
  * 从 STEP_FILE_MAP 按席位拥有的 step 算出来的。上一版这里手抄前缀，结果
@@ -25,6 +26,8 @@ export interface ContentTypeDef {
    * 有归属的类别，标题旁的 @ 送的就是这位助手；用户上传那一类没有归属，故无 @。
    */
   assistantId?: string;
+  /** 席位 id——任务侧据此把类别排成这一跑实际走过的环节顺序。 */
+  seatId?: string;
   /** 该类成员的文件名前缀（不含分组段）。 */
   prefixes: readonly string[];
   /** 该类成员的分组段（`<group>/…` 的 group）。 */
@@ -46,6 +49,7 @@ export const CONTENT_TYPES: readonly ContentTypeDef[] = [
     id: s.contentType!,
     labelKey: `lib.type.${s.contentType}`,
     assistantId: `engineer.${s.id}`,
+    seatId: s.id,
     prefixes: s.filePrefixes,
   })),
 ];
@@ -95,6 +99,71 @@ export interface LibraryFile {
 export interface ContentBucket {
   def: ContentTypeDef;
   files: LibraryFile[];
+}
+
+/**
+ * 一条产物条目——多版本时它是一叠，单份时它就是那一份。
+ *
+ * 用户在界面上改一份产物，改出来的每一稿都留着，同一份东西于是有多个版本。
+ * 库里不能把 n 个版本铺成 n 条并列的产物，否则一份世界观改三次，类别下就冒出四条，
+ * 用户分不清哪条是当前的。所以折叠成一条，默认给最新版，历史版按需展开。
+ */
+export interface FileEntry {
+  /** 折叠后的展示名：多版本取主干名，单份取文件名。 */
+  name: string;
+  /** 当前那一份（多版本取版号最大的）。 */
+  file: LibraryFile;
+  /** 从新到旧；单份文件长度为 1，版号记 0。 */
+  versions: { n: number; file: LibraryFile }[];
+}
+
+/**
+ * 版本约定：`<主干>/<主干>_<n>.<ext>`——同一份产物的各版本装在以主干命名的文件夹里。
+ *
+ * 只认这种「专属文件夹」形态，不认平铺的 `xxx_1.json`：分批产物（情节按批落盘）
+ * 就长成平铺带序号的样子，认了会把一批批内容误当成同一份东西的历史版。
+ * 后端眼下还不产版本目录，这里先把读的一侧备好，落盘侧照此约定补即可。
+ */
+function parseVersion(file: LibraryFile): { stem: string; n: number } | null {
+  const segs = file.path.split("/");
+  if (segs.length < 3) return null; // 至少 <group>/<主干目录>/<文件>
+  const dir = segs[segs.length - 2]!;
+  const dot = file.name.lastIndexOf(".");
+  if (dot <= 0) return null;
+  const base = file.name.slice(0, dot);
+  const ext = file.name.slice(dot);
+  if (!base.startsWith(`${dir}_`)) return null;
+  const tail = base.slice(dir.length + 1);
+  if (!/^\d+$/.test(tail)) return null;
+  return { stem: `${dir}${ext}`, n: Number(tail) };
+}
+
+/** 把同一份产物的多个版本折成一条，其余原样成条；顺序沿用入参。 */
+export function groupVersions(files: readonly LibraryFile[]): FileEntry[] {
+  const entries: FileEntry[] = [];
+  const byStem = new Map<string, FileEntry>();
+
+  for (const file of files) {
+    const ver = parseVersion(file);
+    if (!ver) {
+      entries.push({ name: file.name, file, versions: [{ n: 0, file }] });
+      continue;
+    }
+    const existing = byStem.get(ver.stem);
+    if (existing) {
+      existing.versions.push({ n: ver.n, file });
+      continue;
+    }
+    const entry: FileEntry = { name: ver.stem, file, versions: [{ n: ver.n, file }] };
+    byStem.set(ver.stem, entry);
+    entries.push(entry);
+  }
+
+  for (const entry of byStem.values()) {
+    entry.versions.sort((a, b) => b.n - a.n);
+    entry.file = entry.versions[0]!.file;
+  }
+  return entries;
 }
 
 export interface LibraryContents {

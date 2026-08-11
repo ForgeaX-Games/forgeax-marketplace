@@ -10,7 +10,7 @@
     "zh": "AI 驱动的叙事工坊 · 双层路由(Tier + Mode)+ Planner 动态选步,覆盖 117 品类 / 9 种管线模板 / 6 种叙事原型,生成世界观→角色→剧情→对白的完整叙事;可查看故事树、单步重生成、导出结果。",
     "en": "AI-driven narrative studio — two-layer routing (Tier + Mode) plus a dynamic planner over 117 genres, 9 pipeline templates and 6 narrative archetypes, generating a full world to characters to plot to dialogue narrative; with a story-tree view, per-step regeneration and result export."
   },
-  "icon": "📖",
+  "icon": "BookOpen",
   "consumes": {
     "models": [
       {
@@ -74,7 +74,7 @@
           "zh": "叙事设计",
           "en": "Narrative Studio"
         },
-        "icon": "📖",
+        "icon": "BookOpen",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -146,9 +146,9 @@
           "zh": "叙事设计",
           "en": "Narrative Studio"
         },
-        "icon": "📖",
+        "icon": "BookOpen",
         "order": 140,
-        "category": "workbench",
+        "category": "general",
         "pageType": {
           "extension": "self",
           "id": "narrative"

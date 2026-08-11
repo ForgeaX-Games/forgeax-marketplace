@@ -21,9 +21,13 @@ import { StoryChildNode } from "./nodes/StoryChildNode";
 import { NarrativeCardNode } from "./nodes/NarrativeCardNode";
 import { DetroitEdge } from "./edges/DetroitEdge";
 import { useDetroitLayout } from "../hooks/useDetroitLayout";
+import { useEntryCard } from "../hooks/useEntryCard";
 import { useAnimatedProgress } from "../hooks/useAnimatedProgress";
 import { useRegisterCanvasControls } from "../lib/canvasControls";
 import { useT } from "../i18n";
+
+/** 稳定的空位移表：直接写字面量会让布局 memo 每次渲染都失效。 */
+const NO_DRAGS: Record<string, { dx: number; dy: number }> = {};
 
 class CanvasErrorBoundary extends React.Component<
   { children: React.ReactNode; t: (key: string) => string },
@@ -111,18 +115,19 @@ const edgeTypes: EdgeTypes = {
   detroit: DetroitEdge,
 };
 
+/**
+ * 画布节点 id → 它属于哪个 step。
+ *
+ * 场景生成的内部分段用 `<容器id>::p1::l0` 这种后缀命名，容器 id 就是 step id，
+ * 所以只要剥掉 `::` 之后的部分即可——不必逐个枚举分段名（层数是数据决定的，枚举不全）。
+ * legacy 合并 step 的那一块仍挂在合成 id `qsg::scene` 上，单独认。
+ */
 function resolveStepId(nodeId: string, steps: { id: string }[]): string | null {
-  const hasComposite = steps.some((s) => s.id === "script_scene_generation");
-  if (nodeId === "qsg::quest") {
-    return hasComposite ? "script_scene_generation" : "quest_generation";
+  if (nodeId.startsWith("qsg::")) {
+    return steps.some((s) => s.id === "script_scene_generation") ? "script_scene_generation" : null;
   }
-  if (
-    nodeId === "qsg::scene" || nodeId === "qsg::scene::p1" || nodeId === "qsg::scene::p2" || nodeId === "qsg::scene::p3"
-    || nodeId === "qsg::scene::p1::l0" || nodeId === "qsg::scene::p1::l1" || nodeId === "qsg::scene::p1::l2"
-    || nodeId === "qsg::scene::p1::merge"
-  ) {
-    return hasComposite ? "script_scene_generation" : "scene_generation";
-  }
+  const base = nodeId.split("::")[0];
+  if (base !== nodeId && steps.some((s) => s.id === base)) return base;
   return null;
 }
 
@@ -146,6 +151,8 @@ function NarrativeCanvasInner() {
   const pipelineStatus = isViewingRunning ? "running" : (activeEntryStatus ?? "idle");
   const selectedStepId = useNarrativeStore((s) => s.focusedStepId);
   const setFocus = useNarrativeStore((s) => s.setFocus);
+  // 席位管线的专家归属（announce 帧下发）：让同属一个专家的步骤画进同一个容器。
+  const expertGroups = useNarrativeStore((s) => s.stepGroups);
   const collapsedGraphIds = useNarrativeStore((s) => s.collapsedGraphIds);
   const toggleGraphCollapse = useNarrativeStore((s) => s.toggleGraphCollapse);
   const setCollapsedGraphIds = useNarrativeStore((s) => s.setCollapsedGraphIds);
@@ -171,13 +178,13 @@ function NarrativeCanvasInner() {
         seen.add(step.id);
         if (collapsedIds.has(step.id)) toRemove.push(step.id);
 
-        if (step.id === "script_scene_generation" || step.id === "quest_generation") {
-          if (collapsedIds.has("qsg::quest")) toRemove.push("qsg::quest");
-        }
-        if (step.id === "script_scene_generation" || step.id === "scene_generation") {
-          if (collapsedIds.has("qsg::scene")) toRemove.push("qsg::scene");
-          if (collapsedIds.has("qsg::scene::p1")) toRemove.push("qsg::scene::p1");
-          if (collapsedIds.has("qsg::scene::p2")) toRemove.push("qsg::scene::p2");
+        // 该 step 的内部分段（<step>::p1 之类）跟着一起展开：新产物到达时
+        // 不该还叠着上一次的折叠状态。legacy 合并 step 的分段挂在 qsg:: 前缀下。
+        const prefixes = step.id === "script_scene_generation"
+          ? ["qsg::"]
+          : [`${step.id}::`];
+        for (const id of collapsedIds) {
+          if (prefixes.some((p) => id.startsWith(p))) toRemove.push(id);
         }
       }
     }
@@ -188,15 +195,26 @@ function NarrativeCanvasInner() {
     }
   }, [steps, collapsedIds, collapsedGraphIds, setCollapsedGraphIds]);
 
+  const storedDrags = useNarrativeStore((s) => s.nodeDrags);
+  const dragsEntryIsActive = useNarrativeStore((s) => s.nodeDragsEntryKey === s.activeEntryKey);
+  const nudgeNode = useNarrativeStore((s) => s.nudgeNode);
+  const resetNodeDrags = useNarrativeStore((s) => s.resetNodeDrags);
+  // 位移只在它所属的那张图上生效；换了条目按标准位画，store 里那份留着不碍事。
+  const nodeDrags = dragsEntryIsActive ? storedDrags : NO_DRAGS;
+  const entryCard = useEntryCard();
   const { layoutNodes, layoutEdges } = useDetroitLayout(
     steps, result, collapsedIds, selectedStepId,
     animState.progressMap, animState.revealTimestamps,
     pipelineStatus,
+    expertGroups,
+    nodeDrags,
+    entryCard,
   );
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
   const { fitView, setCenter, getViewport } = useReactFlow();
-  useRegisterCanvasControls();
+  // 「复原」在管线这一侧 = 丢掉人手位移，回到布局算的标准位（布局是纯函数，重算即标准位）。
+  useRegisterCanvasControls({ relayout: () => resetNodeDrags() });
   const prevKeyRef = useRef("");
   const fitViewTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -214,14 +232,11 @@ function NarrativeCanvasInner() {
 
   const resolveActiveNodeId = useCallback((stepId: string | null): string | null => {
     if (!stepId) return null;
-    if (layoutNodes.some((n) => n.id === stepId && !n.parentNode)) return stepId;
-    const FORK_MAP: Record<string, string> = {
-      quest_generation: "qsg::quest",
-      scene_generation: "qsg::scene",
-      script_generation: "qsg::quest",
-    };
-    const mapped = FORK_MAP[stepId];
-    if (mapped && layoutNodes.some((n) => n.id === mapped)) return mapped;
+    if (layoutNodes.some((n) => n.id === stepId)) return stepId;
+    // legacy「任务+场景」合并 step 在图上是两个合成节点，镜头对准场景那半边。
+    if (stepId === "script_scene_generation" && layoutNodes.some((n) => n.id === "qsg::scene")) {
+      return "qsg::scene";
+    }
     return stepId;
   }, [layoutNodes]);
 
@@ -236,10 +251,29 @@ function NarrativeCanvasInner() {
     ).pop();
     if (!targetNode) return;
 
+    // 子节点的 position 是相对父节点的，setCenter 要的是画布绝对坐标：
+    // 专家容器里的子步若直接拿 position 送进去，镜头会飞到画布原点附近。
+    const absolutePos = (node: Node): { x: number; y: number } => {
+      let x = node.position.x;
+      let y = node.position.y;
+      let parentId = node.parentNode;
+      const seen = new Set<string>([node.id]);
+      while (parentId && !seen.has(parentId)) {
+        seen.add(parentId);
+        const parent = layoutNodes.find((n) => n.id === parentId);
+        if (!parent) break;
+        x += parent.position.x;
+        y += parent.position.y;
+        parentId = parent.parentNode;
+      }
+      return { x, y };
+    };
+
+    const abs = absolutePos(targetNode);
     const vp = getViewport();
     const vpW = (typeof window !== "undefined" ? window.innerWidth : 1200) / vp.zoom;
-    const nodeX = targetNode.position.x + ((targetNode.style?.width as number) ?? 150) / 2;
-    const nodeY = targetNode.position.y + ((targetNode.style?.height as number) ?? 50) / 2;
+    const nodeX = abs.x + ((targetNode.style?.width as number) ?? 150) / 2;
+    const nodeY = abs.y + ((targetNode.style?.height as number) ?? 50) / 2;
     const centerX = nodeX + vpW * 0.25;
     const childCount = layoutNodes.filter((n) => n.parentNode === targetNode.id).length;
     const zoom = adaptiveZoom(childCount > 0 ? childCount : layoutNodes.filter((n) => !n.parentNode).length);
@@ -253,7 +287,16 @@ function NarrativeCanvasInner() {
     setNodes(layoutNodes);
     setEdges(layoutEdges);
 
-    const key = layoutNodes.map((n) => `${n.id}:${n.type}:${n.style?.width ?? 0}`).join("|");
+    /*
+     * "图变了吗"的指纹：节点、类型、父子归属、展开态。
+     *
+     * 不能把宽度算进来。容器宽度会因为拖动子节点而变（框跟着长大是设计），一旦宽度进了
+     * 指纹，每次拖动都被当成"换了一张图"，镜头就整体 fitView 回全景（这张图上是 k≈0.1）——
+     * 人在摆位置，画布却一直往后退。展开/折叠该重新取景，那是 expanded 的事，与宽度无关。
+     */
+    const key = layoutNodes
+      .map((n) => `${n.id}:${n.type}:${n.parentNode ?? ""}:${(n.data as { expanded?: boolean } | undefined)?.expanded ?? ""}`)
+      .join("|");
     const isRunning = pipelineStatus === "running";
     const justStarted = prevPipelineStatusRef.current !== "running" && isRunning;
     const justFinished = prevPipelineStatusRef.current === "running" && !isRunning;
@@ -349,12 +392,29 @@ function NarrativeCanvasInner() {
     [onNodesChange],
   );
 
+  /**
+   * 松手时把"人的意图"记成相对布局标准位的差值。
+   *
+   * 布局每来一帧进度就重算，直接留在 ReactFlow 内部状态里的坐标下一帧就被冲掉；
+   * 记成差值交给布局叠加，拖过的节点才留得住，容器也能重算成包住它的新大小。
+   */
+  const onNodeDragStop = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      const base = layoutNodes.find((n) => n.id === node.id);
+      if (!base) return;
+      nudgeNode(node.id, node.position.x - base.position.x, node.position.y - base.position.y);
+    },
+    [layoutNodes, nudgeNode],
+  );
+
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       if (node.type === "storyGroup") {
         toggleGraphCollapse(node.id);
         return;
       }
+      // 入口卡不是 step，没有对应产物可聚焦；它的展开由卡片自己处理。
+      if (entryCard && node.id === entryCard.id) return;
 
       let stepId = node.id;
       const childNodeId = node.type === "storyChild" ? node.id : null;
@@ -363,7 +423,7 @@ function NarrativeCanvasInner() {
       if (resolved) stepId = resolved;
       setFocus(selectedStepId === stepId && !childNodeId ? null : stepId, childNodeId);
     },
-    [setFocus, toggleGraphCollapse, selectedStepId, steps],
+    [setFocus, toggleGraphCollapse, selectedStepId, steps, entryCard],
   );
 
   const onPaneClick = useCallback(() => {
@@ -396,6 +456,7 @@ function NarrativeCanvasInner() {
         onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
+        onNodeDragStop={onNodeDragStop}
         onPaneClick={onPaneClick}
         onMoveStart={onMoveStart}
         fitView

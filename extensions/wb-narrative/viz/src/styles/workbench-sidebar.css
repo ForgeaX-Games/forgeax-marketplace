@@ -16,11 +16,19 @@
   flex-direction: column;
 }
 
+/*
+ * 顶层标题条（左「叙事工坊」／右「创作空间」）。
+ *
+ * 两侧是两个独立 iframe，靠同一份 CSS 对齐：高度写死成 --pane-head-h，底色统一取
+ * base（左栏原本的那层深色）。谁自己挑一个色号，用户看到的就是一条断在中缝的横带。
+ */
 .workbench-pane-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 16px;
+  height: var(--pane-head-h);
+  padding: 0 16px;
+  background: var(--color-background-base);
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   flex-shrink: 0;
 }

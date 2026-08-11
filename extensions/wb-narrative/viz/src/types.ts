@@ -38,6 +38,29 @@ export type ModeId =
 
 export type StepStatus = "pending" | "running" | "completed" | "failed";
 
+/**
+ * announce 帧里的一段「同属一个专家的连续步骤」（后端 types/index.ts 同名结构）。
+ * 画布靠它把席位管线的步骤收进一个专家容器，而不是摊成一排同级节点。
+ */
+export interface AnnounceSeatGroup {
+  id: string;
+  name: string;
+  steps: string[];
+}
+
+export interface AnnounceStepGroup {
+  id: string;
+  /** 专家显示名（如「互动叙事专家」），即容器标题。 */
+  label: string;
+  steps: string[];
+  /** 跑的是哪条席位管线（新架构四条之一）。 */
+  pipelineId?: string;
+  /** 管线内部名（如「叙事管线（分镜）」），作副标题用。 */
+  pipelineName?: string;
+  /** 组内 step 的席位归属，卡上据此标「这一步属于哪一席」。 */
+  seats?: AnnounceSeatGroup[];
+}
+
 export interface PipelineProgress {
   stage: string;
   stepId?: string;
@@ -52,8 +75,19 @@ export interface PipelineProgress {
   type?: "streaming" | "pipeline_steps_announce";
   chunk?: string;
   accumulated?: string;
+  /** 本帧只是运行横幅（如管线配置），不对应 agent：画布不为它建节点。 */
+  meta?: boolean;
   // D4: pipeline_steps_announce payload
   steps?: string[];
+  /**
+   * 步骤显示名（step id → 名称），来自后端 STEP_REGISTRY。
+   * 待跑节点的标题优先用它，前端那份中文步名表只作离线兜底。
+   */
+  stepNames?: Record<string, string>;
+  /** 步序里哪些 id 只是运行横幅；名单由后端给，前端不硬编码 id。 */
+  metaSteps?: string[];
+  /** 步骤的专家归属；缺省（旧后端 / 非席位路径）时画布退回一排同级节点。 */
+  stepGroups?: AnnounceStepGroup[];
   pipelineTemplate?: string;
   complexity?: number;
   routingMode?: "auto" | "semi" | "manual";
@@ -110,6 +144,8 @@ export interface RunResultResponse {
   genre_code?: string;
   pipelineOrder?: string[];
   routingMode?: "auto" | "semi" | "manual";
+  /** 该条目的专家/席位嵌套结构，后端按品类 + 层级现算，与运行时那帧 announce 同源。 */
+  stepGroups?: AnnounceStepGroup[];
 }
 
 export interface ModeInfo {
@@ -209,6 +245,13 @@ export interface StoryNode {
   stage_type?: string;
   narrative_stage?: string;
   is_branch?: boolean;
+  /**
+   * 扇出是否算"分叉"。
+   *
+   * 默认按 next_node 数量推断，但推断只对剧情图成立：场景树的一个节点连着四个子场景
+   * 是包含关系，不是玩家在这里有四条路可走，卡面不该打分叉标。这类拓扑显式写 false。
+   */
+  is_fork?: boolean;
   is_branch_point?: boolean;
   is_merge_point?: boolean;
   branch_letter?: string;
@@ -470,18 +513,20 @@ export const PIPELINE_STEPS: PipelineStepDef[] = [
   { id: "value_framework", label: "D3 数值框架", type: "pipeline" },
   { id: "design_doc", label: "D4 策划案整合", type: "pipeline" },
   // 叙事步骤
-  { id: "preference_summary", label: "偏好总结", type: "pipeline" },
-  { id: "preference_analysis", label: "偏好分析", type: "pipeline" },
+  { id: "preference_summary", label: "需求提炼", type: "pipeline" },
+  { id: "preference_analysis", label: "需求分析", type: "pipeline" },
   { id: "initial_plan", label: "初步方案", type: "pipeline" },
   { id: "worldview", label: "世界观构建", type: "pipeline" },
   { id: "character_enrichment", label: "角色档案", type: "pipeline" },
   { id: "item_database", label: "道具清单", type: "pipeline" },
-  { id: "story_framework", label: "L0 故事框架", type: "story" },
-  { id: "outline_batch", label: "L1 故事大纲", type: "story" },
-  { id: "detailed_outline", label: "L2 故事细纲", type: "story" },
-  { id: "plot_generation", label: "L3 情节生成", type: "story" },
-  { id: "script_generation", label: "L4 剧本生成", type: "story" },
-  { id: "quest_generation", label: "L5 任务生成", type: "story" },
+  // L0-L5 那套层级记号只留在提示词与结构校验内部（那里它确实指"第几层展开"），
+  // 画布与列表上按环节说话：席位名在外，实现名在里。
+  { id: "story_framework", label: "故事框架", type: "story" },
+  { id: "outline_batch", label: "大纲展开", type: "story" },
+  { id: "detailed_outline", label: "细纲展开", type: "story" },
+  { id: "plot_generation", label: "情节生成", type: "story" },
+  { id: "script_generation", label: "剧本生成", type: "story" },
+  { id: "quest_generation", label: "任务生成", type: "story" },
   { id: "scene_generation", label: "场景生成", type: "story" },
   { id: "script_scene_generation", label: "剧本+场景", type: "story" },
   // B3 新模板专属步骤

@@ -21,7 +21,7 @@ import { scriptGeneration } from "./steps/script-generation.js";
 import { questGeneration } from "./steps/quest-generation.js";
 import { sceneGeneration } from "./steps/scene-generation.js";
 import { scriptSceneGeneration } from "./steps/script-scene-generation.js";
-import { narrativeCardGeneration } from "./steps/narrative-card.js";
+import { narrativeCardGeneration, NARRATIVE_CARD_COMPOSER } from "./steps/narrative-card.js";
 import { loreGeneration } from "./steps/lore-generation.js";
 import { branchTree } from "./steps/branch-tree.js";
 import { dialogueScript } from "./steps/dialogue-script.js";
@@ -57,12 +57,16 @@ import {
 import { structureCheck } from "./steps/structure-check.js";
 
 // ════════════════════════════════════════════════════════════
-// A. 偏好前置（所有叙事品类必须执行）
+// A. 需求清单席（所有叙事品类必须执行）
+//
+// 两步是这一席的实现，name 随架构走——四期起这一环节叫「需求清单」，
+// 画布与日志上不再出现「偏好」这个四期前的说法。step id 与产物字段名不动：
+// 它们是存量 checkpoint 与落盘文件的键，改名等于让历史条目读不出来。
 // ════════════════════════════════════════════════════════════
 
 registerStep({
   id: "preference_summary",
-  name: "偏好总结",
+  name: "需求提炼",
   fn: userPreferenceSummary,
   extractOutputKey: "user_preference_summary",
   dependsOn: [],
@@ -71,7 +75,7 @@ registerStep({
 
 registerStep({
   id: "preference_analysis",
-  name: "偏好分析",
+  name: "需求分析",
   fn: userPreferenceAnalysis,
   extractOutputKey: "user_preference_analysis",
   dependsOn: ["preference_summary"],
@@ -124,7 +128,7 @@ registerStep({
 
 registerStep({
   id: "story_framework",
-  name: "L0 故事框架",
+  name: "故事框架",
   fn: storyFramework,
   extractOutputKey: "story_framework",
   // 七单品链式依赖：①初步方案→②世界观→③角色→④道具→⑤叙事(L0)。
@@ -136,7 +140,7 @@ registerStep({
 
 registerStep({
   id: "outline_batch",
-  name: "L1 故事大纲",
+  name: "大纲展开",
   fn: outlineBatch,
   extractOutputKey: "outlines_generated",
   dependsOn: ["story_framework"],
@@ -149,7 +153,7 @@ registerStep({
 
 registerStep({
   id: "detailed_outline",
-  name: "L2 故事细纲",
+  name: "细纲展开",
   fn: detailedOutlineBatch,
   extractOutputKey: "detailed_outlines_generated",
   dependsOn: ["outline_batch"],
@@ -162,7 +166,7 @@ registerStep({
 
 registerStep({
   id: "plot_generation",
-  name: "L3 情节生成",
+  name: "情节生成",
   fn: plotGeneration,
   extractOutputKey: "plots_generated",
   dependsOn: ["detailed_outline"],
@@ -175,7 +179,7 @@ registerStep({
 
 registerStep({
   id: "script_generation",
-  name: "L4 剧本生成",
+  name: "剧本生成",
   fn: scriptGeneration,
   extractOutputKey: "jrpg_script",
   dependsOn: ["plot_generation"],
@@ -187,7 +191,7 @@ registerStep({
 
 registerStep({
   id: "quest_generation",
-  name: "L5 任务生成",
+  name: "任务生成",
   fn: questGeneration,
   extractOutputKey: "quest_graph",
   dependsOn: ["plot_generation"],
@@ -218,9 +222,13 @@ registerStep({
   id: "narrative_card",
   name: "叙事卡",
   fn: narrativeCardGeneration,
+  // 本席走 SingleTurnRunner，提示词由 executeAgent 从这里取；不登记就会发空提示词。
+  composer: NARRATIVE_CARD_COMPOSER,
   extractOutputKey: "narrative_card",
   dependsOn: [],
   outputFields: ["narrative_card"],
+  temperature: 0.8,
+  responseFormat: "json",
 });
 
 registerStep({

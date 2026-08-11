@@ -55,11 +55,16 @@ export const TIER_ITEMS: { id: TierId | "auto" }[] = [
   { id: "tier1" },
 ];
 
+/**
+ * 层级 → 默认运行模式。事实源是后端 pipeline/modes.ts 的 TIER_DEFAULT_MODE，
+ * 这里只是回传用的镜像，两边必须一致：选了层级就显式带上 mode，若这份还写
+ * design_auto，后端就会照 D0-D4 全量策划跑，而不是该层级的席位叙事管线。
+ */
 export const TIER_DEFAULT_MODES: Record<TierId, ModeId> = {
-  tier1: "design_auto",
-  tier2: "design_auto",
-  tier3: "design_auto",
-  tier4: "design_auto",
+  tier1: "narrative_auto",
+  tier2: "narrative_auto",
+  tier3: "narrative_auto",
+  tier4: "narrative_auto",
 };
 
 // Phase 3.5: tier4 也可自由选复杂度（默认 1，但允许手动改）。auto 路由不走品类 → 隐藏。

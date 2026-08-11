@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { Maximize, Minus, Plus, X } from "lucide-react";
-import { RequirementInputPanel } from "./RequirementInputPanel";
+import { AlignLeft, Maximize, Minus, Network, Plus } from "lucide-react";
 import { RunActionBar } from "./RunActionBar";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import {
@@ -11,17 +10,18 @@ import {
 import { useT } from "../../i18n";
 
 /**
- * 创作空间的浮层（设计稿 01/03/04）。
+ * 创作空间的浮层。
  *
- * 主体永远是整片画布，这一层只是压在它上面：需求输入编辑卡居中浮在底部偏上，
- * 操作条与画布控件贴右下角。空态（没点过顶栏「需求输入」）只剩操作条，水印一览无余。
+ * 主体永远是整片画布，这一层只压在它上面：底部一条居中的纯图标工具条——
+ * 开始/取消生成、文本↔节点切换、放大缩小复原，六个同形图标一排。
+ *
+ * 中央不再浮任何入口卡：需求写在画布的输入节点里，或者直接跟外侧对话栏说。
+ * 空态该看到的只有水印，一张挡在中间的卡片只会把画布这个主角遮住。
  */
 export function CenterOverlay() {
   const t = useT();
-  const inputTab = useNarrativeStore((s) => s.inputTab);
-  const inputEditorOpen = useNarrativeStore((s) => s.inputEditorOpen);
-  const setInputEditorOpen = useNarrativeStore((s) => s.setInputEditorOpen);
   const viewMode = useNarrativeStore((s) => s.viewMode);
+  const setViewMode = useNarrativeStore((s) => s.setViewMode);
   const workbenchError = useNarrativeStore((s) => s.workbenchError);
   const [canvas, setCanvas] = useState<CanvasControls | null>(getCanvasControls);
 
@@ -31,60 +31,59 @@ export function CenterOverlay() {
     <div className="cw-overlay">
       {workbenchError && <div className="cw-overlay__error">{workbenchError}</div>}
 
-      {inputEditorOpen && (
-        <div className="cw-float-input" data-tab={inputTab}>
-          <div className="cw-float-input__head">
-            <span className="cw-float-input__badge">{t(`tms.inputTab.${inputTab}`)}</span>
-            <button
-              type="button"
-              className="cw-float-input__close"
-              title={t("nav.input.close")}
-              aria-label={t("nav.input.close")}
-              onClick={() => setInputEditorOpen(false)}
-            >
-              <X size={12} strokeWidth={2} aria-hidden />
-            </button>
-          </div>
-          <RequirementInputPanel />
-        </div>
-      )}
-
       <div className="cw-overlay__actions">
         <RunActionBar />
-        {viewMode === "graph" && (
-          <div className="cw-canvasctl" role="group" aria-label={t("nav.tab.view")}>
-            <button
-              type="button"
-              className="cw-canvasctl__btn"
-              onClick={() => canvas?.zoomIn()}
-              disabled={!canvas}
-              title={t("canvas.zoomIn")}
-              aria-label={t("canvas.zoomIn")}
-            >
-              <Plus size={14} strokeWidth={2} aria-hidden />
-            </button>
-            <button
-              type="button"
-              className="cw-canvasctl__btn"
-              onClick={() => canvas?.zoomOut()}
-              disabled={!canvas}
-              title={t("canvas.zoomOut")}
-              aria-label={t("canvas.zoomOut")}
-            >
-              <Minus size={14} strokeWidth={2} aria-hidden />
-            </button>
-            <button
-              type="button"
-              className="cw-canvasctl__btn"
-              onClick={() => canvas?.fitView()}
-              disabled={!canvas}
-              title={t("canvas.fit")}
-              aria-label={t("canvas.fit")}
-            >
-              <Maximize size={14} strokeWidth={2} aria-hidden />
-            </button>
-          </div>
-        )}
+
+        {/* 视图切换是一个键在两态间翻，图标显示的是"点下去会去哪"。 */}
+        <div className="cw-canvasctl" role="group" aria-label={t("app.viewAria")}>
+          <button
+            type="button"
+            className="cw-canvasctl__btn"
+            onClick={() => setViewMode(viewMode === "graph" ? "text" : "graph")}
+            title={viewMode === "graph" ? t("app.view.text") : t("app.view.graph")}
+            aria-label={viewMode === "graph" ? t("app.view.text") : t("app.view.graph")}
+          >
+            {viewMode === "graph" ? (
+              <AlignLeft size={14} strokeWidth={2} aria-hidden />
+            ) : (
+              <Network size={14} strokeWidth={2} aria-hidden />
+            )}
+          </button>
+        </div>
+
+        {/* 缩放三件套常驻：文本视图下没有画布注册控制器，自然是灰的，位置不跳。 */}
+        <div className="cw-canvasctl" role="group" aria-label={t("canvas.aria")}>
+          <button
+            type="button"
+            className="cw-canvasctl__btn"
+            onClick={() => canvas?.zoomIn()}
+            disabled={!canvas || viewMode !== "graph"}
+            title={t("canvas.zoomIn")}
+            aria-label={t("canvas.zoomIn")}
+          >
+            <Plus size={14} strokeWidth={2} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="cw-canvasctl__btn"
+            onClick={() => canvas?.zoomOut()}
+            disabled={!canvas || viewMode !== "graph"}
+            title={t("canvas.zoomOut")}
+            aria-label={t("canvas.zoomOut")}
+          >
+            <Minus size={14} strokeWidth={2} aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="cw-canvasctl__btn"
+            onClick={() => canvas?.reset()}
+            disabled={!canvas || viewMode !== "graph"}
+            title={t("canvas.reset")}
+            aria-label={t("canvas.reset")}
+          >
+            <Maximize size={14} strokeWidth={2} aria-hidden />
+          </button>
+        </div>
       </div>
     </div>
   );

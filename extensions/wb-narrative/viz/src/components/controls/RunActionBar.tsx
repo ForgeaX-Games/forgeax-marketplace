@@ -1,102 +1,106 @@
-import { Pause, Play, RefreshCw, RotateCcw, Save } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Pause, Play, RefreshCw, RotateCcw } from "lucide-react";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import { useWorkbenchActions } from "../workbench/useWorkbenchActions";
-import { useEntryActions } from "../workbench/useEntryActions";
+import {
+  getComposerRunner,
+  subscribeComposerRunner,
+  type ComposerRunner,
+} from "../../lib/composerRun";
 import { useT } from "../../i18n";
 
 /**
- * 常驻操作条：开始生成 / 取消 / 断点续跑 / 重新生成。
+ * 底部工具条的生成键：开始生成 / 取消 / 断点续跑 / 重新生成。
  *
- * 设计稿 03 把它固定在创作空间底部，与需求输入编辑区同一行——不再随左栏第 3 段滚走。
+ * 纯图标，与右边的视图与缩放键同形，六个键排成一条居中的工具条。
  * 按钮本身不执行动作，只往 store 的命令槽写一条；执行在 owner 侧的 WorkbenchProvider。
+ *
+ * 开始键有两条路：画布在编排态时走画布那条（按节点解析出的锚定管线开跑，
+ * 顺带落一个新任务条目），否则走条目那条常规启动。判据是画布有没有登记开跑动作。
  */
 export function RunActionBar() {
   const t = useT();
   const {
     phase, primaryAction, busy, isRunning, isGenerating, isHeavyUpload, ipCanGenerate,
-    start, cancel, resume, regenerate,
+    hasRequirement, canStart, start, cancel, resume, regenerate,
   } = useWorkbenchActions();
 
   const activeEntryKey = useNarrativeStore((s) => s.activeEntryKey);
-  const activeEntryStatus = useNarrativeStore((s) => s.activeEntryStatus);
   const runningEntryKey = useNarrativeStore((s) => s.runningEntryKey);
   const runningProgress = useNarrativeStore((s) => s.runningProgress);
-  const entryDirty = useNarrativeStore((s) => s.entryDirty);
-  const { saveEntryConfig } = useEntryActions();
 
-  // 路由改完后落盘的那一手。原先在左栏 ROUTING 段底部，路由搬进顶栏下拉后跟操作条同排。
-  const canSaveEntry = !!activeEntryKey && !activeEntryStatus;
+  const [composer, setComposer] = useState<ComposerRunner | null>(getComposerRunner);
+  useEffect(() => subscribeComposerRunner(setComposer), []);
+
+  // 主键三态共用一个位置：没跑过是「开始」，跑挂了是「续跑」，跑完了是「重新生成」。
+  const primary =
+    composer
+    ? {
+        onClick: composer.run,
+        disabled: !composer.canRun || composer.starting,
+        Icon: Play,
+        title: composer.starting
+          ? t("tms.start.starting")
+          : composer.canRun
+            ? t("tms.start")
+            : t("composer.noInput"),
+      }
+    : primaryAction === "regen"
+      ? {
+          onClick: regenerate,
+          disabled: busy || isRunning,
+          Icon: RefreshCw,
+          title: busy ? t("tms.regen.analyzing") : isRunning ? t("tms.regen.running") : t("tms.regen"),
+        }
+      : primaryAction === "resume"
+        ? {
+            onClick: resume,
+            disabled: busy || isRunning,
+            Icon: RotateCcw,
+            title: busy
+              ? t("tms.resume.resuming")
+              : isRunning
+                ? t("tms.resume.generating")
+                : t("tms.resume"),
+          }
+        : {
+            onClick: start,
+            disabled: !canStart,
+            Icon: Play,
+            title: !hasRequirement
+              ? t("tms.start.noInputTitle")
+              : isHeavyUpload && !ipCanGenerate
+                ? t("tms.start.ipScopeTitle")
+                : busy
+                  ? t("tms.start.starting")
+                  : isGenerating
+                    ? t("tms.start.generating")
+                    : t("tms.start"),
+          };
 
   return (
     <div className="cw-actions">
-      {canSaveEntry && (
-        <button
-          type="button"
-          className="cw-actions__btn"
-          onClick={() => void saveEntryConfig()}
-          disabled={!entryDirty}
-          title={t("tms.saveEntry")}
-        >
-          <Save size={14} strokeWidth={2} aria-hidden />
-          <span>{entryDirty ? t("tms.saveEntry") : t("tms.saveEntryDone")}</span>
-        </button>
-      )}
+      <button
+        type="button"
+        className="cw-canvasctl__btn cw-canvasctl__btn--primary"
+        onClick={primary.onClick}
+        disabled={primary.disabled}
+        title={primary.title}
+        aria-label={primary.title}
+      >
+        <primary.Icon size={14} strokeWidth={2} aria-hidden />
+      </button>
 
       <button
         type="button"
-        className={`cw-actions__btn cw-actions__btn--cancel${phase === "generating" ? " is-active" : ""}`}
+        className={`cw-canvasctl__btn${phase === "generating" ? " is-warn" : ""}`}
         onClick={cancel}
         disabled={phase !== "generating"}
         title={t("tms.cancel")}
+        aria-label={t("tms.cancel")}
       >
         <Pause size={14} strokeWidth={2} aria-hidden />
-        <span>{t("tms.cancel")}</span>
       </button>
-
-      {primaryAction === "regen" ? (
-        <button
-          type="button"
-          className="cw-actions__btn cw-actions__btn--primary"
-          onClick={regenerate}
-          disabled={busy || isRunning}
-          title={t("tms.regen")}
-        >
-          <RefreshCw size={14} strokeWidth={2} aria-hidden />
-          <span>
-            {busy ? t("tms.regen.analyzing") : isRunning ? t("tms.regen.running") : t("tms.regen")}
-          </span>
-        </button>
-      ) : primaryAction === "resume" ? (
-        <button
-          type="button"
-          className="cw-actions__btn cw-actions__btn--primary"
-          onClick={resume}
-          disabled={busy || isRunning}
-          title={t("tms.resume")}
-        >
-          <RotateCcw size={14} strokeWidth={2} aria-hidden />
-          <span>
-            {busy ? t("tms.resume.resuming") : isRunning ? t("tms.resume.generating") : t("tms.resume")}
-          </span>
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="cw-actions__btn cw-actions__btn--primary"
-          onClick={start}
-          disabled={phase !== "routed" || busy || (isHeavyUpload && !ipCanGenerate)}
-          title={
-            phase !== "routed"
-              ? t("tms.start.notRoutedTitle")
-              : isHeavyUpload && !ipCanGenerate
-                ? t("tms.start.ipScopeTitle")
-                : t("tms.start")
-          }
-        >
-          <Play size={14} strokeWidth={2} aria-hidden />
-          <span>{busy ? t("tms.start.starting") : isGenerating ? t("tms.start.generating") : t("tms.start")}</span>
-        </button>
-      )}
 
       {isRunning && activeEntryKey !== runningEntryKey && (
         <button

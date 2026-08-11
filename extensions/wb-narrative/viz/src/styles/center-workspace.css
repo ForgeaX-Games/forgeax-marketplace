@@ -16,9 +16,9 @@
 }
 
 /* 与左栏一致的 pane header，center iframe 专属 */
+/* 顶层标题条的底色与高度都由 .workbench-pane-header 统一，这里只补一句"别被压缩"。 */
 .cw-preview-header {
   flex-shrink: 0;
-  background: var(--color-background-elevated);
 }
 
 /* 隐藏旧版 center 顶栏（mode-bar / action-bar），防止 dist 缓存或 full 模式残留 */
@@ -102,18 +102,18 @@ body[data-pane="center"] .editor-center-workspace {
   background: var(--color-background-base);
 }
 
+/* 第三层注释带：高度与左栏路径行同一个数（那 1px 让给 .cw-toolbar 的分隔线）。 */
 .cw-toolbar-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  height: calc(var(--pane-band3-h) - 1px);
+  padding: 0 12px;
   min-height: 0;
 }
 
 .cw-toolbar-row + .cw-toolbar-row {
   border-top: 1px solid var(--color-divider-subtle);
-  padding-top: 6px;
-  padding-bottom: 6px;
 }
 
 .fx-segmented {
@@ -166,6 +166,19 @@ body[data-pane="center"] .editor-center-workspace {
   min-width: 0;
   font-size: 11px;
   color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 第三层注释：与左栏路径行同一份分量——够看清，不抢正文。 */
+.cw-note {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -300,25 +313,44 @@ body[data-pane="center"] .editor-center-workspace {
   border-bottom: 1px solid var(--color-divider-subtle);
 }
 
+/*
+ * 三个 tab 等宽，宽度由最长那条标签决定（grid 的 auto-columns: 1fr 就是这个意思）。
+ * 写死一个 px 宽在中文下够、英文下就把「Narrative planning expert groups」切掉半截；
+ * 让它们互相取齐既保住了对齐，也不必为每种语言各调一个数。
+ */
 .cw-topnav__bar {
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  /* 让整条 bar 按内容收缩再居中：这样 1fr 取的是"最长那条的宽"，而不是把整行三等分。 */
+  width: max-content;
+  min-width: min(100%, 480px);
+  max-width: 100%;
+  margin: 0 auto;
   align-items: stretch;
   gap: 10px;
-  padding: 10px 12px;
+  /* 带高与左栏第二层同一个数（那 1px 让给 .cw-topnav 的分隔线）；tab 撑满剩下的空间。 */
+  height: calc(var(--pane-band2-h) - 1px);
+  padding: 6px 12px;
 }
 
+/* 三个 tab 是这一层唯一的动作，所以它们得读起来像按钮而不是标签：
+   字重压住旁边的说明文字，底色把矩形框实体化。底色掺主题绿而非纯灰，
+   是为了让"这三块是工具入口"和下面画布的中性黑分开。 */
 .cw-topnav__tab {
-  flex: 0 0 auto;
-  width: 152px;
-  padding: 9px 12px;
-  border: 1px solid var(--color-border-default);
-  background: var(--color-background-floating);
-  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--color-border-default));
+  background: color-mix(in srgb, var(--primary) 10%, var(--color-background-floating));
+  color: var(--color-text-primary);
   font-family: var(--font-sans);
   font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-align: center;
+  white-space: nowrap;
   cursor: pointer;
   position: relative;
   transition:
@@ -328,27 +360,31 @@ body[data-pane="center"] .editor-center-workspace {
 }
 
 .cw-topnav__tab:hover:not(.is-open) {
-  color: var(--color-text-primary);
-  border-color: var(--color-border-strong, var(--primary));
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 18%, var(--color-background-floating));
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
 }
 
 .cw-topnav__tab.is-open {
-  color: var(--color-text-primary);
-  background: var(--color-background-base);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 24%, var(--color-background-base));
   border-color: var(--primary);
 }
 
-/* 级联面板：整块浮在创作空间之上并居中，不撑开顶栏也不挤压主体。 */
+/*
+ * 级联面板：浮在创作空间之上，左沿对齐**打开它的那个 tab**（--cw-menu-x 由组件量出来写入）。
+ * 不居中是有意的：三组工具各自成列，菜单从哪个 tab 落下来一眼可辨；居中会让三组的菜单
+ * 都长在同一个位置，用户失去"我点的是哪一组"的方位感。
+ */
 .cw-topnav__panel {
   position: absolute;
   top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
+  left: var(--cw-menu-x, 50%);
   margin-top: -1px;
   display: flex;
   align-items: stretch;
   border: 1px solid var(--primary);
-  background: var(--color-background-floating);
+  background: color-mix(in srgb, var(--primary) 5%, var(--color-background-floating));
   box-shadow: var(--shadow-overlay, 0 8px 24px rgb(0 0 0 / 28%));
   max-height: 320px;
   z-index: 21;
@@ -363,7 +399,7 @@ body[data-pane="center"] .editor-center-workspace {
   overflow-y: auto;
 }
 
-.cw-menu + .cw-menu { border-left: 1px solid var(--color-divider-subtle); }
+.cw-menu + .cw-menu { border-left: 1px solid color-mix(in srgb, var(--primary) 24%, transparent); }
 
 /* 末级列可能有上百条（品类），给一个更宽的滚动区。 */
 .cw-menu--leaf { min-width: 176px; max-height: 320px; }
@@ -377,7 +413,7 @@ body[data-pane="center"] .editor-center-workspace {
   border: none;
   border-left: 2px solid transparent;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   font-family: var(--font-sans);
   font-size: 12px;
   text-align: left;
@@ -388,19 +424,24 @@ body[data-pane="center"] .editor-center-workspace {
     background var(--motion-duration-fast) var(--motion-ease-out);
 }
 
+/* 三种态各自换一种颜色，而不是三种都往灰白里挪一点：
+   悬停是"手在这"、展开是"这一级还有下一列"、选中是"值就是它"，
+   同色不同亮度分不出这三件事，扫一眼菜单只剩一片灰。 */
 .cw-menu__item:hover {
-  color: var(--color-text-primary);
-  background: var(--color-background-base);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, var(--color-background-base));
 }
 
 /* is-open = 这一级被展开（右边还有下一列）；is-active = 这一项就是当前选中值。 */
 .cw-menu__item.is-open {
   color: var(--color-text-primary);
-  background: var(--color-background-base);
+  background: color-mix(in srgb, var(--primary) 18%, var(--color-background-base));
+  border-left-color: color-mix(in srgb, var(--primary) 45%, transparent);
 }
 
 .cw-menu__item.is-active {
-  color: var(--color-text-primary);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
   border-left-color: var(--primary);
 }
 
@@ -424,9 +465,13 @@ body[data-pane="center"] .editor-center-workspace {
 }
 
 .cw-menu__leaf:active { cursor: grabbing; }
-.cw-menu__leaf:hover { background: var(--color-background-base); }
-.cw-menu__leaf.is-active { border-left-color: var(--primary); }
-.cw-menu__leaf.is-active .cw-menu__item { color: var(--color-text-primary); }
+.cw-menu__leaf:hover { background: color-mix(in srgb, var(--primary) 12%, var(--color-background-base)); }
+.cw-menu__leaf:hover .cw-menu__item { color: var(--primary); }
+.cw-menu__leaf.is-active {
+  border-left-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.cw-menu__leaf.is-active .cw-menu__item { color: var(--primary); }
 
 .cw-menu__item--leaf {
   flex: 1;
@@ -508,59 +553,11 @@ body[data-pane="center"] .editor-center-workspace {
   font-size: 11px;
 }
 
-/* 需求输入编辑卡：居中、贴着操作条上方，内容多时向上长。 */
-.cw-float-input {
-  position: absolute;
-  left: 50%;
-  bottom: 56px;
-  transform: translateX(-50%);
-  width: min(560px, calc(100% - 48px));
-  max-height: calc(100% - 96px);
-  overflow-y: auto;
-  padding: 10px 12px 12px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--prim-radius-6);
-  background: var(--color-background-floating);
-  box-shadow: var(--shadow-overlay, 0 8px 24px rgb(0 0 0 / 28%));
-}
-
-.cw-float-input__head {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 8px;
-  position: relative;
-}
-
-.cw-float-input__badge {
-  padding: 3px 14px;
-  border: 1px solid var(--primary);
-  border-radius: 999px;
-  color: var(--primary);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-}
-
-.cw-float-input__close {
-  position: absolute;
-  right: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.cw-float-input__close:hover { color: var(--color-text-primary); }
-
-/* 操作条 + 画布控件：贴右下角。 */
+/* 底部工具条居中：生成键与视图/缩放键同形同列，读起来是一排工具而不是两堆按钮。 */
 .cw-overlay__actions {
   position: absolute;
-  right: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 12px;
   display: flex;
   align-items: center;
@@ -570,42 +567,7 @@ body[data-pane="center"] .editor-center-workspace {
 .cw-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.cw-actions__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--prim-radius-6);
-  background: var(--color-background-base);
-  color: var(--color-text-secondary);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    color var(--motion-duration-fast) var(--motion-ease-out),
-    border-color var(--motion-duration-base) var(--motion-ease-out);
-}
-
-.cw-actions__btn:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  border-color: var(--color-border-strong, var(--color-border-default));
-}
-
-.cw-actions__btn:disabled { opacity: 0.4; cursor: default; }
-
-.cw-actions__btn--primary:not(:disabled) {
-  color: var(--primary);
-  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
-}
-
-.cw-actions__btn--cancel.is-active {
-  color: var(--color-accent-orange-default);
-  border-color: color-mix(in srgb, var(--color-accent-orange-default) 55%, transparent);
+  gap: 4px;
 }
 
 .cw-actions__hint {
@@ -639,14 +601,24 @@ body[data-pane="center"] .editor-center-workspace {
 
 .cw-canvasctl__btn:disabled { opacity: 0.4; cursor: default; }
 
-/* ── Canvas flow node（复用管线状态 .rf-pipeline-node 观感：横向、前后连接） ── */
+/* 生成主键：同形不同色，一排里一眼看得出哪个是"跑"。 */
+.cw-canvasctl__btn--primary:not(:disabled) {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.cw-canvasctl__btn.is-warn {
+  color: var(--color-accent-orange-default);
+  border-color: color-mix(in srgb, var(--color-accent-orange-default) 55%, transparent);
+}
+
+/* ── Canvas flow node（复用管线状态 .rf-pipeline-node 观感：横向、前后连接） ──
+   卡片宽度定在 index.css 的 .composer-node--card：那里才排在「运行态借用本形式」的
+   width:100% 之后，写在这里会被它按层叠顺序盖掉。 */
 .composer-node {
-  width: 190px;
   box-sizing: border-box;
   transition: width 0.15s ease;
 }
-/* 展开时同一张卡片略微加宽、高度随内容自然增长（单组件两态形变，非叠加两块） */
-.composer-node.is-expanded { width: 244px; }
 /* 展开的节点抬到上层，避免被相邻节点压住 */
 .react-flow__node:has(.composer-node.is-expanded) { z-index: 20 !important; }
 
@@ -870,6 +842,38 @@ body[data-pane="center"] .editor-center-workspace {
 .composer-config__label {
   font-size: 11px;
   color: var(--color-text-secondary);
+}
+
+/* 入口节点的两个二/三选一（怎么说需求、走哪条路由）：
+   选项少且互斥，用下拉会多一次点击才看见有哪些，横排按钮一眼全在。 */
+.composer-config__seg {
+  display: flex;
+  gap: 4px;
+}
+
+.composer-config__seg-btn {
+  flex: 1;
+  padding: 5px 6px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-floating);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--motion-duration-fast) var(--motion-ease-out),
+    background var(--motion-duration-fast) var(--motion-ease-out),
+    border-color var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+.composer-config__seg-btn:hover { color: var(--color-text-primary); }
+
+.composer-config__seg-btn.is-active {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, var(--color-background-floating));
 }
 
 .composer-config__input,
@@ -1233,6 +1237,125 @@ body[data-pane="center"] .editor-center-workspace {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* ────────────────────────────────────────────────────────────────
+ * 工具栏补充：未接线席位、自定义团队
+ * ──────────────────────────────────────────────────────────────── */
+
+/* 后端还没有单跑入口的席位：能拖能 @，点不动。 */
+.cw-menu__leaf.is-unwired .cw-menu__item--leaf {
+  color: var(--color-text-tertiary);
+  cursor: default;
+}
+
+.cw-menu__hint {
+  margin: 4px 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-text-tertiary);
+}
+
+.cw-menu__hint--warn { color: var(--color-warning, #d1a343); }
+
+.cw-menu--custom {
+  min-width: 248px;
+  max-height: 360px;
+}
+
+/* 建团模态：蒸馏一支私有助手是独立一件事（要填来源、投喂素材、等后端跑），
+   不是菜单里的下一项，所以它离开那条 44px 的工具带，居中独占创作空间。 */
+.cw-team-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--color-overlay-modal, rgba(0, 0, 0, 0.5));
+  backdrop-filter: blur(4px);
+}
+
+.cw-team-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  max-height: 80vh;
+  overflow: hidden;
+  border: 1px solid var(--primary);
+  border-radius: var(--prim-radius-6);
+  background: var(--color-background-floating);
+  box-shadow: var(--shadow-overlay, 0 8px 24px rgb(0 0 0 / 28%));
+}
+
+.cw-team-modal__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-divider-subtle);
+}
+
+.cw-team-modal__title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+}
+
+.cw-team-modal__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.cw-team-modal__close:hover { color: var(--primary); border-color: var(--primary); }
+
+.cw-team-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+}
+
+.cw-team-form__kinds { display: flex; gap: 4px; }
+
+.cw-team-form__kinds .cw-menu__item {
+  flex: 1;
+  justify-content: center;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+}
+
+.cw-team-form__foot { display: flex; gap: 4px; }
+.cw-team-form__foot .fx-btn { flex: 1; justify-content: center; }
+
+/* 菜单末尾的新建位：与菜单项同宽的一个 +，按下收起菜单、另开居中的建团模态。 */
+.cw-menu__new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 4px 8px 2px;
+  padding: 5px 0;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--prim-radius-4);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.cw-menu__new:hover { color: var(--primary); border-color: var(--primary); }
+
 
 /* Legacy full-mode: map old class when not in center-only iframe */
 .app-right-panel.editor-center-workspace {

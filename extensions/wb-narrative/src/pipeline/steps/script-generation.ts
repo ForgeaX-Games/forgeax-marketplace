@@ -2,13 +2,13 @@
  * L4 剧本生成（ScriptProcessor）
  *
  * 设计哲学（继承自 v3）：
- * - 情节→专业级 JRPG 剧本（冲突推动 + 角色弧光 + 游戏交互）
+ * - 情节 → 可演出的剧本段落（冲突推动 + 角色弧光 + 游戏交互）
  * - 7 种 content 类型：stage_direction/narration/dialogue/inner_monologue/
  *   player_action/system_message/branch_point
  * - 5 种章节类型：opening/rising/climax/falling/resolution
  * - 拓扑分层执行（分支并行 + 主干顺序）：
  *   同层节点并行，层间顺序，通过滑动窗口传递前驱实际内容摘要
- * - 增强上下文：L2 风格指引（dialogue_hint 等）、用户原始需求
+ * - 增强上下文：结构席给的节点风格指引（dialogue_hint 等）、用户原始需求
  */
 import type { NarrativeContext, PlotNode, ScriptChapter, JrpgScript } from "../../types/index.js";
 import type { LLMClient } from "../llm-client.js";
@@ -16,6 +16,7 @@ import { extractJSON } from "../llm-client.js";
 import { validateTripleConstraints } from "../../utils/constraint-validator.js";
 import { buildDesignContextSnippet, appendUserInstructions } from "./design-context-helper.js";
 import { composeSystemPrompt, IP_DNA_SLOT_BLOCK, type PromptComposer } from "../prompt-composer.js";
+import { CAMERA_LANGUAGE } from "../prompt/narrative-craft.js";
 import { getNodeFilter } from "../node-merge.js";
 import {
   buildSlidingWindowSummary,
@@ -28,7 +29,7 @@ const VALID_CONTENT_TYPES = new Set([
 ]);
 const VALID_CHAPTER_TYPES = new Set(["opening", "rising", "climax", "falling", "resolution"]);
 
-const SYSTEM_PROMPT = `你是游戏剧本设计师，请将情节节点改写为JRPG剧本章节。所有输出使用中文。
+const SYSTEM_PROMPT = `你是游戏剧本设计师，请将剧情树节点的情节改写为可演出的剧本段落。所有输出使用中文。
 
 ## 章节结构要求
 
@@ -78,28 +79,30 @@ const SYSTEM_PROMPT = `你是游戏剧本设计师，请将情节节点改写为
 export const SCRIPT_GENERATION_COMPOSER: PromptComposer = {
   stepId: "script_generation",
   skillSlots: ["style_guide", "examples", "constraints"],
-  systemBlockOrder: ["base", "ip_dna", "style_guide", "examples", "constraints", "cot"],
+  systemBlockOrder: ["base", "ip_dna", "craft", "style_guide", "examples", "constraints", "cot"],
   userBlockOrder: [],
   blocks: {
     cot: `## 机制与流程
 1. 将情节文本切分为对白单元与舞台指示，先分清哪些该由人物说出、哪些该由镜头交代。
-2. 逐句打磨对白：保证角色辨识度，并让重要的话都带潜台词——人物很少直说自己要什么。
-3. 在关键情感转折处标注表演提示，给演出留出可执行的落点。
-4. 自检：对白是否同质化（遮住名字还认得出谁在说吗）？全场有没有一句配得上"名场面"的台词？`,
+2. 按上面的镜头序列给每一段配镜，景别随戏的性质走。
+3. 标出本段的冲突张力与角色弧光位置，让演出知道这一段要演到什么程度。
+4. 自检：遮住角色名还认得出谁在说吗？全场有没有一句配得上"名场面"的台词？
+   镜头有没有全篇一个机位？`,
     base: SYSTEM_PROMPT,
     ip_dna: IP_DNA_SLOT_BLOCK,
+    craft: CAMERA_LANGUAGE,
     style_guide: "{{SKILL.style_guide}}",
     examples: "{{SKILL.examples}}",
     constraints: "{{SKILL.constraints}}",
   },
 };
 
-function buildL2StyleHints(plot: PlotNode, ctx: NarrativeContext): string {
+function buildNodeStyleHints(plot: PlotNode, ctx: NarrativeContext): string {
   const detailedOutlines = ctx.detailed_outlines_generated?.detailed_outlines ?? [];
-  // L3 与 L2 是 1:1 映射（plot.node_id === L2 node_id），plot.parent_id 是 L1 ID
-  const l2Node = detailedOutlines.find(n => n.node_id === plot.node_id);
-  if (!l2Node) return "";
-  const se = l2Node.story_elements;
+  // 情节与结构席的细化节点一一对应（同 node_id），风格提示随节点走
+  const structureNode = detailedOutlines.find(n => n.node_id === plot.node_id);
+  if (!structureNode) return "";
+  const se = structureNode.story_elements;
   const lines = [
     `- 对白风格: ${se.dialogue_hint ?? "（无）"}`,
     `- 独白方向: ${se.monologue_hint ?? "（无）"}`,
@@ -125,18 +128,18 @@ function buildPromptForPlot(
       ).join("\n- ")
     : "（无后续节点）";
 
-  const l2Hints = buildL2StyleHints(plot, ctx);
+  const styleHints = buildNodeStyleHints(plot, ctx);
 
   let prompt = `## 用户原始需求
 ${ctx.user_input}
 
-## 情节节点（需改写为剧本章节）
+## 情节节点（需改写为剧本段落）
 ${JSON.stringify(plot, null, 2)}
 
 ## 边界校验上下文
 - ${prevInfo}
 - ${nextInfo}
-${l2Hints ? `\n## L2 风格指引\n${l2Hints}` : ""}
+${styleHints ? `\n## 本节点风格指引\n${styleHints}` : ""}
 
 ## 角色档案
 ${JSON.stringify(ctx.detailed_character_sheets ?? [], null, 2)}

@@ -70,9 +70,21 @@ export function buildDesignContextSnippet(ctx: NarrativeContext): string {
  * are present on ctx.
  */
 export function appendUserInstructions(prompt: string, ctx: NarrativeContext): string {
+  const block = userInstructionsBlock(ctx);
+  return block ? `${prompt}\n\n${block}` : prompt;
+}
+
+/**
+ * 用户修改意见块本身（无则空串）。
+ *
+ * 供 PromptComposer 的 userBlockOrder 直接列为一块：提示词交给 composer 装配后，
+ * user prompt 不再由 step 函数手工拼接，appendUserInstructions 那种"事后追加"
+ * 就没有插入点了。两者共用同一段文案，措辞只有一处。
+ */
+export function userInstructionsBlock(ctx: NarrativeContext): string {
   const instructions = (ctx as Record<string, unknown>)._userInstructions as string | undefined;
-  if (!instructions) return prompt;
-  return `${prompt}\n\n## 🚨 用户修改意见（本次重新生成的核心指导，必须优先遵守）\n${instructions}`;
+  if (!instructions) return "";
+  return `## 🚨 用户修改意见（本次重新生成的核心指导，必须优先遵守）\n${instructions}`;
 }
 
 /**

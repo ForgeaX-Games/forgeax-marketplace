@@ -3,20 +3,20 @@
  *
  * 所有步骤的 AgentDef 注册。副作用文件：import 后自动注册。
  *
- * 过渡期策略：
- *   - 已迁移到 .md 模板的 step → 完整 AgentDef 注册
- *   - 未迁移的 step → 依赖 assembler.ts 中的 StepDescriptor 桥接
+ * 注册分两类：
+ *   - 手写 AgentDef：需要 validator、算子消费声明这类派生不出来的信息（本文件上半）；
+ *   - 按席位配置表批量派生：形态取自 seat-spec，其余字段取自 StepDescriptor（本文件末尾）。
  *
- * 随着 Phase 2 逐步推进，此文件中的注册项会越来越多，
- * 直到所有 step 都有独立的 AgentDef，彼时可移除桥接逻辑。
+ * 顺序要紧：手写的先注册，批量派生跳过已注册项——手写的信息比派生的多。
  */
+import "../step-registrations.js";
 import { registerAgentDef } from "./agent-def-registry.js";
+import { registerSeatAgentDefs } from "../seat-agents.js";
+import { registerExpertAgentDefs } from "../expert-agents.js";
 import { registerValidator } from "./processor-registry.js";
 import type { AgentDef } from "./types.js";
 import { extractJSON } from "../llm-client.js";
 import type { NarrativeCard, VnLogline } from "../../types/index.js";
-import { makeCompositeAgentDef } from "./runners/composite-runner.js";
-import { JRPG_PIPELINE_STEPS } from "../templates.js";
 
 // ════════════════════════════════════════════════════════
 // narrative_card — 叙事卡（Tier4 最简步骤）
@@ -59,6 +59,16 @@ const narrativeCardDef: AgentDef = {
   dependencies: [],
   validators: ["narrative_card_validator"],
   extractOutputKey: "narrative_card",
+  /**
+   * 第一个真正交给 runner 执行的席位。
+   *
+   * 它能先切，是因为它的 step 函数除了一次 LLM 调用与 JSON 解析之外不做别的：
+   * 提示词全在 NARRATIVE_CARD_COMPOSER（system 与 user 两段都在），
+   * 必填校验已登记为 narrative_card_validator，产出直接写 io.outputField。
+   * 其余席位的 step 函数还带着分批、派生字段、修复等落地逻辑，
+   * 那些搬进 runner 之前不能切——见 seat-spec.ts 的落差登记。
+   */
+  useNewRunner: true,
 };
 
 registerAgentDef(narrativeCardDef);
@@ -103,50 +113,16 @@ const vnLoglineDef: AgentDef = {
 registerAgentDef(vnLoglineDef);
 
 // ════════════════════════════════════════════════════════
-// tpl-jrpg — JRPG 品类专家（nested composite · Phase-1 垂直样例）
+// 席位实现 — 按配置表批量派生（必须放在手写注册之后）
 // ════════════════════════════════════════════════════════
 
-const JRPG_CHILDREN = JRPG_PIPELINE_STEPS.flatMap((g) =>
-  Array.isArray(g) ? g : [g],
-);
+registerSeatAgentDefs();
 
-/** 串行边 + quest/scene 并行组。 */
-const jrpgEdges: Array<{ source: string; target: string }> = [];
-for (let i = 0; i < JRPG_PIPELINE_STEPS.length - 1; i++) {
-  const cur = JRPG_PIPELINE_STEPS[i]!;
-  const next = JRPG_PIPELINE_STEPS[i + 1]!;
-  const sources = Array.isArray(cur) ? cur : [cur];
-  const targets = Array.isArray(next) ? next : [next];
-  for (const s of sources) {
-    for (const t of targets) jrpgEdges.push({ source: s, target: t });
-  }
-}
+// ════════════════════════════════════════════════════════
+// 品类专家 — 四条席位管线的 composite 外壳
+// ════════════════════════════════════════════════════════
+//
+// 放在席位注册之后：专家的 children 是席位实现，先有子步定义再有编排更好排查。
+// 步序来自 resolveSeatStepGroups 的同一份展开，不再摊平 JRPG_PIPELINE_STEPS。
 
-registerAgentDef(
-  makeCompositeAgentDef("tpl-jrpg", "JRPG 品类叙事专家", {
-    children: JRPG_CHILDREN,
-    edges: jrpgEdges,
-    parallelGroups: [["quest_generation", "scene_generation"]],
-  }, {
-    prompts: { templateId: "tpl-jrpg", skillSlots: ["style_guide"] },
-    io: {
-      requiredInputs: ["user_input"],
-      outputField: "tpl_jrpg",
-    },
-  }),
-);
-
-/** 画布 expert 节点 catalogId 别名。 */
-registerAgentDef(
-  makeCompositeAgentDef("expert.jrpg", "JRPG 品类叙事专家", {
-    children: JRPG_CHILDREN,
-    edges: jrpgEdges,
-    parallelGroups: [["quest_generation", "scene_generation"]],
-  }, {
-    prompts: { templateId: "tpl-jrpg", skillSlots: ["style_guide"] },
-    io: {
-      requiredInputs: ["user_input"],
-      outputField: "tpl_jrpg",
-    },
-  }),
-);
+registerExpertAgentDefs();

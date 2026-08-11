@@ -14,7 +14,7 @@
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
-  "icon": "📝",
+  "icon": "UserCog",
   "keywords": [
     "agent",
     "persona",
@@ -58,7 +58,7 @@
           "zh": "Agent Persona 编辑器",
           "en": "Agent Persona Editor"
         },
-        "icon": "📝",
+        "icon": "UserCog",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -124,9 +124,9 @@
           "zh": "Agent Persona 编辑器",
           "en": "Agent Persona Editor"
         },
-        "icon": "📝",
+        "icon": "UserCog",
         "order": 200,
-        "category": "workbench",
+        "category": "general",
         "pageType": {
           "extension": "self",
           "id": "wb-agent-persona"

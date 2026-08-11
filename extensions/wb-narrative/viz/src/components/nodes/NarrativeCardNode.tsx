@@ -35,21 +35,18 @@ function NarrativeCardNodeRaw({ data, id }: NodeProps<NarrativeCardData>) {
 
   return (
     <div
-      className={`rf-pipeline-node status-${status} type-special`}
+      className={`rf-pipeline-node status-${status} type-special${expanded ? " is-expanded" : ""}`}
       onClick={(e) => { if (hasData) { e.stopPropagation(); setExpanded(!expanded); } }}
     >
       <Handle type="target" position={Position.Left} className="rf-handle" />
       <div className="rf-pipeline-header">
         <span style={{ fontSize: 8, color: dotColor }}>✦</span>
         <span className="rf-pipeline-label">{displayLabel}</span>
+        {expanded && <span className="rf-child-close">✕</span>}
       </div>
+      {/* 展开原地续一段，标题条留在上面不重复；nodrag/nopan 保住内部滚动与选字。 */}
       {expanded && card && (
-        <div className="rf-pipeline-overlay rf-narrative-card-overlay">
-          <div className="rf-pipeline-header" style={{ marginBottom: 6 }}>
-            <span style={{ fontSize: 8, color: dotColor }}>✦</span>
-            <span className="rf-pipeline-label">{displayLabel}</span>
-            <span className="rf-child-close">✕</span>
-          </div>
+        <div className="rf-pipeline-detail rf-narrative-card-detail nodrag nopan" onClick={(e) => e.stopPropagation()}>
           {typeof card.game_name === "string" && card.game_name && (
             <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(77,255,160,0.9)", marginBottom: 6 }}>
               {card.game_name}

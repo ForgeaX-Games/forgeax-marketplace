@@ -69,6 +69,33 @@ export function registerStep(desc: StepDescriptor): void {
   STEP_REGISTRY.set(desc.id, desc);
 }
 
+/**
+ * 只报运行信息、不对应任何 agent 的帧（运行横幅）。
+ *
+ * 画布不该为它们画节点。名单随 announce 帧一起下发，前端不自己维护一份 id 常量——
+ * 否则后端加减一个元帧，画布上就会凭空多/少一张卡。
+ */
+export const BANNER_STEP_IDS: readonly string[] = ["pipeline_config"];
+
+/**
+ * step 的显示名。注册表是这个名字的唯一真值：
+ * SSE 的 stage、announce 的 stepNames、画布卡片标题全部回到这里取，
+ * 谁都不许再抄一份常量表——抄一份就意味着改名要改 N 处，漏一处就是画布上写着旧名。
+ */
+export function stepDisplayName(stepId: string): string {
+  return STEP_REGISTRY.get(stepId)?.name ?? stepId;
+}
+
+/** 一批 step 的显示名，随 announce 帧下发给前端（前端不再自带中文步名表）。 */
+export function stepDisplayNames(stepIds: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const id of stepIds) {
+    const name = STEP_REGISTRY.get(id)?.name;
+    if (name) out[id] = name;
+  }
+  return out;
+}
+
 /** 获取指定 step 的所有输出字段（主字段 + 派生字段） */
 export function getStepOutputFields(stepId: string): string[] {
   const desc = STEP_REGISTRY.get(stepId);

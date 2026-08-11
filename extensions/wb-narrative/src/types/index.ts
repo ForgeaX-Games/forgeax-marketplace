@@ -1165,6 +1165,33 @@ export interface ItemLore {
 
 // --- Pipeline 进度 & 配置 ---
 
+/**
+ * announce 帧里的一段「同属一个专家的连续步骤」。
+ * id/label 取席位管线本身（如 pl-narrative / 叙事管线（任务）），画布用它画容器标题。
+ */
+/** 组内的一段席位归属：这几步同属 feature list 2.3.x 的哪一席。 */
+export interface AnnounceSeatGroup {
+  id: string;
+  name: string;
+  steps: string[];
+}
+
+export interface AnnounceStepGroup {
+  id: string;
+  /**
+   * 画布容器标题。用的是**专家显示名**（如「互动叙事专家」），不是管线内部名：
+   * 用户拖进来的那张卡叫什么，生成后的容器就该叫什么。管线名另走 pipelineName。
+   */
+  label: string;
+  steps: string[];
+  /** 本组跑的是哪条席位管线（新架构四条之一，如 pl-film-game）。 */
+  pipelineId?: string;
+  /** 管线内部名（如「叙事管线（分镜）」），作为副标题/悬浮说明用。 */
+  pipelineName?: string;
+  /** 组内 step 的席位归属，供画布在卡上标注「这一步属于哪一席」。 */
+  seats?: AnnounceSeatGroup[];
+}
+
 export interface PipelineProgress {
   stage: string;
   stepId?: string;
@@ -1188,8 +1215,30 @@ export interface PipelineProgress {
   type?: "streaming" | "pipeline_steps_announce";
   chunk?: string;
   accumulated?: string;
+  /**
+   * 本帧只是「运行横幅」，不对应任何 agent（如管线配置：报 Tier/Mode/总步数）。
+   *
+   * 画布据此判断"这一帧不该画成节点"，而不是去认 stepId 字符串——
+   * 元帧的名单只有后端知道，前端硬编码 id 就会随后端加减元帧而漂移。
+   */
+  meta?: boolean;
   // pipeline_steps_announce payload
   steps?: string[];
+  /**
+   * 步序里每个 step 的显示名（step id → 名称），真值来自 STEP_REGISTRY。
+   *
+   * 有了它，前端在任何一步开跑之前就能把待跑节点的标题写对，
+   * 不必自带一份中文步名表去和后端对赌（对赌的结果就是后端改了名、画布还是旧名）。
+   */
+  stepNames?: Record<string, string>;
+  /** 步序里哪些 id 只是运行横幅（见 BANNER_STEP_IDS）：画布据此不为它们建节点。 */
+  metaSteps?: string[];
+  /**
+   * 步骤的专家归属。`steps` 是扁平步序，画布无从得知哪几步同属一个专家席位管线，
+   * 只能把它们摊成一排同级节点；有了这个，画布才能把它们收进专家容器里逐个点亮。
+   * 归属真值只在后端（narrative-pipelines.ts），故随 announce 一起下发而非前端猜。
+   */
+  stepGroups?: AnnounceStepGroup[];
   pipelineTemplate?: string;
   complexity?: number;
   /** @deprecated A1: derived from (tier, mode, genreCode). Kept for replay/log only. */

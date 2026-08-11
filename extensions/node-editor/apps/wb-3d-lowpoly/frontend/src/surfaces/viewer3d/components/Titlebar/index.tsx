@@ -16,6 +16,7 @@ type ExportFormat = 'obj' | 'glb' | 'glb-static' | 'glb-skinned' | 'glb-characte
 interface TitlebarProps {
   onResetView: () => void
   onExport: (format: ExportFormat) => void | Promise<void>
+  onDirectImport: () => void
   onScreenshot: () => void | Promise<void>
   canExportUrdf: boolean
   /** 静态几何导出（obj / glb / glb-static）：URDF 或静态场景就绪即可。 */
@@ -24,9 +25,10 @@ interface TitlebarProps {
   canExportSkinned?: boolean
   /** 角色模式（骨架蒙皮已就绪）时可导出角色 GLB。 */
   canExportCharacter?: boolean
+  canDirectImport?: boolean
 }
 
-function Titlebar({ onResetView, onExport, onScreenshot, canExportUrdf, canExportScene, canExportSkinned = false, canExportCharacter = false }: TitlebarProps) {
+function Titlebar({ onResetView, onExport, onDirectImport, onScreenshot, canExportUrdf, canExportScene, canExportSkinned = false, canExportCharacter = false, canDirectImport = false }: TitlebarProps) {
   // Selected field-by-field — a bare `useViewerStore()` subscribes to the
   // whole store and re-renders the titlebar on every unrelated viewer update.
   const sourceLabel = useViewerStore((s) => s.sourceLabel)
@@ -41,6 +43,7 @@ function Titlebar({ onResetView, onExport, onScreenshot, canExportUrdf, canExpor
 
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [directImportMode, setDirectImportMode] = useState(false)
   const exportMenuRef = useRef<HTMLDivElement>(null)
   const settingsMenuRef = useRef<HTMLDivElement>(null)
 
@@ -65,6 +68,11 @@ function Titlebar({ onResetView, onExport, onScreenshot, canExportUrdf, canExpor
   const handleExportFormat = (format: ExportFormat) => {
     setShowExportMenu(false)
     void onExport(format)
+  }
+
+  const handleDirectImport = () => {
+    setShowExportMenu(false)
+    onDirectImport()
   }
 
   return (
@@ -100,55 +108,82 @@ function Titlebar({ onResetView, onExport, onScreenshot, canExportUrdf, canExpor
           </button>
           {showExportMenu && (
             <div className="viewer-dropdown">
-              <div className="viewer-dropdown-header">{t.titlebar.exportHeader}</div>
-              <button
-                className="viewer-dropdown-item"
-                disabled={!canExportScene}
-                onClick={() => handleExportFormat('obj')}
-              >
-                <span className="viewer-dropdown-item-title">{t.titlebar.exportObj}</span>
-                <span className="viewer-dropdown-item-sub">{t.titlebar.exportObjSub}</span>
-              </button>
-              <button
-                className="viewer-dropdown-item"
-                disabled={!canExportScene}
-                onClick={() => handleExportFormat('glb')}
-              >
-                <span className="viewer-dropdown-item-title">{t.titlebar.exportGlb}</span>
-                <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbSub}</span>
-              </button>
-              <button
-                className="viewer-dropdown-item"
-                disabled={!canExportScene}
-                onClick={() => handleExportFormat('glb-static')}
-              >
-                <span className="viewer-dropdown-item-title">{t.titlebar.exportGlbStatic}</span>
-                <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbStaticSub}</span>
-              </button>
-              <button
-                className="viewer-dropdown-item"
-                disabled={!canExportSkinned}
-                onClick={() => handleExportFormat('glb-skinned')}
-              >
-                <span className="viewer-dropdown-item-title">{t.titlebar.exportGlbSkinned}</span>
-                <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbSkinnedSub}</span>
-              </button>
-              <button
-                className="viewer-dropdown-item"
-                disabled={!canExportCharacter}
-                onClick={() => handleExportFormat('glb-character')}
-              >
-                <span className="viewer-dropdown-item-title">{t.titlebar.exportGlbCharacter}</span>
-                <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbCharacterSub}</span>
-              </button>
-              <button
-                className="viewer-dropdown-item"
-                disabled={!canExportUrdf}
-                onClick={() => handleExportFormat('urdf')}
-              >
-                <span className="viewer-dropdown-item-title">{t.titlebar.exportUrdf}</span>
-                <span className="viewer-dropdown-item-sub">{t.titlebar.exportUrdfSub}</span>
-              </button>
+              <div className="viewer-dropdown-header">{directImportMode ? t.titlebar.directImportHeader : t.titlebar.exportHeader}</div>
+              <label className="viewer-dropdown-switch">
+                <span className="viewer-dropdown-switch-copy">
+                  <span className="viewer-dropdown-item-title">{t.titlebar.directImportToggle}</span>
+                  <span className="viewer-dropdown-item-sub">{t.titlebar.directImportToggleSub}</span>
+                </span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={directImportMode}
+                  onChange={(event) => setDirectImportMode(event.target.checked)}
+                  aria-label={t.titlebar.directImportToggle}
+                />
+              </label>
+              <div className="viewer-dropdown-divider" />
+              {directImportMode ? (
+                <button
+                  className="viewer-dropdown-item"
+                  disabled={!canDirectImport}
+                  onClick={handleDirectImport}
+                >
+                  <span className="viewer-dropdown-item-title">{t.titlebar.directImportAction}</span>
+                  <span className="viewer-dropdown-item-sub">{t.titlebar.directImportActionSub}</span>
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="viewer-dropdown-item"
+                    disabled={!canExportScene}
+                    onClick={() => handleExportFormat('obj')}
+                  >
+                    <span className="viewer-dropdown-item-title">{t.titlebar.exportObj}</span>
+                    <span className="viewer-dropdown-item-sub">{t.titlebar.exportObjSub}</span>
+                  </button>
+                  <button
+                    className="viewer-dropdown-item"
+                    disabled={!canExportScene}
+                    onClick={() => handleExportFormat('glb')}
+                  >
+                    <span className="viewer-dropdown-item-title">{t.titlebar.exportGlb}</span>
+                    <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbSub}</span>
+                  </button>
+                  <button
+                    className="viewer-dropdown-item"
+                    disabled={!canExportScene}
+                    onClick={() => handleExportFormat('glb-static')}
+                  >
+                    <span className="viewer-dropdown-item-title">{t.titlebar.exportGlbStatic}</span>
+                    <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbStaticSub}</span>
+                  </button>
+                  <button
+                    className="viewer-dropdown-item"
+                    disabled={!canExportSkinned}
+                    onClick={() => handleExportFormat('glb-skinned')}
+                  >
+                    <span className="viewer-dropdown-item-title">{t.titlebar.exportGlbSkinned}</span>
+                    <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbSkinnedSub}</span>
+                  </button>
+                  <button
+                    className="viewer-dropdown-item"
+                    disabled={!canExportCharacter}
+                    onClick={() => handleExportFormat('glb-character')}
+                  >
+                    <span className="viewer-dropdown-item-title">{t.titlebar.exportGlbCharacter}</span>
+                    <span className="viewer-dropdown-item-sub">{t.titlebar.exportGlbCharacterSub}</span>
+                  </button>
+                  <button
+                    className="viewer-dropdown-item"
+                    disabled={!canExportUrdf}
+                    onClick={() => handleExportFormat('urdf')}
+                  >
+                    <span className="viewer-dropdown-item-title">{t.titlebar.exportUrdf}</span>
+                    <span className="viewer-dropdown-item-sub">{t.titlebar.exportUrdfSub}</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

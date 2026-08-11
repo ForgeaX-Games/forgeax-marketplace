@@ -297,3 +297,68 @@ export function resolveSeatAgents(id: string, scope?: string | null): string[] {
 export function seatPrimaryStep(id: string): string | undefined {
   return resolveSeatAgents(id)[0];
 }
+
+/**
+ * 文件名前缀 → 产它的 step id。点一份产物要定位到节点视图的哪个节点，查这张表。
+ * 席位的 filePrefixes 只到席位粒度，定位要的是具体那一步，故单列。
+ */
+export const FILE_PREFIX_STEP: Readonly<Record<string, string>> = {
+  "00_": "preference_summary",
+  "01_": "preference_analysis",
+  "02_": "initial_plan",
+  "04_": "worldview",
+  "06_": "story_framework",
+  "07_": "outline_batch",
+  "08_": "detailed_outline",
+  "09_": "character_enrichment",
+  "10_": "item_database",
+  "11_": "plot_generation",
+  "12_": "script_generation",
+  "13_": "quest_generation",
+  "14_": "scene_generation",
+  "07a_": "structure_validation_l1",
+  "08a_": "structure_validation_l2",
+  "11a_": "structure_validation_l3",
+  "15_": "lore_generation",
+  "17_": "narrative_card",
+  "T0_": "tier_detection",
+  "T1_": "demand_analysis",
+  "01a_": "global_control_params",
+  "D0_": "core_concept",
+  "D1_": "system_architecture",
+  "D2_": "system_detail",
+  "D3_": "value_framework",
+  "D4_": "design_doc",
+  "D4a_": "narrative_requirements",
+  "15a_": "item_lore",
+  "B0_": "branch_tree",
+  "B1_": "dialogue_script",
+  "B2_": "cinematic_storyboard",
+  "B3_": "region_design",
+  "B4_": "emergent_event",
+  "B5_": "card_lore",
+  "B6_": "event_pool",
+  "V0_": "vn_logline",
+  "V1_": "vn_outline_acts",
+  "V1a_": "vn_character_bios",
+  "V1b_": "vn_key_items",
+  "V2_": "vn_scenes",
+  "V3_": "vn_beats",
+  "V4_": "vn_script_normalize",
+  "V5_": "vn_segment_confirm",
+  "V6_": "vn_branched_beats",
+  "V6a_": "vn_state_ledger",
+  "V7_": "vn_screenplay",
+  "V8_": "vn_storyboard",
+  "V9_": "vn_video_prompts"
+};
+
+/** 由 `<group>/<路径>` 反查产它的 step id；查不到返回 undefined。 */
+export function stepIdForFile(groupedPath: string): string | undefined {
+  const base = groupedPath.split("/").pop() ?? groupedPath;
+  // 长前缀优先：01a_ 必须先于 01_ 命中，否则全局控制参数会被认成偏好分析。
+  const hit = Object.keys(FILE_PREFIX_STEP)
+    .filter((p) => base.startsWith(p))
+    .sort((a, b) => b.length - a.length)[0];
+  return hit ? FILE_PREFIX_STEP[hit] : undefined;
+}

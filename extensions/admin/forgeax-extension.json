@@ -32,7 +32,7 @@
           "zh": "面板管理",
           "en": "Admin"
         },
-        "icon": "⚙",
+        "icon": "Settings",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -68,9 +68,9 @@
           "zh": "面板管理",
           "en": "Admin"
         },
-        "icon": "⚙",
+        "icon": "Settings",
         "order": 210,
-        "category": "workbench",
+        "category": "general",
         "pageType": {
           "extension": "self",
           "id": "admin"

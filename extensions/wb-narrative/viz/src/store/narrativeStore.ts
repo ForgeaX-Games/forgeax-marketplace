@@ -6,6 +6,7 @@ import type {
   NarrativeContext,
   StepStatus,
   TierModeInfo,
+  AnnounceStepGroup,
 } from "../types";
 import { PIPELINE_STEPS } from "../types";
 import { sendToHost } from "../lib/bridge";
@@ -15,7 +16,9 @@ import { computePhase, type NarrativePhase } from "./phase";
 import { t as tGlobal, tStepLabel } from "../i18n";
 import {
   computeAnchoredPipelines,
+  findCatalogItem,
   instantiateComposerNode,
+  ENTRY_CATALOG_ID,
   type ComposerCatalogItem,
   type ComposerNodeData,
   type ComposerEdgeData,
@@ -27,11 +30,38 @@ export type { NarrativePhase };
 
 export type ViewMode = "text" | "graph";
 
-/** 需求输入的三个入口（PRD v1.4 §5.2.1）。 */
+/**
+ * 叙事上传的三个入口：直接输入 / 标签选择 / 文件上传。
+ * 它们只长在节点视图的输入节点里——没有独立的上传面板。
+ */
 export type InputTab = "text" | "tags" | "file";
 
-/** 顶栏四段（PRD v1.4 §5.2）：需求输入 / 叙事路由 / 叙事工具 / 视图模式。 */
-export type NavTab = "input" | "routing" | "tools" | "view";
+/**
+ * 创作空间顶栏三段——它现在是纯粹的工具栏：
+ * 叙事策划专家组（按品类预制的多 agent 管线）/ 叙事单品助手团队（二十席基础 agent）/
+ * 自定义专属团队（用户投喂作品蒸馏出的私有助手）。
+ *
+ * 上传与路由不在这里，也不在任何悬空面板里：需求由节点视图的输入节点写，
+ * 或由外侧平台对话栏说；路由缺项交给后端推断。视图切换与缩放归底栏。
+ */
+export type NavTab = "experts" | "units" | "custom";
+
+/** 左栏两块：任务管理（每次对话开启的生成）与项目管理（用户自建的资产库）。 */
+export type LeftSection = "tasks" | "projects";
+
+/**
+ * 左栏被点开的那一份产物——右侧两个视图都跟着它走。
+ *
+ * 文本模式直接把这份文件的正文铺出来，节点模式则把画面挪到产它的那个节点上。
+ * 两种模式看的是同一份后端数据，所以选中态只有一个，放在 store 里跨 iframe 同步。
+ */
+export interface FocusedFile {
+  /** 产物所属的任务条目键，取内容时要用。 */
+  taskKey: string;
+  /** `<group>/<相对路径>`，与 `GET /files/:key` 的扁平清单同形。 */
+  path: string;
+  name: string;
+}
 
 /**
  * 路由选择草稿：创作空间顶栏「叙事路由 / 叙事工具」写的就是这一份。
@@ -113,6 +143,11 @@ export interface StepState {
   status: StepStatus;
   message?: string;
   data?: unknown;
+  /**
+   * 后端声明这一条只是运行横幅（管线配置那类），不对应任何 agent。
+   * 画布据此不为它画节点；进度条与运行日志照旧使用。
+   */
+  isMeta?: boolean;
 }
 
 /**
@@ -200,6 +235,11 @@ interface NarrativeState {
   runningProgress: StepState[];
   /** 后端 announce 帧下发的完整管线步骤序列；用于已知总步数但未渲染节点时的进度指示 */
   pipelineOrder: string[];
+  /**
+   * 步骤的专家归属（announce 帧下发）。画布用它把同属一条席位管线的步骤收进
+   * 一个可展开的专家容器；空数组表示无归属信息，退回一排同级节点。
+   */
+  stepGroups: AnnounceStepGroup[];
   /** 当前运行采用哪种渲染策略（决定 announce 帧是否预填节点） */
   runMode: RunMode;
   /**
@@ -276,21 +316,22 @@ interface NarrativeState {
    * 任一处切入口，另一处立刻跟随，两边不各持一份 useState。
    */
   inputTab: InputTab;
-  /**
-   * 需求输入编辑卡是否浮在创作空间上（设计稿 01 vs 03：空态只有水印，
-   * 点过顶栏「需求输入 → 某个入口」之后编辑卡才浮出来）。
-   */
-  inputEditorOpen: boolean;
+  /** 左栏点开的那份产物；null = 右侧照常显示本次运行的产物。 */
+  focusedFile: FocusedFile | null;
   /**
    * 顶栏当前展开的级联菜单；null 表示全收起。
    * 放 store 而非组件内，是为了让「点条目/选完品类就自动收起」这类跨组件动作可达。
    */
   openNavTab: NavTab | null;
+  /** 左栏当前所在的那一块：任务管理还是项目管理。 */
+  leftSection: LeftSection;
   /**
-   * 左栏被双击"进入"的项目条目键（PRD v1.4 §5.1）。
-   * 非空 = 左栏从项目列表切到项目内部（资源库 / 资产库）；单击选中条目不改这个值。
+   * 左栏被双击"进入"的任务条目键。
+   * 非空 = 从任务列表切到该任务内部（按类别铺开的产物）；单击选中条目不改这个值。
    */
-  openedProjectKey: string | null;
+  openedTaskKey: string | null;
+  /** 项目管理里被打开的那个项目 id；非空 = 从项目列表切到项目内部。 */
+  openedProjectId: string | null;
   routing: RoutingDraft;
   input: InputDraft;
   /**
@@ -318,6 +359,23 @@ interface NarrativeState {
   focusedChildNodeId: string | null;
   expandedStepId: string | null;
   collapsedGraphIds: string[];
+  /**
+   * 人手把某个节点从布局标准位拖开的位移（存差值，不存绝对坐标）。
+   *
+   * 布局是纯函数，每来一帧进度就重算一次；只有把"人的意图"单独记下来，
+   * 拖过的节点才不会在下一帧被算回原位。存差值而非绝对位，是因为新节点入场时
+   * 整排会平移，差值仍然成立，绝对位会错。
+   */
+  nodeDrags: Record<string, { dx: number; dy: number }>;
+  /**
+   * 上面那批位移是在哪个条目上拖的。
+   *
+   * 位移只对它所属的那张图有意义，换了条目就该作废。这里记一个归属键、
+   * 由读取方比对，而不是在每条"切条目"的路径上各清一次——切条目的入口有好几个
+   * （loadEntry、selectEntry 的几条快路、草稿恢复），靠每处都记得清，
+   * 漏一处就会看到上一条目的卡歪在这一条目的画布上。
+   */
+  nodeDragsEntryKey: string | null;
   /** STEP2 预演链路：左栏算好的"待生成"步骤序，写入 store 供右栏 PIPELINE STATUS 跨 iframe 读取（fresh-config 预览）。 */
   previewOrder: string[] | null;
   /** 当前预演是否为"自动"模式（planning + auto tier）；右栏据此显示"由 LLM 判定"提示。 */
@@ -333,10 +391,13 @@ interface NarrativeState {
   // ---- Actions: config ----
   setConfig: (tier: TierId | null, mode: ModeId | null, autoDetect: boolean) => void;
   setInputTab: (tab: InputTab) => void;
-  setInputEditorOpen: (open: boolean) => void;
+  setFocusedFile: (file: FocusedFile | null) => void;
   setOpenNavTab: (tab: NavTab | null) => void;
-  openProject: (entryKey: string) => void;
-  closeProject: () => void;
+  setLeftSection: (section: LeftSection) => void;
+  openTask: (entryKey: string) => void;
+  closeTask: () => void;
+  openVaultProject: (projectId: string) => void;
+  closeVaultProject: () => void;
   setRouting: (patch: Partial<RoutingDraft>) => void;
   setInput: (patch: Partial<InputDraft>) => void;
   setUploadedFiles: (next: UploadedItem[] | ((prev: UploadedItem[]) => UploadedItem[])) => void;
@@ -415,6 +476,13 @@ interface NarrativeState {
      * 缺失字段（旧 entry）时不会清掉，让 TierModeSelector 的本地 fallback 兜底。
      */
     config?: ActiveConfig;
+    /**
+     * 该条目的专家/席位嵌套结构（后端按品类 + 层级现算）。
+     *
+     * 没有它，历史回放的画布只能铺一排扁平卡片——跑的时候是三层嵌套、
+     * 事后打开却看不出谁属于哪个专家。旧后端不给这个字段时按空处理，退回扁平。
+     */
+    stepGroups?: AnnounceStepGroup[];
   }) => void;
   /** Phase 2: 单独更新 activeConfig 部分字段（保留双写过渡期手动打补丁的能力）。 */
   setActiveConfig: (patch: Partial<ActiveConfig> | null) => void;
@@ -464,6 +532,10 @@ interface NarrativeState {
   finishAnimation: (stepId?: string) => void;
   toggleGraphCollapse: (nodeId: string) => void;
   setCollapsedGraphIds: (ids: string[]) => void;
+  /** 累加某节点被拖动的位移（父子节点都按各自坐标系的差值记）。 */
+  nudgeNode: (nodeId: string, dx: number, dy: number) => void;
+  /** 「复原」：丢掉所有人手位移，回到布局标准位。 */
+  resetNodeDrags: () => void;
 
   reset: () => void;
   snapshot: () => string;
@@ -533,14 +605,21 @@ const INITIAL_INPUT: InputDraft = {
   uploadedFiles: [],
 };
 
+/**
+ * id → ctx 字段的探测表（纯 result 恢复时靠它认出"这一步跑过了"）。
+ *
+ * label 一列只是**离线兜底**：这种恢复路径没有 SSE、也没有 announce，
+ * 拿不到后端名字才用它。有后端名字的场合一律以后端为准（见 rebuildStepsFromResult）。
+ */
 const STEP_RESULT_MAP: Array<{ id: string; label: string; key: keyof NarrativeContext }> = [
   { id: "core_concept", label: "D0 核心概念", key: "core_concept" },
   { id: "system_architecture", label: "D1 系统架构", key: "system_architecture" },
   { id: "system_detail", label: "D2 玩法设计", key: "system_details" },
   { id: "value_framework", label: "D3 数值框架", key: "value_framework" },
   { id: "design_doc", label: "D4 策划案整合", key: "game_design_context" },
-  { id: "preference_summary", label: "偏好总结", key: "user_preference_summary" },
-  { id: "preference_analysis", label: "偏好分析", key: "user_preference_analysis" },
+  // 需求清单席的两步实现。名字随架构走：这一席叫需求清单，不再用四期前的「偏好」说法。
+  { id: "preference_summary", label: "需求提炼", key: "user_preference_summary" },
+  { id: "preference_analysis", label: "需求分析", key: "user_preference_analysis" },
   // 合并步骤：用 initial_story_outline 作为存在性探针，rebuildStepsFromResult 会
   // 把它当作单个 initial_plan 节点恢复（label = "初步方案"）。data 字段在前端
   // 渲染时通过 result.initial_story_outline / core_settings / plot_synopsis 自取。
@@ -623,7 +702,9 @@ function rebuildStepsFromResult(result: NarrativeContext, existingSteps: StepSta
     if (dataFromResult != null) {
       merged.push({
         id: s.id,
-        label: entry?.label ?? s.label,
+        // 传入的 label 来自后端（manifest / SSE 回放）时以它为准；
+        // 本地表只在没有后端名字时兜底，别拿旧常量把新名字盖回去。
+        label: s.label && s.label !== s.id ? s.label : (entry?.label ?? s.label),
         status: "completed",
         message: tGlobal("msg.stepDone", { label: tStepLabel(s.id, entry?.label ?? s.label) }),
         data: dataFromResult,
@@ -656,10 +737,12 @@ function rebuildStepsFromResult(result: NarrativeContext, existingSteps: StepSta
 function buildStepState(p: PipelineProgress): StepState {
   return {
     id: p.stepId ?? p.stage,
+    // 后端 stage 就是 STEP_REGISTRY 里的显示名，直接用；前端不再翻译一遍中文步名。
     label: p.stage,
     status: p.status,
     message: p.message,
     data: p.data,
+    isMeta: p.meta,
   };
 }
 
@@ -670,6 +753,10 @@ function splitCompositeStep(
   const msg = p.message ?? "";
   const isScriptPhase = msg.includes("剧本");
   const isScenePhase = msg.includes("场景");
+  // 复合步拆成两张卡时，两半的名字仍走 i18n / 静态步表，不在这里写死中文字面量：
+  // 环节改名时这里若留着旧字面量，画布上就会冒出一个别处都没有的名字。
+  const scriptLabel = tStepLabel("script_generation");
+  const sceneLabel = tStepLabel("scene_generation");
 
   if (p.status === "completed") {
     const data = p.data as Record<string, unknown> | undefined;
@@ -678,16 +765,16 @@ function splitCompositeStep(
     return upsertStep(
       upsertStep(steps, {
         id: "script_generation",
-        label: "L4 剧本生成",
+        label: scriptLabel,
         status: "completed",
-        message: tGlobal("msg.stepDone", { label: tStepLabel("script_generation", "L4 剧本生成") }),
+        message: tGlobal("msg.stepDone", { label: scriptLabel }),
         data: scriptData,
       }),
       {
         id: "scene_generation",
-        label: "场景生成",
+        label: sceneLabel,
         status: "completed",
-        message: tGlobal("msg.stepDone", { label: tStepLabel("scene_generation", "场景生成") }),
+        message: tGlobal("msg.stepDone", { label: sceneLabel }),
         data: sceneData,
       },
     );
@@ -697,7 +784,7 @@ function splitCompositeStep(
   if (isScriptPhase || !isScenePhase) {
     result = upsertStep(result, {
       id: "script_generation",
-      label: "L4 剧本生成",
+      label: scriptLabel,
       status: "running",
       message: msg,
     });
@@ -705,7 +792,7 @@ function splitCompositeStep(
     if (!existScene) {
       result = upsertStep(result, {
         id: "scene_generation",
-        label: "场景生成",
+        label: sceneLabel,
         status: "pending",
       });
     }
@@ -713,7 +800,7 @@ function splitCompositeStep(
   if (isScenePhase) {
     result = upsertStep(result, {
       id: "scene_generation",
-      label: "场景生成",
+      label: sceneLabel,
       status: "running",
       message: msg,
     });
@@ -762,6 +849,22 @@ function resolveEntryStatus(status: string | undefined): EntryStatus {
   return null;
 }
 
+/**
+ * 画布的开局：项目自带的那枚需求入口节点。
+ *
+ * 空画布不是"干净"，是"不知道从哪起手"——第一件事永远是说需求 + 选路由，
+ * 那就该有一枚节点已经摆在那里等着填，而不是让用户先从目录里找出该拖哪一个。
+ *
+ * id 写死而非随机：左右两个 iframe 各自建 store 时都要落到同一枚节点上，
+ * 否则 BroadcastChannel 同步完会留下两枚各自随机 id 的入口。
+ */
+const ENTRY_NODE_ID = "composer_entry_default";
+
+function seedComposerNodes(): ComposerNodeData[] {
+  const item = findCatalogItem(ENTRY_CATALOG_ID);
+  return item ? [instantiateComposerNode(item, { x: 96, y: 120 }, ENTRY_NODE_ID)] : [];
+}
+
 export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   // ---- Active branch ----
   activeEntryKey: null,
@@ -775,6 +878,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   runningRunId: null,
   runningProgress: [],
   pipelineOrder: [],
+  stepGroups: [],
   runMode: null,
   ipPreviewRunId: null,
   ipRunKey: null,
@@ -787,7 +891,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   pendingForkKind: null,
 
   // ---- Composer（无限画布编排） ----
-  composerNodes: [],
+  composerNodes: seedComposerNodes(),
   composerEdges: [],
 
   entryPipelines: [],
@@ -807,9 +911,11 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   // ---- UI state ----
   viewMode: "graph",
   inputTab: "text",
-  inputEditorOpen: false,
+  focusedFile: null,
   openNavTab: null,
-  openedProjectKey: null,
+  leftSection: "tasks",
+  openedTaskKey: null,
+  openedProjectId: null,
   routing: { ...INITIAL_ROUTING },
   input: { ...INITIAL_INPUT },
   entryDirty: false,
@@ -823,6 +929,8 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   focusedChildNodeId: null,
   expandedStepId: null,
   collapsedGraphIds: [],
+  nodeDrags: {},
+  nodeDragsEntryKey: null,
   previewOrder: null,
   previewIsAuto: false,
 
@@ -872,6 +980,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
         pendingFork: false,
         runningProgress: seededProgress,
         pipelineOrder: seededOrder,
+        stepGroups: [],
         runMode: "start",
         editDrafts: {},
         tier: tier ?? get().tier,
@@ -902,6 +1011,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       // 这样 announce 帧到达前 UI 就能显示"哪些步骤会保留 / 哪些会重跑"。
       runningProgress: preloadSteps ?? [],
       pipelineOrder: preloadSteps?.map((s) => s.id) ?? [],
+      stepGroups: [],
       runMode: "fork",
       editDrafts: {},
       tier: tier ?? get().tier,
@@ -926,6 +1036,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       //  叠加 SSE 时间序追加的新节点 → ui_copy 跑到 branch_tree 之前那种怪现象）。
       runningProgress: get().activeSteps.filter((s) => s.status === "completed"),
       pipelineOrder: [],
+      stepGroups: [],
       runMode: "resume",
       streamingChunks: {},
       streamPlayedSteps: [],
@@ -1030,13 +1141,20 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
 
   pushProgress: (p) =>
     set((state) => {
-      // pipeline_steps_announce — 三种 runMode 的渲染策略不同：
+      // pipeline_steps_announce — runMode 决定这一帧是否预填节点：
       //  - fork：announce 列表代表"完整管线全景"，预填全量节点（缺的补 pending），
       //          配合 startFork 已塞好的 preloadSteps 一起呈现"哪些保留 / 哪些重跑"。
-      //  - start / resume：渐进式渲染，announce 帧只把序列存到 pipelineOrder（备总步数 / 进度条用），
-      //                    runningProgress 不预填，等 step_start/step_done 增量加入节点。
+      //  - start：同样预填。渐进式渲染（只等 step_start 增量长节点）的代价是开跑那几十秒里
+      //          画布上只有零星两张卡，专家容器要等第二步开始才够两个成员而"迟到"出现——
+      //          用户看到的是"先跑了两步散节点，然后才蹦出专家"，与"选定专家跑他的管线"相反。
+      //          announce 帧本就是后端给的完整步序，照它先把待跑节点铺满更贴事实。
+      //  - resume：仍渐进。断点续跑的 announce 含已完成步，预填会把上次残留的 pending 一并塞回。
       //  - null（极端兜底，正常不会发生）：按旧逻辑全量预填，避免节点丢失。
-      if (p.type === "pipeline_steps_announce" && Array.isArray(p.steps) && p.steps.length > 0) {
+      if (p.type === "pipeline_steps_announce") {
+        // 空步序的 announce 帧照样要在这里吃掉。它是自动路由未定品类时的正常产物，
+        // 若放它落到下面的通用分支，stepId ?? stage 会取到字符串 "announce"，
+        // 画布上就会凭空长出一枚叫 announce 的节点——它不对应任何 agent。
+        if (!Array.isArray(p.steps) || p.steps.length === 0) return {};
         // 头部元节点保留：design_auto 第二帧 announce（D4 后重规划）只发
         // ["pipeline_config", ...]，会把首帧的 tier_router（品类识别）挤掉，导致
         // 该节点"出现又消失"。这里把上一帧已有、本帧缺失的头部元节点补回最前。
@@ -1057,14 +1175,30 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
           nextOrder = [...missingIp, ...nextOrder];
         }
         const patch: Partial<NarrativeState> = { pipelineOrder: nextOrder };
+        // 专家归属：只认本帧里真的出现在步序中的步，且非空才覆盖 —— design_auto 的
+        // 二补帧若某次没带分组，不该把首帧已画好的专家容器拆回一排同级节点。
+        if (Array.isArray(p.stepGroups) && p.stepGroups.length > 0) {
+          const inOrder = new Set(nextOrder);
+          const groups = p.stepGroups
+            .map((g) => ({ ...g, steps: g.steps.filter((id) => inOrder.has(id)) }))
+            .filter((g) => g.steps.length > 0);
+          if (groups.length > 0) patch.stepGroups = groups;
+        }
         const isFork = state.runMode === "fork";
+        const isStart = state.runMode === "start";
         const isLegacy = state.runMode === null;
-        if (isFork || isLegacy) {
+        if (isFork || isStart || isLegacy) {
           const existingMap = new Map(state.runningProgress.map((s) => [s.id, s]));
+          // 名字与"哪些是横幅"都来自本帧：后端 announce 已经把 STEP_REGISTRY 的显示名
+          // 和 BANNER_STEP_IDS 一并带来了，前端不猜、也不用自己的中文步名表当真值。
+          // 只有旧后端（不带这两个字段）才退回本地静态表。
+          const announcedNames = p.stepNames ?? {};
+          const metaIds = new Set(p.metaSteps ?? []);
           const announced: StepState[] = nextOrder.map((id) => existingMap.get(id) ?? {
             id,
-            label: id,
+            label: announcedNames[id] ?? PIPELINE_STEPS.find((ps) => ps.id === id)?.label ?? id,
             status: "pending" as const,
+            isMeta: metaIds.has(id) || undefined,
           });
           for (const s of state.runningProgress) {
             if (!nextOrder.includes(s.id)) announced.push(s);
@@ -1251,7 +1385,14 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       animatingStepId: null,
       // 切到其它 entry 时清 IP 预览旁路，避免历史条目被误判为"运行中"。
       ...(opts.entryKey === currentRunningKey ? {} : { ipPreviewRunId: null }),
-      ...(keepPipelineOrder ? {} : { pipelineOrder: [] as string[] }),
+      // pipelineOrder 是"正在跑"的东西，切条目必须清；stepGroups 描述的是这份产物
+      // 由谁产出，随条目一起回放，所以用后端给的那份覆盖（没给才退回扁平）。
+      ...(keepPipelineOrder
+        ? {}
+        : {
+            pipelineOrder: [] as string[],
+            stepGroups: opts.stepGroups ?? ([] as AnnounceStepGroup[]),
+          }),
     });
   },
 
@@ -1311,6 +1452,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       ipDnaGenerating: false,
       runningProgress: [],
       pipelineOrder: [],
+      stepGroups: [],
       runMode: null,
       editDrafts: {},
       focusedStepId: null,
@@ -1331,6 +1473,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       ipDnaGenerating: false,
       runningProgress: [],
       pipelineOrder: [],
+      stepGroups: [],
       activeSteps: [],
       activeResult: null,
       runMode: null,
@@ -1366,10 +1509,13 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   // ---- Actions: UI ----
   setViewMode: (mode) => set({ viewMode: mode }),
   setInputTab: (tab) => set({ inputTab: tab }),
-  setInputEditorOpen: (open) => set({ inputEditorOpen: open }),
+  setFocusedFile: (file) => set({ focusedFile: file }),
   setOpenNavTab: (tab) => set((s) => ({ openNavTab: s.openNavTab === tab ? null : tab })),
-  openProject: (entryKey) => set({ openedProjectKey: entryKey }),
-  closeProject: () => set({ openedProjectKey: null }),
+  setLeftSection: (section) => set({ leftSection: section }),
+  openTask: (entryKey) => set({ openedTaskKey: entryKey }),
+  closeTask: () => set({ openedTaskKey: null }),
+  openVaultProject: (projectId) => set({ openedProjectId: projectId }),
+  closeVaultProject: () => set({ openedProjectId: null }),
   setRouting: (patch) => set((s) => ({ routing: { ...s.routing, ...patch } })),
   setInput: (patch) => set((s) => ({ input: { ...s.input, ...patch } })),
   setUploadedFiles: (next) =>
@@ -1412,7 +1558,7 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
   resetFormDraft: () =>
     set({
       inputTab: "text",
-      inputEditorOpen: false,
+      focusedFile: null,
       routing: { ...INITIAL_ROUTING },
       input: { ...INITIAL_INPUT },
       entryDirty: false,
@@ -1522,6 +1668,24 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
 
   setCollapsedGraphIds: (ids) => set({ collapsedGraphIds: ids }),
 
+  nudgeNode: (nodeId, dx, dy) =>
+    set((state) => {
+      if (dx === 0 && dy === 0) return {};
+      // 换了条目就从空的开始记，不继承上一张图的位移。
+      const sameEntry = state.nodeDragsEntryKey === state.activeEntryKey;
+      const base = sameEntry ? state.nodeDrags : {};
+      const prev = base[nodeId];
+      return {
+        nodeDrags: {
+          ...base,
+          [nodeId]: { dx: (prev?.dx ?? 0) + dx, dy: (prev?.dy ?? 0) + dy },
+        },
+        nodeDragsEntryKey: state.activeEntryKey,
+      };
+    }),
+
+  resetNodeDrags: () => set({ nodeDrags: {}, nodeDragsEntryKey: null }),
+
   reset: () =>
     set({
       activeEntryKey: null,
@@ -1534,12 +1698,13 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       ipPreviewRunId: null,
       runningProgress: [],
       pipelineOrder: [],
+      stepGroups: [],
       runMode: null,
       inputConfirmed: false,
       routingConfigured: false,
       ipDnaGenerating: false,
       pendingFork: false,
-      composerNodes: [],
+      composerNodes: seedComposerNodes(),
       composerEdges: [],
       entryPipelines: [],
       activePipelineId: null,
@@ -1668,7 +1833,8 @@ export const useNarrativeStore = create<NarrativeState>((set, get) => ({
       ),
     })),
 
-  clearComposer: () => set({ composerNodes: [], composerEdges: [] }),
+  // 清空是"把我编排的东西撤掉"，不是"连入口一起撤掉"——入口是项目自带的，清完还得在。
+  clearComposer: () => set({ composerNodes: seedComposerNodes(), composerEdges: [] }),
 
   setEntryPipelines: (pipelines, activePipelineId) => {
     const activeId =
@@ -1870,6 +2036,7 @@ const SYNC_KEYS: Array<keyof NarrativeState> = [
   "pendingForkKind",
   "runningProgress",
   "pipelineOrder",
+  "stepGroups",
   "previewOrder",
   "previewIsAuto",
   "runMode",
@@ -1883,8 +2050,10 @@ const SYNC_KEYS: Array<keyof NarrativeState> = [
   "autoDetect",
   "viewMode",
   "inputTab",
-  "inputEditorOpen",
-  "openedProjectKey",
+  "focusedFile",
+  "leftSection",
+  "openedTaskKey",
+  "openedProjectId",
   "routing",
   "input",
   "entryDirty",
@@ -1955,7 +2124,7 @@ const CONTROL_KEYS: Array<keyof NarrativeState> = [
 
 const PIPELINE_KEYS: Array<keyof NarrativeState> = [
   "activeSteps", "activeEntryKey", "activeEntryStatus",
-  "pipelineOrder", "viewMode", "focusedStepId", "editDrafts",
+  "pipelineOrder", "stepGroups", "viewMode", "focusedStepId", "editDrafts",
 ];
 
 useNarrativeStore.subscribe((state, prevState) => {

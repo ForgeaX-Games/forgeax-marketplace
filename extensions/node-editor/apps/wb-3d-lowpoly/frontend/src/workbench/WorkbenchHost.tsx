@@ -4,6 +4,10 @@ import { Editor, usePipelineStore, useProjectStore } from '@forgeax/node-runtime
 import { HttpApiClient } from '../api/HttpApiClient.js'
 import { geometryValueFormatter } from './geometryValueFormatter.js'
 import { paneUrl } from './paneUrls.js'
+import type {
+  EditorAssetImportResultMessage,
+  ViewerDirectImportMessage,
+} from './protocol.js'
 import './WorkbenchHost.css'
 
 const geometryPortTypes = [
@@ -79,6 +83,108 @@ export function WorkbenchHost(): JSX.Element {
       '*',
     )
   }, [])
+
+  const pendingEditorImportsRef = useRef(new Map<string, {
+    resolve: (result: unknown) => void
+    reject: (error: Error) => void
+    timer: number
+  }>())
+
+  // The viewer is a child iframe of this workbench. The workbench forwards the
+  // bytes to the Studio WorkbenchRuntimeFrame, whose injected Editor bridge
+  // calls the live Gateway directly. No ToolRegistry lookup is involved.
+  useEffect(() => {
+    const onEditorImportResult = (event: MessageEvent): void => {
+      if (event.source !== window.parent) return
+      const data = event.data as Partial<EditorAssetImportResultMessage> | null
+      if (!data || data.type !== 'workbench:editor-asset-import-result' || typeof data.requestId !== 'string') return
+      const pending = pendingEditorImportsRef.current.get(data.requestId)
+      if (!pending) return
+      window.clearTimeout(pending.timer)
+      pendingEditorImportsRef.current.delete(data.requestId)
+      if (data.ok === true) pending.resolve(data.result)
+      else pending.reject(new Error(typeof data.error === 'string' ? data.error : 'Editor asset import failed'))
+    }
+
+    window.addEventListener('message', onEditorImportResult)
+    return () => {
+      window.removeEventListener('message', onEditorImportResult)
+      for (const pending of pendingEditorImportsRef.current.values()) {
+        window.clearTimeout(pending.timer)
+        pending.reject(new Error('Workbench closed before Editor asset import completed'))
+      }
+      pendingEditorImportsRef.current.clear()
+    }
+  }, [])
+
+  const requestEditorAssetImport = useCallback((input: {
+    requestId: string
+    destPath: string
+    sourceName: string
+    base64: string
+  }): Promise<unknown> => {
+    const parent = window.parent
+    if (!parent || parent === window) {
+      return Promise.reject(new Error('请在 Studio 工作台中打开 3D Lowpoly Generator 后再导入引擎'))
+    }
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        pendingEditorImportsRef.current.delete(input.requestId)
+        reject(new Error('Editor 没有在规定时间内响应导入请求'))
+      }, 120_000)
+      pendingEditorImportsRef.current.set(input.requestId, { resolve, reject, timer })
+      try {
+        parent.postMessage({ type: 'workbench:editor-asset-import', ...input }, '*')
+      } catch (error) {
+        window.clearTimeout(timer)
+        pendingEditorImportsRef.current.delete(input.requestId)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    })
+  }, [])
+
+  const handleViewerDirectImport = useCallback(async (event: MessageEvent): Promise<void> => {
+    if (event.source !== viewerIframeRef.current?.contentWindow) return
+    const data = event.data as Partial<ViewerDirectImportMessage> | null
+    if (!data || data.type !== 'workbench:viewer-direct-import') return
+    const target = viewerIframeRef.current?.contentWindow
+    if (!target || typeof data.requestId !== 'string') return
+    const reply = (ok: boolean, result?: unknown, error?: string): void => {
+      target.postMessage({
+        type: 'workbench:viewer-direct-import-result',
+        requestId: data.requestId,
+        ok,
+        ...(result === undefined ? {} : { result }),
+        ...(error === undefined ? {} : { error }),
+      }, '*')
+    }
+    if (
+      typeof data.directory !== 'string'
+      || typeof data.name !== 'string'
+      || typeof data.base64 !== 'string'
+    ) {
+      reply(false, undefined, '导入请求缺少目录、文件名或 GLB 数据')
+      return
+    }
+    try {
+      const directory = data.directory.replace(/[\\/]+$/u, '')
+      const sourceName = data.name.replace(/^[\\/]+/u, '')
+      const result = await requestEditorAssetImport({
+        requestId: data.requestId,
+        destPath: `${directory}/${sourceName}`,
+        sourceName,
+        base64: data.base64,
+      })
+      reply(true, result)
+    } catch (error) {
+      reply(false, undefined, error instanceof Error ? error.message : String(error))
+    }
+  }, [requestEditorAssetImport])
+
+  useEffect(() => {
+    window.addEventListener('message', handleViewerDirectImport)
+    return () => window.removeEventListener('message', handleViewerDirectImport)
+  }, [handleViewerDirectImport])
   useEffect(() => {
     const sync = (ids: string[]) => {
       selectionRef.current = ids

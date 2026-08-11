@@ -32,7 +32,7 @@
           "zh": "代码 / Code",
           "en": "Code Workbench"
         },
-        "icon": "</>",
+        "icon": "CodeXml",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -61,6 +61,22 @@
           "**/*.js",
           "**/*.css"
         ]
+      }
+    ],
+    "activities": [
+      {
+        "id": "code.launcher",
+        "title": {
+          "zh": "代码 / Code",
+          "en": "Code Workbench"
+        },
+        "icon": "CodeXml",
+        "order": 190,
+        "category": "general",
+        "pageType": {
+          "extension": "self",
+          "id": "code"
+        }
       }
     ]
   }

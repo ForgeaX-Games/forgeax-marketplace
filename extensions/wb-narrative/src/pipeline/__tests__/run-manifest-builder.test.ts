@@ -31,12 +31,41 @@ describe("buildRunManifest", () => {
     ]);
   });
 
-  // Phase-2 M9：/plan 必须自己走 mode 路由，前端不再补 D0-D4 前缀或维护路由步序镜像。
-  it("planning route prefixes the D0-D4 design chain (design_auto default)", () => {
-    const m = buildRunManifest({
+  /**
+   * 专家组的默认步序 = 该品类的席位管线，**不含** D0-D4。
+   * D0-D4 是游戏策划案（核心概念/系统架构/玩法设计/价值框架/策划文档整合），
+   * 不在 PRD v1.4 §3.2.3 的通用流程里；它只在调用方显式选 design_* 时出现。
+   */
+  it("planning route runs the seat pipeline, with no D0-D4 prefix", () => {
+    const ids = buildRunManifest({
       config: { genreCode: "rpg-jrpg", tier: "tier1", routeGroup: "planning" },
-    });
-    const ids = m.agents.map((a) => a.agentId);
+    }).agents.map((a) => a.agentId);
+    // 与专家组 CSV 第 7 列逐环节对应：需求清单 → 策划文档 → 世界观设定 → 角色档案
+    // → 道具清单 → 场景列表 → 故事大纲 → 故事结构 → 故事情节 → 任务 → 质检
+    expect(ids).toEqual([
+      "preference_summary",
+      "preference_analysis",
+      "initial_plan",
+      "worldview",
+      "character_enrichment",
+      "item_database",
+      "scene_generation",
+      "story_framework",
+      "outline_batch",
+      "detailed_outline",
+      "plot_generation",
+      "quest_generation",
+      "structure_check",
+    ]);
+    for (const d of ["core_concept", "system_architecture", "value_framework", "design_doc"]) {
+      expect(ids).not.toContain(d);
+    }
+  });
+
+  it("design_* still prefixes D0-D4, then joins the same seat pipeline", () => {
+    const ids = buildRunManifest({
+      config: { genreCode: "rpg-jrpg", tier: "tier1", routeGroup: "planning", mode: "design_auto" },
+    }).agents.map((a) => a.agentId);
     expect(ids.slice(0, 5)).toEqual([
       "core_concept",
       "system_architecture",
@@ -44,29 +73,35 @@ describe("buildRunManifest", () => {
       "value_framework",
       "design_doc",
     ]);
-    expect(ids).toContain("preference_summary");
-    expect(ids).toContain("worldview");
+    // 叙事段与纯叙事路径同源：两条路不该跑出不同步序
+    expect(ids.slice(5)).toEqual(
+      buildRunManifest({
+        config: { genreCode: "rpg-jrpg", tier: "tier1", routeGroup: "planning" },
+      }).agents.map((a) => a.agentId),
+    );
   });
 
-  // 选了层级但没选品类时，预览不能假装是 jrpg（tier4 真跑只有一步叙事卡）。
-  it("tier-only planning preview uses the tier-exclusive template", () => {
+  // 选了层级但没选品类时，按层级归到四条之一（层级本就是"这游戏有多少叙事"的度量）。
+  it("tier-only planning preview routes by tier alone", () => {
     const t4 = buildRunManifest({
       config: { tier: "tier4", genreCode: null, routeGroup: "planning" },
     }).agents.map((a) => a.agentId);
     expect(t4).toEqual([
-      "core_concept",
-      "system_architecture",
-      "system_detail",
-      "value_framework",
-      "design_doc",
+      "preference_summary",
+      "preference_analysis",
+      "initial_plan",
+      "worldview",
       "narrative_card",
     ]);
 
     const t3 = buildRunManifest({
       config: { tier: "tier3", genreCode: null, routeGroup: "planning" },
     }).agents.map((a) => a.agentId);
+    // 设定集线不产剧情树，交付物是设定集
     expect(t3).not.toContain("quest_generation");
+    expect(t3).not.toContain("plot_generation");
     expect(t3).toContain("worldview");
+    expect(t3).toContain("lore_generation");
   });
 
   it("static narrative mode uses modeConfig.steps verbatim (no design prefix)", () => {

@@ -10,6 +10,7 @@ import {
 } from "../narrative-pipelines.js";
 import { getSeat, seatCoveredBy, ASSISTANT_SEATS } from "../assistant-seats.js";
 import { STEP_REGISTRY } from "../step-registry.js";
+import { isExecutableStep } from "../pipeline.js";
 import { GENRE_TAXONOMY, findGenreByCode } from "../../knowledge/genre-taxonomy.js";
 import "../step-registrations.js";
 
@@ -76,6 +77,19 @@ describe("新架构四条叙事管线", () => {
       expect(steps.length, `${p.id} 展开为空`).toBeGreaterThan(0);
       for (const id of steps) {
         expect(STEP_REGISTRY.has(id), `${p.id} 的 ${id} 未注册`).toBe(true);
+      }
+    }
+  });
+
+  /**
+   * 登记 ≠ 跑得起来：run() 从 pipeline.ts 的 ALL_STEPS 取执行函数，
+   * 只在 STEP_REGISTRY 有元数据的步会被 resolveStepId 静默丢掉 ——
+   * 于是 /plan 预览里有这一步、实跑却没有（structure_check 就这么漏过一次）。
+   */
+  it("展开出的每个 step 在 run() 里真的可执行", () => {
+    for (const p of Object.values(NARRATIVE_PIPELINES)) {
+      for (const id of expandPipelineSteps(p)) {
+        expect(isExecutableStep(id), `${p.id} 的 ${id} 不在 ALL_STEPS，实跑会被静默跳过`).toBe(true);
       }
     }
   });

@@ -53,6 +53,13 @@ import {
   type StructurePlanItem,
 } from "../layer-threshold-config.js";
 import { deviationFromLegacy } from "../../types/index.js";
+import {
+  deriveTreeFields,
+  mergeTreeSemantics,
+  treeSemanticsPromptSpec,
+  type TreeSemantics,
+} from "../outline-tree.js";
+import { expansionPrinciples, TOPOLOGY_DISCIPLINE } from "../prompt/narrative-craft.js";
 
 // ─── Step 1: 结构规划 ───
 
@@ -67,7 +74,13 @@ interface DetailPlan {
   has_branch?: boolean;
 }
 
-const STEP1_SYSTEM = `你是叙事结构规划师。根据L1大纲节点，为每个大纲节点规划L2细纲子节点数量和分支。所有输出使用中文。`;
+const DETAIL_PRINCIPLES = expansionPrinciples({
+  upstream: "上游的大纲层",
+  here: "本层",
+  convergence: "新分岔必须聚合回来，或路由到上游已有的分支上",
+});
+
+const STEP1_SYSTEM = `你是叙事结构规划师。读上游的大纲节点，为每个节点规划它要再细分成几个节点、在哪里分岔。所有输出使用中文。`;
 
 export const DETAIL_PLAN_COMPOSER: PromptComposer = {
   stepId: "detailed_outline",
@@ -86,10 +99,11 @@ export const DETAIL_PLAN_COMPOSER: PromptComposer = {
     base: STEP1_SYSTEM,
     strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
+    craft: TOPOLOGY_DISCIPLINE,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints", "cot"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "craft", "style_guide", "constraints", "cot"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -100,10 +114,11 @@ export const DETAIL_FILL_COMPOSER: PromptComposer = {
     base: "你是叙事结构设计师。",
     strategy: STRATEGY_SLOT_BLOCK,
     ip_dna: IP_DNA_SLOT_BLOCK,
+    craft: TOPOLOGY_DISCIPLINE,
     style_guide: "{{SKILL.style_guide}}",
     constraints: "{{SKILL.constraints}}",
   },
-  systemBlockOrder: ["base", "strategy", "ip_dna", "style_guide", "constraints"],
+  systemBlockOrder: ["base", "strategy", "ip_dna", "craft", "style_guide", "constraints"],
   userBlockOrder: [],
   skillSlots: ["style_guide", "constraints"],
 };
@@ -129,12 +144,9 @@ function buildStep1Prompt(ctx: NarrativeContext): string {
 ${ctx.user_input}
 ${buildIpSourceReference(ctx)}
 
-## 核心设计原则
-- **命运必然论**：L0框架层预设所有命运分支和结局，细纲层在大纲框架内继续细化，不创造新结局
-- **有限突变论**：细纲层可产生独立新分支（Y轴可能性维度），但分支必须聚合或路由到上层预设分支
-- **双维度嵌套展开**：X轴顺序维度将L1的1个节点拆解为N个连续L2子节点；Y轴可能性维度在L2内部独立产生新分支
+${DETAIL_PRINCIPLES}
 
-## L1大纲节点
+## 上游大纲节点
 ${olDesc}
 
 ${nodeCountSection}
@@ -268,7 +280,7 @@ function buildSkeleton(plans: DetailPlan[]): SkeletonNode[] {
 
 // ─── Step 1.5: 分组内容填充 ───
 
-interface PartialFill {
+interface PartialFill extends TreeSemantics {
   node_id: string;
   name: string;
   narrative_stage: string;
@@ -307,14 +319,11 @@ async function step1_5_batchFill(
       `- [${s.node_id}] prev=${JSON.stringify(s.prev_node)} next=${JSON.stringify(s.next_node)} ${s.is_branch ? "(分支)" : ""} ${s.is_merge_point ? "(合并点)" : ""}`
     ).join("\n");
 
-    const prompt = `你是叙事结构设计师。请为以下L2细纲节点组填充详细内容。所有输出必须使用中文。
+    const prompt = `你是叙事结构设计师。请为以下一组细化节点填充详细内容。所有输出必须使用中文。
 
-## 核心设计原则
-- **命运必然论**：L0框架层预设所有命运分支和结局，细纲层在框架内细化，不创造新结局
-- **有限突变论**：细纲层可产生独立新分支（Y轴可能性维度），但必须聚合或路由到上层预设分支
-- **双维度嵌套展开**：X轴顺序维度将L1的1个节点拆解为N个连续L2子节点；Y轴可能性维度在L2内部独立产生新分支
+${DETAIL_PRINCIPLES}
 
-## 所属L1大纲节点
+## 所属大纲节点
 - ID: ${parentId}
 - 名称: ${parentName}
 - 叙事阶段: ${parentStage}
@@ -344,7 +353,7 @@ ${JSON.stringify(ctx.global_control_params ?? {})}
 
 ## 节点骨架
 ${skeletonDesc}
-
+${treeSemanticsPromptSpec(group)}
 ## 反套路偏差指导
 - 正偏差 → 意外/升华/惊喜转折
 - 负偏差 → 颠覆解构常规套路
@@ -397,7 +406,7 @@ ${skeletonDesc}
 
 // ─── Step 2: 全局补充 ───
 
-const STEP2_SYSTEM = `你是叙事结构设计师，请基于L1大纲和L2结构骨架，为内容不足的细纲节点补充详细内容。所有输出必须使用中文。
+const STEP2_SYSTEM = `你是叙事结构设计师，请基于上游大纲与已定的节点骨架，为内容不足的细化节点补充详细内容。所有输出必须使用中文。
 
 ## Layer2 细纲层 6 槽位
 - L2_01 局部场景: 场景细节
@@ -447,7 +456,7 @@ function buildStep2Prompt(ctx: NarrativeContext, skeleton: SkeletonNode[], fillM
 ${ctx.user_input}
 ${buildIpSourceReference(ctx)}
 
-## L1大纲
+## 上游大纲
 ${outlinesDigest}
 
 ## 世界观
@@ -596,10 +605,40 @@ export async function detailedOutlineBatch(
     }
   }
 
+  // 剧情树字段：与 L1 同一套归一化（拓扑推导 + 模型语义），见 outline-tree.ts
+  const treeFields = deriveTreeFields(skeleton);
+
+  /**
+   * 最优路径沿父链继承。
+   *
+   * 判据两条都要成立：父节点在最优路径上，且本节点不是某处分岔里没被选中的那一支。
+   * 只看自己会把「一条被放弃的支线里的顺流节点」也算成最优路径；只看父节点则会
+   * 把本层新开的分支全算进去。缺了这条链，feature list 2.3.8 要的「标出最符合
+   * 用户需求的那条链路」在 L2 就断了。
+   */
+  const l1OptimalById = new Map(outlines.map((o) => [o.node_id, o.on_optimal_path !== false]));
+  const optimalBranchPick = new Map<string, string>();
+  for (const skel of skeleton) {
+    if (skel.prev_node.length !== 1) continue;
+    const siblings = skeleton.filter(
+      (s) => s.prev_node.length === 1 && s.prev_node[0] === skel.prev_node[0],
+    );
+    // 同一分岔的多支里取首支为最优（与 L1 缺省 optimal_branch="a" 同口径）
+    if (siblings.length > 1) optimalBranchPick.set(skel.prev_node[0]!, siblings[0]!.node_id);
+  }
+  const onOptimalPath = (skel: SkeletonNode): boolean => {
+    if (l1OptimalById.get(skel.parent_id) === false) return false;
+    const pick = skel.prev_node.length === 1
+      ? optimalBranchPick.get(skel.prev_node[0]!)
+      : undefined;
+    return pick === undefined || pick === skel.node_id;
+  };
+
   // 合并骨架 + 内容
   const detailedOutlines: DetailedOutlineNode[] = skeleton.map((skel) => {
     const fill = fillMap.get(skel.node_id);
     const se = fill?.story_elements;
+    const tree = mergeTreeSemantics(treeFields.get(skel.node_id)!, fill);
 
     return {
       node_id: skel.node_id,
@@ -609,6 +648,11 @@ export async function detailedOutlineBatch(
       narrative_stage: fill?.narrative_stage ?? "rising",
       prev_node: skel.prev_node,
       next_node: skel.next_node,
+      on_optimal_path: onOptimalPath(skel),
+      node_function: tree.node_function,
+      edges: tree.edges,
+      branch_type: tree.branch_type,
+      ending: tree.ending,
       story_elements: {
         plot: {
           cause: se?.plot?.cause ?? "",

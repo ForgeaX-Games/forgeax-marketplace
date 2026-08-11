@@ -14,7 +14,7 @@
     "name": "forgeax",
     "email": "dev@forgeax.local"
   },
-  "icon": "🎬",
+  "icon": "Clapperboard",
   "keywords": [
     "reel",
     "fmv",
@@ -103,7 +103,7 @@
           "zh": "影游工坊",
           "en": "Reel Studio"
         },
-        "icon": "🎬",
+        "icon": "Clapperboard",
         "cardinality": "singleton",
         "restorePolicy": "project",
         "layout": {
@@ -177,9 +177,9 @@
           "zh": "影游工坊",
           "en": "Reel Studio"
         },
-        "icon": "🎬",
+        "icon": "Clapperboard",
         "order": 160,
-        "category": "workbench",
+        "category": "general",
         "pageType": {
           "extension": "self",
           "id": "reel"

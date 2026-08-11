@@ -12,7 +12,11 @@ bun.lock
 # 大数据/运行产物：不进 git
 # knowledge_base 含 embeddings/语料(单文件>100MB 超 GitHub 上限)，分发策略(git-lfs/release)另议
 knowledge_base/
-input/
+# 只忽略仓根的 input/（IP 素材投放口）。
+# 不加前导斜杠会匹配任意层级的 input/ 目录——曾因此把
+# viz/src/components/input/RequirementInputPanel.tsx 静默吞掉：
+# 本地能跑，推上去别人构建即断在找不到该模块。
+/input/
 .ipdna-jobs/
 _tmp_*.ts
 _tmp_*.mjs

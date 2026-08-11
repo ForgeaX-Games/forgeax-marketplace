@@ -66,6 +66,13 @@ export function useWorkbenchActions() {
   const resume = useCallback(() => requestCommand("resume"), [requestCommand]);
   const regenerate = useCallback(() => requestCommand("regenerate"), [requestCommand]);
 
+  /**
+   * 叙事路由不再是开跑的前置条件：输入确认了就能开始，没选的轴交给后端自行判定
+   * （handleStart 走 autoDetect，本就支持）。头脑风暴阶段没人想先定题材和体量，
+   * 硬卡在 routed 只会逼用户乱点一个，反而把错的偏好焊进这一跑。
+   */
+  const hasRequirement = phase === "routed" || phase === "input";
+
   return {
     phase,
     primaryAction,
@@ -74,7 +81,8 @@ export function useWorkbenchActions() {
     isGenerating: isRunning || ipDnaRunning,
     isHeavyUpload,
     ipCanGenerate,
-    canStart: phase === "routed" && !busy && !(isHeavyUpload && !ipCanGenerate),
+    hasRequirement,
+    canStart: hasRequirement && !busy && !(isHeavyUpload && !ipCanGenerate),
     start,
     cancel,
     resume,

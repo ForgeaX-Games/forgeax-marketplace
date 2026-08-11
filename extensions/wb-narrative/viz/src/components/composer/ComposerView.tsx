@@ -1,13 +1,14 @@
-import { useCallback, useRef, useState } from "react";
-import { Play, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { ReactFlowProvider } from "reactflow";
 import { useNarrativeStore } from "../../store/narrativeStore";
 import { startEntryPipelines, planPipelines, saveEntry } from "../../hooks/useNarrativeStream";
 import { getLocale, useT } from "../../i18n";
 import type { TierId, ModeId } from "../../types";
-import { composerIpGenerators, type AnchoredPipeline } from "../../composer/composerCatalog";
+import { composerIpGenerators, isEntryNode, type AnchoredPipeline } from "../../composer/composerCatalog";
 import { ComposerCanvas } from "./ComposerCanvas";
 import { CenterHero } from "../panels/CenterHero";
+import { clearComposerRunner, registerComposerRunner } from "../../lib/composerRun";
 
 /**
  * 无限画布编排视图（"未生成"态取代只读节点视图）。
@@ -35,6 +36,9 @@ interface ResolvedPipelineConfig {
   mode?: ModeId;
   genreCode?: string;
   complexity?: number;
+  /** 三轴中用户可选的两轴；结构轴由后端按类型+题材推导，前端不传。 */
+  storyType?: string;
+  storyTheme?: string;
   pipelineTemplate?: string;
   autoDetect: boolean;
   /** 输入节点走的是 IP 文件链，需转交 IP 生成器而非文本管线。 */
@@ -68,7 +72,13 @@ function resolvePipelineConfig(anchored: AnchoredPipeline): ResolvedPipelineConf
     tier =
       ((routing?.config.tier as TierId | null | undefined) ?? expert?.tier ?? undefined) ||
       undefined;
-    genreCode = (routing?.config.genreCode as string | undefined) || undefined;
+    // 品类住在专家节点上——选哪个专家就是选哪个品类。需求入口不再有品类字段，
+    // 所以这里必须落到专家节点的 config，否则品类丢失 → 后端按 tier 兜到
+    // design_auto，跑出来是全量策划的 D0-D4 而不是该专家的叙事管线。
+    genreCode =
+      ((routing?.config.genreCode as string | undefined) ||
+        (expert?.config.genreCode as string | undefined)) ||
+      undefined;
     autoDetect = !genreCode;
   }
 
@@ -80,6 +90,9 @@ function resolvePipelineConfig(anchored: AnchoredPipeline): ResolvedPipelineConf
     mode,
     genreCode,
     complexity: (routing?.config.complexity as number | undefined) ?? undefined,
+    // 三轴住在需求入口节点上（它兼任 routingNode）；独立路由节点没有这两轴，取到 undefined 即「自动」。
+    storyType: (routing?.config.storyType as string | null | undefined) || undefined,
+    storyTheme: (routing?.config.storyTheme as string | null | undefined) || undefined,
     pipelineTemplate: expert?.pipelineTemplate,
     autoDetect,
     isFileFlow: (anchored.inputNode.config.inputTab as string) === "file",
@@ -88,6 +101,8 @@ function resolvePipelineConfig(anchored: AnchoredPipeline): ResolvedPipelineConf
 
 /** 管线是否连到了可执行节点（否则只 plan 不 start）。 */
 function hasExecutableNode(anchored: AnchoredPipeline): boolean {
+  // 入口节点自带路由，单它一枚就是一条能跑的管线——不必再往后接点什么才算数。
+  if (isEntryNode(anchored.inputNode)) return true;
   return anchored.orderedNodes.some(
     (n) =>
       n.category === "routing" || n.category === "expert" || n.category === "engineer",
@@ -159,6 +174,8 @@ export function ComposerView() {
             tier: r.tier ?? null,
             mode: r.mode ?? null,
             genreCode: r.genreCode ?? null,
+            storyType: r.storyType ?? null,
+            storyTheme: r.storyTheme ?? null,
             complexity: r.complexity,
             routeGroup: r.routeGroup,
             pipelineTemplate: r.pipelineTemplate,
@@ -185,6 +202,8 @@ export function ComposerView() {
           tier: primary.tier ?? null,
           mode: primary.mode ?? null,
           genreCode: primary.genreCode ?? null,
+          storyType: primary.storyType ?? null,
+          storyTheme: primary.storyTheme ?? null,
           complexity: primary.complexity,
           routeGroup: primary.routeGroup,
           pipelineTemplate: primary.pipelineTemplate,
@@ -205,6 +224,8 @@ export function ComposerView() {
         tier: primary.tier,
         mode: primary.mode,
         genreCode: primary.genreCode,
+        storyType: primary.storyType,
+        storyTheme: primary.storyTheme,
         complexity: primary.complexity,
         locale: getLocale() === "en" ? "en" : "zh",
         pipelines: planned.pipelines,
@@ -230,6 +251,8 @@ export function ComposerView() {
           tier: cfg?.tier,
           mode: cfg?.mode,
           genreCode: cfg?.genreCode ?? null,
+          storyType: cfg?.storyType ?? null,
+          storyTheme: cfg?.storyTheme ?? null,
           complexity: cfg?.complexity,
           routeGroup: cfg?.routeGroup,
           autoDetect: cfg?.autoDetect,
@@ -281,20 +304,17 @@ export function ComposerView() {
     }
   }, [getAnchoredPipelines, storeStartNewRun, setEntryPipelines, setListExpanded, setPipelineRuns, t]);
 
+  // 开始键归底栏那条居中工具条，画布只把动作交出去；两处各摆一个开始键会让用户犯迷糊。
+  useEffect(() => {
+    registerComposerRunner({ run: () => void handleRun(), canRun: inputCount > 0, starting });
+    return clearComposerRunner;
+  }, [handleRun, inputCount, starting]);
+
   return (
     <div className="composer-view">
-      {/* 空画布不摆工具条：设计稿 01 的空态只有水印。有节点了才需要"跑/清空"。 */}
+      {/* 空画布不摆工具条：设计稿 01 的空态只有水印。有节点了才需要"清空 + 提示"。 */}
       {composerNodes.length > 0 && (
         <div className="composer-view__toolbar">
-          <button
-            type="button"
-            className="fx-btn fx-btn--primary"
-            onClick={handleRun}
-            disabled={starting}
-          >
-            <Play size={13} aria-hidden />
-            {t("composer.run")}
-          </button>
           <button
             type="button"
             className="fx-btn fx-btn--danger"
