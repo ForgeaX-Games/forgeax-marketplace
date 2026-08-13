@@ -13,8 +13,10 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureWorkspacePackages } from '../../../scripts/ensure-workspace-packages.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
+ensureWorkspacePackages(root)
 const shell = process.platform === 'win32'
 
 // vendor/dist holds the geometry DSL types the backend batteries import at

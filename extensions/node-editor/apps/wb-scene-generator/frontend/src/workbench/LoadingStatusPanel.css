@@ -1,12 +1,10 @@
-/* Project-switch / renderer-load progress panel. Anchored bottom-left of the
-   renderer pane (`.scene-pane` is position:relative) so it never covers the
-   center of the preview, and never blocks pointer events outside its own
-   footprint. */
+/* Project-switch / renderer-load progress panel above the zoom controls in the
+   renderer pane (`.scene-pane` is position:relative). */
 
 .load-status {
   position: absolute;
-  left: 10px;
-  bottom: 10px;
+  bottom: 46px;
+  left: 8px;
   z-index: 20;
   max-width: min(280px, calc(100% - 20px));
   font-size: 12px;

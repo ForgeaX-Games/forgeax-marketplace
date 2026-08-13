@@ -90,7 +90,7 @@ function ensureTree(value: unknown): DataTree<unknown> {
   if (DataTree.isDataTree(value)) {
     return DataTree.fromEntries((value as { toJSON(): ReadonlyArray<DataTreeEntry<unknown>> }).toJSON())
   }
-  if (Array.isArray(value) && value.length > 0 && isEntryShape(value[0])) {
+  if (Array.isArray(value) && value.every(isEntryShape)) {
     return DataTree.fromJSON(value as DataTreeEntry<unknown>[])
   }
   if (value === undefined) return DataTree.empty<unknown>()

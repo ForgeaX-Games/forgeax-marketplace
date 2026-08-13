@@ -111,6 +111,13 @@ export interface ToggleEditorMessage {
   type: 'workbench:toggle-editor'
 }
 
+/** Renderer pane → host: close the floating editor after an outside-canvas click. */
+export interface RequestCloseEditorMessage {
+  type: 'workbench:request-close-editor'
+  /** Explicit competing surfaces may close a pinned editor; outside clicks may not. */
+  force?: boolean
+}
+
 /** Renderer pane → host: query whether the floating editor is visible. */
 export interface QueryEditorVisibilityMessage {
   type: 'workbench:query-editor-visibility'
@@ -144,6 +151,42 @@ export interface PreviewCapturedMessage {
   error?: string
 }
 
+/** Renderer → host: pass a generated GLB to Studio's Editor asset-import bridge. */
+export interface RendererDirectImportMessage {
+  type: 'workbench:renderer-direct-import'
+  requestId: string
+  directory: string
+  name: string
+  base64: string
+}
+
+/** Host → renderer: result of the corresponding direct Studio asset import. */
+export interface RendererDirectImportResultMessage {
+  type: 'workbench:renderer-direct-import-result'
+  requestId: string
+  ok: boolean
+  result?: unknown
+  error?: string
+}
+
+/** Workbench → Studio host: import a source asset into the active game project. */
+export interface EditorAssetImportMessage {
+  type: 'workbench:editor-asset-import'
+  requestId: string
+  destPath: string
+  sourceName: string
+  base64: string
+}
+
+/** Studio host → workbench: outcome of an Editor asset import request. */
+export interface EditorAssetImportResultMessage {
+  type: 'workbench:editor-asset-import-result'
+  requestId: string
+  ok: boolean
+  result?: unknown
+  error?: string
+}
+
 /** Renderer → host: resolve a clicked SceneGraph/baked layer back to graph + source. */
 export interface PreviewLineageSelectionMessage {
   type: 'workbench:preview-lineage-selection'
@@ -164,11 +207,24 @@ export function workbenchTargetOrigin(): string {
   return typeof window !== 'undefined' ? window.location.origin : ''
 }
 
+/** Origin of the Studio window embedding this workbench. In local development
+ * the plugin runs on its own port, so this can differ from window.location. */
+export function workbenchParentOrigin(): string {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return ''
+  if (!document.referrer) return window.location.origin
+  try {
+    return new URL(document.referrer).origin
+  } catch {
+    return window.location.origin
+  }
+}
+
 export type WorkbenchMessage =
   | RequestFocusMessage
   | QueryFocusMessage
   | FocusChangedMessage
   | ToggleEditorMessage
+  | RequestCloseEditorMessage
   | QueryEditorVisibilityMessage
   | EditorVisibilityChangedMessage
   | StatusReportMessage
@@ -182,6 +238,10 @@ export type WorkbenchMessage =
   | RestoreLayoutMessage
   | CapturePreviewMessage
   | PreviewCapturedMessage
+  | RendererDirectImportMessage
+  | RendererDirectImportResultMessage
+  | EditorAssetImportMessage
+  | EditorAssetImportResultMessage
   | PreviewLineageSelectionMessage
   | LineageHighlightMessage
 

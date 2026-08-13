@@ -9,16 +9,17 @@
 }
 
 /* Matches the legacy renderer toolbar AND the kernel editor titlebar: fixed
-   32px height (var(--titlebar-height)), titlebar gradient (#050806 → #0b120d),
+   shared height, titlebar gradient (#050806 → #0b120d),
    hairline bottom border, horizontal-only padding via var(--spacing-md). The
    prior 6px vertical padding made it noticeably taller/off-color than legacy. */
 .renderer-toolbar {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
-  height: var(--titlebar-height, 32px);
-  min-height: var(--titlebar-height, 32px);
-  padding: 0 var(--spacing-md, 12px);
+  height: var(--scene-titlebar-height, 30px);
+  min-height: var(--scene-titlebar-height, 30px);
+  padding: 0 var(--scene-titlebar-padding-inline, 12px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: linear-gradient(
     180deg,
@@ -48,16 +49,12 @@
 }
 
 .renderer-toolbar__title {
-  font-weight: 700;
-  font-size: var(--font-size-sm, 0.875rem);
+  color: var(--scene-titlebar-color);
+  font-weight: var(--scene-titlebar-title-weight, 700);
+  font-size: var(--scene-titlebar-title-size, 14px);
   letter-spacing: 0.01em;
   white-space: nowrap;
   padding-right: 2px;
-  /* Lime → off-white gradient text, matching the legacy Preview title. */
-  background: linear-gradient(135deg, #f5ffd1 0%, var(--color-accent, #d4ff48) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 
 /* Renderer status pill ("Ready") — idle treatment from the legacy status-badge. */
@@ -421,7 +418,7 @@
 .renderer-preview-label {
   position: absolute;
   z-index: 17;
-  top: 8px;
+  bottom: 8px;
   left: 8px;
   display: inline-flex;
   width: max-content;
@@ -449,11 +446,6 @@
   border-radius: 50%;
   background: var(--color-accent, #d4ff48);
   box-shadow: 0 0 7px rgba(212, 255, 72, 0.58);
-}
-
-.renderer-preview-label__title {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .renderer-preview-label__zoom {
@@ -493,11 +485,11 @@
 .renderer-drawer-dock {
   position: absolute;
   z-index: 18;
-  top: calc(16px + var(--renderer-preview-label-height));
+  top: 8px;
   bottom: auto;
   left: 8px;
   display: flex;
-  max-height: calc(100% - var(--renderer-preview-label-height) - 24px);
+  max-height: calc(100% - 16px);
   align-items: flex-start;
   pointer-events: none;
 }
@@ -530,9 +522,11 @@
   background: rgba(255, 255, 255, 0.045);
   cursor: pointer;
   transition:
-    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 180ms ease,
-    box-shadow 180ms ease;
+    color var(--scene-motion-duration, 220ms) ease,
+    border-color var(--scene-motion-duration, 220ms) ease,
+    transform var(--scene-motion-duration, 220ms) var(--scene-motion-ease),
+    background-color var(--scene-motion-duration, 220ms) ease,
+    box-shadow var(--scene-motion-duration, 220ms) ease;
 }
 
 .renderer-drawer-pill__button svg {
@@ -548,10 +542,13 @@
 }
 
 .renderer-drawer-pill__button.is-active {
+  transform: scale(1.08);
   color: var(--color-accent, #d4ff48);
   border-color: rgba(212, 255, 72, 0.58);
   background: rgba(212, 255, 72, 0.16);
-  box-shadow: 0 0 0 3px rgba(212, 255, 72, 0.2);
+  box-shadow:
+    0 0 0 3px rgba(212, 255, 72, 0.2),
+    0 0 16px rgba(212, 255, 72, 0.16);
 }
 
 .renderer-drawer-pill__divider {
@@ -590,10 +587,12 @@
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.42);
   pointer-events: none;
   transition:
-    width 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    margin-left 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 180ms ease,
-    border-width 0ms linear 260ms;
+    width var(--scene-motion-duration, 220ms) var(--scene-motion-ease),
+    margin-left var(--scene-motion-duration, 220ms) var(--scene-motion-ease),
+    opacity var(--scene-motion-duration, 220ms) ease,
+    border-color var(--scene-motion-duration, 220ms) ease,
+    box-shadow var(--scene-motion-duration, 220ms) ease,
+    border-width 0ms linear var(--scene-motion-duration, 220ms);
 }
 
 .renderer-drawer-panel.is-compact {
@@ -611,10 +610,17 @@
   opacity: 1;
   pointer-events: auto;
   transition:
-    width 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    margin-left 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 180ms ease 40ms,
+    width var(--scene-motion-duration, 220ms) var(--scene-motion-ease),
+    margin-left var(--scene-motion-duration, 220ms) var(--scene-motion-ease),
+    opacity var(--scene-motion-duration, 220ms) ease 30ms,
+    border-color var(--scene-motion-duration, 220ms) ease,
+    box-shadow var(--scene-motion-duration, 220ms) ease,
     border-width 0ms;
+  border-color: rgba(212, 255, 72, 0.34);
+  box-shadow:
+    0 16px 36px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(212, 255, 72, 0.08),
+    0 0 24px rgba(212, 255, 72, 0.06);
 }
 
 .renderer-drawer-panel__inner {
@@ -633,6 +639,15 @@
   color: var(--color-text-primary, #e6e8ec);
   scrollbar-width: thin;
   scrollbar-color: rgba(212, 255, 72, 0.45) transparent;
+}
+
+.renderer-drawer-panel.is-open .renderer-drawer-panel__inner {
+  animation: renderer-drawer-content-in var(--scene-motion-duration, 220ms) ease 45ms both;
+}
+
+@keyframes renderer-drawer-content-in {
+  from { opacity: 0.2; }
+  to { opacity: 1; }
 }
 
 .renderer-drawer-panel__resize {
@@ -687,11 +702,64 @@
 }
 
 .renderer-drawer-panel__title {
-  padding: 11px 12px 9px;
-  border-bottom: 1px solid var(--color-border, #2a2e36);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: var(--scene-titlebar-height, 30px);
+  min-height: var(--scene-titlebar-height, 30px);
+  padding: 0 var(--scene-titlebar-padding-inline, 12px);
+  border-bottom: 1px solid var(--scene-titlebar-border);
+  color: var(--scene-titlebar-color);
+  font-size: var(--scene-titlebar-title-size, 14px);
+  font-weight: var(--scene-titlebar-title-weight, 700);
+}
+
+.renderer-drawer-panel__pin {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-text-secondary, #9aa1ad);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--scene-motion-duration, 220ms) ease,
+    border-color var(--scene-motion-duration, 220ms) ease,
+    background var(--scene-motion-duration, 220ms) ease,
+    box-shadow var(--scene-motion-duration, 220ms) ease;
+}
+
+.renderer-drawer-panel__pin svg {
+  transform: scale(1);
+  transition: transform var(--scene-motion-duration, 220ms) var(--scene-motion-ease);
+}
+
+.renderer-drawer-panel__pin:hover {
+  color: var(--color-text-primary, #e6e8ec);
+  border-color: rgba(212, 255, 72, 0.3);
+  background: rgba(212, 255, 72, 0.08);
+}
+
+.renderer-drawer-panel__pin.is-active {
   color: var(--color-accent, #d4ff48);
-  font-size: 13px;
-  font-weight: 700;
+  border-color: rgba(212, 255, 72, 0.52);
+  background: rgba(212, 255, 72, 0.14);
+  box-shadow: 0 0 0 3px rgba(212, 255, 72, 0.12);
+}
+
+.renderer-drawer-panel__pin.is-active svg {
+  transform: scale(1.12);
+}
+
+.renderer-drawer-panel__pin:focus-visible {
+  outline: 2px solid var(--color-accent, #d4ff48);
+  outline-offset: 1px;
 }
 
 .renderer-effects-section {
@@ -825,6 +893,61 @@
 .renderer-drawer-export-result.is-error {
   border-color: rgba(255, 96, 96, 0.4);
   color: #ffb4b4;
+}
+
+.renderer-studio-glb-dialog {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  margin: 8px 10px 0;
+  padding: 12px 30px 12px 12px;
+  border: 1px solid rgba(var(--color-accent-rgb, 212, 255, 72), 0.34);
+  border-radius: var(--radius-md, 8px);
+  background: rgba(15, 21, 16, 0.96);
+  color: var(--color-text-primary, #e6e8ec);
+}
+
+.renderer-studio-glb-dialog > p {
+  margin: 0;
+  color: var(--color-text-secondary, #9aa1ad);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.renderer-studio-glb-dialog__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.renderer-studio-glb-dialog__presets button {
+  padding: 3px 6px;
+  border: 1px solid var(--color-border, #2a2e36);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--color-text-secondary, #9aa1ad);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.renderer-studio-glb-dialog__presets button:hover:not(:disabled) {
+  border-color: var(--color-accent, #d4ff48);
+  color: var(--color-accent, #d4ff48);
+}
+
+.renderer-studio-glb-dialog__status {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.renderer-studio-glb-dialog__status.is-success {
+  color: var(--color-accent, #d4ff48);
+}
+
+.renderer-studio-glb-dialog__status.is-error {
+  color: #fecaca;
 }
 
 .renderer-layers__add.is-active {
@@ -1188,7 +1311,7 @@
 .renderer-layers__section-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 6px 8px 4px;
   font-size: 10px;
   font-weight: 600;

@@ -10,6 +10,18 @@ import { fileURLToPath } from 'node:url'
 // Production paths (serve-dist / .app) never load this config, so they keep
 // consuming dist. Exact-match (`$`) so CSS subpaths (already → src) are untouched.
 const kernel = (p: string) => fileURLToPath(new URL(`../../../packages/${p}`, import.meta.url))
+// The kernel is source-aliased from a sibling workspace package. Pin React to
+// this app's dependency location as well: Vite's `dedupe` cannot always collapse
+// the two pnpm symlink ancestry chains during linked-source HMR, which gives the
+// renderer and App different React dispatchers ("Invalid hook call").
+const appDependency = (p: string) => fileURLToPath(new URL(`node_modules/${p}`, import.meta.url))
+const reactAlias = [
+  { find: /^react$/, replacement: appDependency('react/index.js') },
+  { find: /^react\/jsx-runtime$/, replacement: appDependency('react/jsx-runtime.js') },
+  { find: /^react\/jsx-dev-runtime$/, replacement: appDependency('react/jsx-dev-runtime.js') },
+  { find: /^react-dom$/, replacement: appDependency('react-dom/index.js') },
+  { find: /^react-dom\/client$/, replacement: appDependency('react-dom/client.js') },
+]
 const kernelAlias = [
   { find: /^@forgeax\/node-runtime-react\/editor$/, replacement: kernel('node-runtime-react/src/editor/index.ts') },
   { find: /^@forgeax\/node-runtime-react\/themes$/, replacement: kernel('node-runtime-react/src/themes/index.ts') },
@@ -42,7 +54,7 @@ export default defineConfig(({ mode }) => ({
         }
       : undefined,
   resolve: {
-    alias: kernelAlias,
+    alias: [...reactAlias, ...kernelAlias],
     // Single React/@xyflow/react/zustand instance across app + kernel source — when
     // the kernel is served from source its hooks must share the app's React.
     dedupe: ['react', 'react-dom', '@xyflow/react', 'zustand'],

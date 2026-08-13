@@ -2,6 +2,7 @@ import type { GraphEdge, GraphNode, KernelGraphV1, NodeGroup, Op } from '@forgea
 
 import { createSceneDiagnostic } from './diagnostics.js'
 import { stableEntityId } from './identity.js'
+import { literalValue, literalValueForAccess } from './literal-datatree.js'
 import type {
   CompiledSceneModule,
   ContractRegistry,
@@ -24,19 +25,6 @@ interface CompiledEntity {
   runtimeEdgeIds: string[]
   runtimeOrigins?: Record<string, string>
   runtimeEdgeOrigins?: Record<string, string>
-}
-
-function literalValue(expression: SceneExpression): unknown {
-  switch (expression.kind) {
-    case 'literal':
-      return expression.value
-    case 'array':
-      return expression.items.map(literalValue)
-    case 'object':
-      return Object.fromEntries(Object.entries(expression.properties).map(([key, value]) => [key, literalValue(value)]))
-    case 'reference':
-      return undefined
-  }
 }
 
 function runtimePort(port: PortContract): string {
@@ -142,7 +130,7 @@ function compileGroup(
   for (const input of contract.inputs) {
     if (input.mode !== 'parameter') continue
     const expression = statement.args[input.name]
-    const value = expression ? literalValue(expression) : undefined
+    const value = expression ? literalValueForAccess(expression, input.access) : undefined
     if (value === undefined) continue
     const templateNodeId = input.parameterTarget?.templateNodeId
     const param = input.parameterTarget?.param ?? input.name
@@ -198,6 +186,7 @@ function compileGroup(
         sourceNodeId: mapNode(port.sourceNodeId),
         sourcePortName: port.sourcePortName,
         ...(port.portType ? { portType: port.portType } : {}),
+        ...(port.access ? { access: port.access } : {}),
         ...(port.hidden !== undefined ? { hidden: port.hidden } : {}),
         ...(port.order !== undefined ? { order: port.order } : {}),
         ...(port.customLabel ? { customLabel: port.customLabel } : {}),
@@ -243,8 +232,9 @@ function compileAtomic(statement: SceneCallStatement, contract: NodeFunctionCont
   const entityId = stableEntityId('node', statement.statementId)
   const params: Record<string, unknown> = { ...(contract.runtimeDefaults ?? {}) }
   for (const [name, expression] of Object.entries(statement.args)) {
-    if (expression.kind !== 'reference' && contract.inputs.find((input) => input.name === name)?.mode !== 'value') {
-      params[name] = literalValue(expression)
+    const input = contract.inputs.find((candidate) => candidate.name === name)
+    if (expression.kind !== 'reference' && input?.mode !== 'value') {
+      params[name] = literalValueForAccess(expression, input?.access)
     } else if (!contract.inputs.some((input) => input.name === name) && expression.kind !== 'reference') {
       params[name] = literalValue(expression)
     }
@@ -494,9 +484,17 @@ export function compileSceneModule(module: SceneModuleAst, registry: ContractReg
     ...(entity.contract.definitionVersion ? { definitionVersion: entity.contract.definitionVersion } : {}),
     ...(entity.contract.kind !== 'atomic' ? { instancePath: entity.entityId } : {}),
   }))
-  const resultEntityIds = entities
-    .filter((entity) => entity.contract.opId === 'scene_output' || entity.contract.functionName === 'sceneOutput')
-    .map((entity) => entity.entityId)
+  const resultCaptures = entities.flatMap((entity) => {
+    const { opId, functionName } = entity.contract
+    if (opId !== 'scene_output' && functionName !== 'sceneOutput') return []
+    return [{
+      entityId: entity.entityId,
+      kind: 'sceneOutput' as const,
+      functionName,
+      opId: opId ?? functionName,
+    }]
+  })
+  const resultEntityIds = resultCaptures.map((capture) => capture.entityId)
 
   applyInitialAuthoringLayout(ops, entities)
 
@@ -507,6 +505,7 @@ export function compileSceneModule(module: SceneModuleAst, registry: ContractReg
     diagnostics,
     entityIds: entities.map((entity) => entity.entityId),
     resultEntityIds,
+    resultCaptures,
   }
 }
 
@@ -560,6 +559,7 @@ export function compiledOpsToKernelGraph(ops: readonly Op[]): KernelGraphV1 {
         portType: port.portType ?? 'any',
         sourceNodeId: port.sourceNodeId,
         sourcePortName: port.sourcePortName,
+        ...(port.access ? { access: port.access } : {}),
         ...(port.hidden !== undefined ? { hidden: port.hidden } : {}),
         ...(port.order !== undefined ? { order: port.order } : {}),
         ...(port.customLabel ? { customLabel: port.customLabel } : {}),

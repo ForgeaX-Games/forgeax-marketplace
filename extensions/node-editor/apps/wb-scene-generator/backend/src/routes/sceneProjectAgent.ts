@@ -25,8 +25,9 @@ import {
   type SceneWorkNode,
   type SourceMapEntry,
 } from '@forgeax/scene-authoring'
-import { getPipeline, importPipelineGraph, listGroups, type KernelGraphV1 } from '@forgeax/node-runtime'
+import { executeNode, getPipeline, importPipelineGraph, listGroups, type KernelGraphV1 } from '@forgeax/node-runtime'
 
+import { summarizeExecutionResult } from '../execution-summary.js'
 import { getProjectDir, getRuntimeForProject } from '../runtime.js'
 import { getSceneContractRegistry } from '../scene-script/contracts.js'
 import { compileStoredSceneProject, resolveSceneImport } from '../scene-script/projectCompiler.js'
@@ -266,13 +267,14 @@ export async function registerSceneProjectAgentRoutes(app: FastifyInstance): Pro
     const { entry } = await projectContext(req.params.projectId, projectDir)
     const nodes = await readWorkNodes(projectDir)
     const current = nodes.find((node) => !['accepted', 'reverted', 'failed'].includes(node.status))
+    const checkpoint = current?.checkpoint ?? null
     return {
       projectSummary: {
         projectId: req.params.projectId,
         projectRevision: entry.state?.projectRevision ?? entry.revision,
         modules: entry.state?.modules ?? [entry.file],
       },
-      checkpoint: current?.checkpoint ?? null,
+      checkpoint,
       currentWorkOrder: current ? current.artifacts.workOrder : null,
       health: { canonical: Boolean(entry.source.trim()), diagnostics: current?.diagnostics.slice(0, 3) ?? [] },
       payload: 'bounded-resume-context',
@@ -651,7 +653,11 @@ export async function registerSceneProjectAgentRoutes(app: FastifyInstance): Pro
     const node = newWorkNode(stored.transaction.workNodeId, stored.transaction.targetIds, stored.transaction.writableModuleIds, stored.transaction.humanGate)
     node.status = 'preview'
     node.updatedAt = now()
-    node.checkpoint = { id: `checkpoint-${stored.transaction.transactionId}-preview`, projectRevision: String(commandPayload.projectRevision), createdAt: now() }
+    node.checkpoint = {
+      id: `checkpoint-${stored.transaction.transactionId}-preview`,
+      projectRevision: String(commandPayload.projectRevision),
+      createdAt: now(),
+    }
     await Promise.all([
       writeStoredTransaction(projectDir, stored),
       writeWorkNodeArtifacts(projectDir, node, {
@@ -707,7 +713,11 @@ export async function registerSceneProjectAgentRoutes(app: FastifyInstance): Pro
     node.budget.stopped = true
     node.diagnostics = diagnostics
     node.updatedAt = now()
-    node.checkpoint = { id: `checkpoint-${stored.transaction.transactionId}-verify`, projectRevision: (await readSceneModule(projectDir)).state?.projectRevision ?? '', createdAt: now() }
+    node.checkpoint = {
+      id: `checkpoint-${stored.transaction.transactionId}-verify`,
+      projectRevision: (await readSceneModule(projectDir)).state?.projectRevision ?? '',
+      createdAt: now(),
+    }
     await Promise.all([
       writeStoredTransaction(projectDir, stored),
       writeWorkNodeArtifacts(projectDir, node, {
@@ -730,12 +740,13 @@ export async function registerSceneProjectAgentRoutes(app: FastifyInstance): Pro
     if (!access.ok) return reply.code(403).send(access)
     const stored = await readStoredTransaction(projectDir, req.params.transactionId)
     if (!stored) return reply.code(404).send({ reason: 'transaction not found' })
-    if (req.body?.decision === 'accept') {
+    const decision = req.body?.decision
+    if (decision === 'accept') {
       if (stored.status !== 'verified' || !stored.verification?.ok) {
         return reply.code(409).send({ reason: 'Only a successfully verified preview can be accepted.' })
       }
       stored.status = 'accepted'
-    } else if (req.body?.decision === 'revert') {
+    } else if (decision === 'revert') {
       if (!['preview', 'verified'].includes(stored.status)) return reply.code(409).send({ reason: `Cannot revert ${stored.status}` })
       await restoreTransaction(req.params.projectId, projectDir, stored)
       stored.status = 'reverted'
@@ -747,7 +758,11 @@ export async function registerSceneProjectAgentRoutes(app: FastifyInstance): Pro
     const node = newWorkNode(stored.transaction.workNodeId, stored.transaction.targetIds, stored.transaction.writableModuleIds, stored.transaction.humanGate)
     node.status = stored.status
     node.updatedAt = now()
-    node.checkpoint = { id: `checkpoint-${stored.transaction.transactionId}-${stored.status}`, projectRevision: module.state?.projectRevision ?? module.revision, createdAt: now() }
+    node.checkpoint = {
+      id: `checkpoint-${stored.transaction.transactionId}-${stored.status}`,
+      projectRevision: module.state?.projectRevision ?? module.revision,
+      createdAt: now(),
+    }
     await Promise.all([
       writeStoredTransaction(projectDir, stored),
       writeWorkNodeArtifacts(projectDir, node, {

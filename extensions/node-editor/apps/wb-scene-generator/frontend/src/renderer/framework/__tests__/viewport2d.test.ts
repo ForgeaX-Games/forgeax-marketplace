@@ -7,7 +7,7 @@ import {
   zoomViewportCentered,
   type Viewport2DState,
 } from '../viewport2d'
-import { useRenderStore } from '../../store'
+import { SCENE_DEFAULT_VIEWPORT_2D, useRenderStore } from '../../store'
 
 describe('viewport2d reducers', () => {
   it('panViewport increments and rounds the offset', () => {
@@ -57,8 +57,8 @@ describe('store viewport actions', () => {
   it('panViewport2d accumulates deltas; resetViewport2d restores the default', () => {
     useRenderStore.getState().panViewport2d(10, 20)
     useRenderStore.getState().panViewport2d(5, -4)
-    expect(useRenderStore.getState().viewport2d).toEqual({ offsetX: 15, offsetY: 16, scale: 1 })
+    expect(useRenderStore.getState().viewport2d).toEqual({ offsetX: 15, offsetY: 16, scale: 0.7 })
     useRenderStore.getState().resetViewport2d()
-    expect(useRenderStore.getState().viewport2d).toEqual(DEFAULT_VIEWPORT_2D)
+    expect(useRenderStore.getState().viewport2d).toEqual(SCENE_DEFAULT_VIEWPORT_2D)
   })
 })

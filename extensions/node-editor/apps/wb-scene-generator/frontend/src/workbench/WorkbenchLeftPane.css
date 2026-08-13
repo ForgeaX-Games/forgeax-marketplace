@@ -187,14 +187,22 @@ body[data-pane='left'] #root {
 
 /* Match Projects heading to the History/section-title style (accent green). */
 .scene-left-pane .proj-panel__head {
+  box-sizing: border-box;
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
+  min-height: var(--scene-titlebar-height, 30px);
+  border-bottom: 1px solid var(--scene-titlebar-border);
 }
 
 .scene-left-pane .proj-panel__head h2 {
   opacity: 1;
   margin: 0;
+  color: var(--scene-titlebar-color);
+  font-size: var(--scene-titlebar-title-size, 14px);
+  font-weight: var(--scene-titlebar-title-weight, 700);
+  letter-spacing: 0.01em;
+  text-transform: none;
 }
 
 /* Wizard / delete heading — match the Projects section heading style. */

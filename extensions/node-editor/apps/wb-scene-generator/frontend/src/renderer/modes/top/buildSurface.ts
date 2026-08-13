@@ -2,7 +2,7 @@
 //
 // 两种 drawMode 由本文件分支处理:
 //   * 'color' —— 1 px = 1 cell 的 ImageData 直写 RGBA;compose drawImage 时
-//     按 BASE_CELL_SIZE 倍 nearest-neighbor 缩放 → 像素方块,GPU 加速
+//     按 SCREEN_CELL_SIZE 倍 nearest-neighbor 缩放 → 像素方块,GPU 加速
 //   * 'wire'  —— **预先栅格化**到 (cols × cellSize) × (rows × cellSize) 的高分辨率
 //     OffscreenCanvas,fill + stroke 都在 build 阶段做完。compose drawImage 跟
 //     color 同款 → GPU 加速。线宽 1 buffer-pixel = 1 CSS px(at 1× viewport)
@@ -16,7 +16,7 @@ import type { CellSource } from '../../framework/cellSource'
 import { createSurface, type Surface2D } from '../../framework/canvas2d'
 import type { DrawMode } from '../../types'
 import { colorForValue } from '../../framework/palette'
-import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
+import { SCREEN_CELL_SIZE } from '../../framework/geometry/constants'
 import type { AliasMeta } from '../../framework/asset/matchAssetEntry'
 import { matchAssetEntry } from '../../framework/asset/matchAssetEntry'
 import { getOrLoadImage, getRegisteredAssetUrl, getLoadTick } from '../../framework/asset/imageCache'
@@ -80,8 +80,8 @@ export function buildSurfaceForSource(
 // 占位算 key,lookupWithWildcard 查 rule.faces.top.map → sprite idx → atlas rect →
 // drawImage。randomRules 命中按 (x,y) 稳定散列做变体替换(同帧间不闪烁)。
 //
-// surface 像素密度用 rule.ppu(默认 BASE_CELL_SIZE)避免在 build 阶段就 nearest 下采样;
-// compose 那侧 dst 仍按 BASE_CELL_SIZE logical 缩放。
+// surface 像素密度用 rule.ppu(默认 SCREEN_CELL_SIZE)避免在 build 阶段就 nearest 下采样;
+// compose 那侧 dst 仍按 SCREEN_CELL_SIZE logical 缩放。
 //
 // 任一前置缺失(无 alias 命中 / rule 未加载 / 图未加载)→ 返回 null,调用方降级到 color。
 
@@ -106,7 +106,7 @@ function buildAssetSurface(
   const img = getOrLoadImage(getRegisteredAssetUrl(match.primary))
   if (!img) return null
 
-  const ppu = rule.ppu > 0 ? rule.ppu : BASE_CELL_SIZE
+  const ppu = rule.ppu > 0 ? rule.ppu : SCREEN_CELL_SIZE
   const cols = Math.max(1, source.cols)
   const rows = Math.max(1, source.rows)
   const w = cols * ppu
@@ -223,7 +223,7 @@ function buildColorSurface(source: CellSource, opts: BuildSurfaceOpts): Surface2
 // 视觉:线宽 1 buffer-pixel(= 1 CSS px @ 1× viewport;N CSS px @ N×)。
 
 function buildWireSurface(source: CellSource, opts: BuildSurfaceOpts): Surface2D | null {
-  const cellSize = BASE_CELL_SIZE
+  const cellSize = SCREEN_CELL_SIZE
   const w = Math.max(1, source.cols * cellSize)
   const h = Math.max(1, source.rows * cellSize)
   const canvas = createSurface(w, h)

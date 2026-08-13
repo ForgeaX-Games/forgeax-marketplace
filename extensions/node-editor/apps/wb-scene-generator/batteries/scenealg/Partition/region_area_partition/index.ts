@@ -9,8 +9,10 @@
  *   配额感知 Voronoi + Lloyd 松弛 + 边界后处理。
  */
 
-import { applyBoundaryStyle } from './boundary.js';
-import { placeSeedPoints, lloydRelax, type SeedPoint } from './placement.js';
+// Battery loader imports index.ts via Node type-stripping; sibling modules are
+// also .ts on disk, so use .ts specifiers (phantom .js files are not emitted).
+import { applyBoundaryStyle } from './boundary.ts';
+import { placeSeedPoints, lloydRelax, type SeedPoint } from './placement.ts';
 
 type Grid = number[][];
 

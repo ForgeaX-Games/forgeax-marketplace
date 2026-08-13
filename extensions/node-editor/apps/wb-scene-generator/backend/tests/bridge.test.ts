@@ -80,7 +80,7 @@ describe('bridge REST', () => {
     })
     expect(created.statusCode).toBeLessThan(300)
     const projectId = created.json().id as string
-    const source = 'const value = numberValue({ value: 1 })\n'
+    const source = 'const value = numberValue({ value: 1 })\nconst root = emptyScene({})\nsceneOutput({ scene: root.scene })\n'
     const committed = await app.inject({
       method: 'PUT',
       url: `/api/v1/projects/${projectId}/scene-script`,

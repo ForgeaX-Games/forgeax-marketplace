@@ -57,6 +57,117 @@
         "scene:screenshot.capture",
         "scene:screenshot.latest"
       ],
+      "taskProfiles": [
+        {
+          "id": "project-create-and-scene-work",
+          "match": [
+            "(?:创建|新建|建立|create|new).{0,16}(?:场景项目|scene\\s*project).{0,40}(?:设计|初始化|填充|搭建|创作|design|bootstrap|populate|build)",
+            "(?:设计|初始化|填充|搭建|创作|design|bootstrap|populate|build).{0,40}(?:创建|新建|建立|create|new).{0,16}(?:场景项目|scene\\s*project)"
+          ],
+          "inheritAgentTools": true,
+          "tools": ["skill_compose_scene_script"],
+          "directive": "用户在同一请求中明确要求创建项目并继续处理场景内容。先创建并打开项目，再按明确的初始化或设计范围推进；发生 Scene Script 写入后适用对应内容门禁。",
+          "maxTurns": 48
+        },
+        {
+          "id": "project-create",
+          "description": {
+            "zh": "只创建场景项目，不创作场景内容",
+            "en": "Create a Scene Project without authoring scene content"
+          },
+          "match": [
+            "(?:创建|新建|建立|create|new).{0,16}(?:场景项目|scene\\s*project)",
+            "(?:场景项目|scene\\s*project).{0,16}(?:创建|新建|建立|create|new)"
+          ],
+          "tools": ["scene_projects_create"],
+          "directive": "这是项目管理任务。只调用 scene_projects_create 一次；创建成功（返回 project id）即完成。除非用户在同一请求中明确要求设计、初始化或填充场景，否则不要 open、resume、读取 Contract/Script、validate、put、execute、截图或关闭项目。名称缺省时直接使用工具默认名，不要追问。",
+          "maxTurns": 3
+        },
+        {
+          "id": "project-list",
+          "match": [
+            "(?:列出|查看|有哪些|list|show).{0,16}(?:场景项目|scene\\s*projects?)"
+          ],
+          "tools": ["scene_projects_list"],
+          "directive": "这是只读项目管理任务。列出项目并简洁返回结果即完成；不要打开项目或进入 Scene Script 工作流。",
+          "maxTurns": 3
+        },
+        {
+          "id": "project-open",
+          "match": [
+            "(?:打开|进入|open).{0,16}(?:场景项目|scene\\s*project)"
+          ],
+          "tools": ["scene_projects_list", "scene_projects_open"],
+          "directive": "这是项目管理任务。必要时先列出项目，再打开目标项目；打开成功即完成。不要自动 resume、读取 Contract/Script、执行或截图。",
+          "maxTurns": 4
+        },
+        {
+          "id": "project-close",
+          "match": [
+            "(?:关闭|退出|close).{0,16}(?:场景项目|scene\\s*project)"
+          ],
+          "tools": ["scene_projects_close"],
+          "directive": "这是项目管理任务。关闭指定项目成功即完成，不进行任何场景设计或验证。",
+          "maxTurns": 3
+        },
+        {
+          "id": "scene-bootstrap",
+          "match": [
+            "(?:初始化|搭建|生成|bootstrap|scaffold).{0,20}(?:基础场景|空场景|base\\s*(?:scene|grid))"
+          ],
+          "tools": [
+            "scene_projects_list",
+            "scene_projects_open",
+            "scene_script_contracts",
+            "scene_script_get",
+            "scene_script_validate",
+            "scene_script_put",
+            "scene_pipeline_execute",
+            "skill_compose_scene_script"
+          ],
+          "directive": "这是明确的场景初始化任务，不是纯项目创建。只实现用户指定的基础脚手架；不要自行扩展为完整区域、动线、地标和装饰设计。Scene Script 发生写入后，执行与非空最终输出门禁适用。",
+          "maxTurns": 20
+        },
+        {
+          "id": "scene-inspection",
+          "match": [
+            "(?:检查|审查|验证|查看|inspect|review|verify).{0,20}(?:场景|scene)"
+          ],
+          "tools": [
+            "scene_projects_list",
+            "scene_projects_open",
+            "scene_script_get",
+            "scene_script_validate",
+            "scene_pipeline_execute",
+            "scene_renderer_info",
+            "scene_renderer_setViewMode",
+            "scene_renderer_selectLayer",
+            "scene_renderer_openAllSubLayers",
+            "scene_screenshot_capture",
+            "scene_screenshot_latest"
+          ],
+          "directive": "这是只读检查/验收任务。收集用户指定的有界证据并报告；除非用户明确要求修复，否则不要 put 或启动编辑事务。检查完成不等于重做场景。",
+          "maxTurns": 16
+        },
+        {
+          "id": "scene-edit",
+          "match": [
+            "(?:修改|调整|移动|替换|删除|优化|edit|modify|adjust|move|replace|remove).{0,24}(?:场景|scene)"
+          ],
+          "inheritAgentTools": true,
+          "tools": ["skill_compose_scene_script"],
+          "directive": "这是既有场景的局部修改任务。优先走有界 Edit Lens 和事务验证；项目级创建/打开只是前置条件，不得把局部修改升级为全场重做。",
+          "maxTurns": 32
+        },
+        {
+          "id": "scene-design",
+          "default": true,
+          "inheritAgentTools": true,
+          "tools": ["skill_compose_scene_script"],
+          "directive": "这是场景创作任务。依据用户明确要求选择初始化、完整设计或继续设计流程；只有发生 Scene Script 内容变更时才适用编译、执行、最终输出与 Renderer 门禁。不要把纯项目管理动作解释为场景交付。",
+          "maxTurns": 48
+        }
+      ],
       "defaultSkills": [
         { "source": "plugin", "pluginId": "@forgeax-extension/wb-scene-generator", "skillId": "compose-scene-script" }
       ]

@@ -1,6 +1,7 @@
 import { createRuntime, createBatteryLoader, OpRegistry, ProjectRegistry } from '@forgeax/node-runtime'
 import type { Runtime, BatteryLoader, LoaderEvent } from '@forgeax/node-runtime'
 import { fileURLToPath } from 'node:url'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { resolveBatteryScanRoots } from '@forgeax/editor-host/backend'
 
@@ -31,9 +32,51 @@ export function resolveSharedGamesRoot(): string {
 const PLUGIN_ID = '@forgeax-plugin/wb-scene-generator'
 
 let registry: ProjectRegistry | null = null
+let registryWorkspaceRoot: string | null = null
 let sharedOps: OpRegistry | null = null
 let batteryLoader: BatteryLoader | null = null
 let stopWatch: (() => void) | null = null
+
+const GAME_SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/u
+
+function isWorkbenchPluginRoot(workspaceRoot: string): boolean {
+  return /(?:^|\/)\.forgeax\/workbench\/[^/]+$/u.test(workspaceRoot.replace(/\\/g, '/'))
+}
+
+/**
+ * The Studio host owns active-game.json. A standalone/test backend retains its
+ * own workspace root, while a Workbench backend always stores projects inside
+ * the selected game's directory.
+ */
+export function resolveActiveGameSlug(): string | null {
+  const workspaceRoot = resolveWorkspaceRoot()
+  if (!isWorkbenchPluginRoot(workspaceRoot)) return null
+
+  const gamesRoot = resolveSharedGamesRoot()
+  const activeGameFile = resolve(gamesRoot, '..', 'active-game.json')
+  try {
+    const active = JSON.parse(readFileSync(activeGameFile, 'utf-8')) as { slug?: unknown }
+    if (typeof active.slug !== 'string' || !GAME_SLUG_RE.test(active.slug)) {
+      throw new Error('active-game.json has no valid slug')
+    }
+    const gameRoot = resolve(gamesRoot, active.slug)
+    if (!gameRoot.startsWith(`${resolve(gamesRoot)}/`) || !existsSync(gameRoot) || !statSync(gameRoot).isDirectory()) {
+      throw new Error(`active game directory does not exist: ${active.slug}`)
+    }
+    return active.slug
+  } catch (error) {
+    throw new Error(
+      `Scene Generator requires a valid active game (${activeGameFile}): ${(error as Error).message}`,
+    )
+  }
+}
+
+export function resolveProjectWorkspaceRoot(): string {
+  const workspaceRoot = resolveWorkspaceRoot()
+  const gameSlug = resolveActiveGameSlug()
+  if (!gameSlug) return workspaceRoot
+  return resolve(resolveSharedGamesRoot(), gameSlug, '.forgeax', 'workbench', 'wb-scene-generator')
+}
 
 function batteryWatchEnabled(): boolean {
   const flag = process.env.FORGEAX_BATTERY_WATCH
@@ -101,9 +144,9 @@ export function stopBatteryWatch(): void {
 }
 
 export async function getProjectRegistry(): Promise<ProjectRegistry> {
-  if (registry) return registry
+  const workspaceRoot = resolveProjectWorkspaceRoot()
+  if (registry && registryWorkspaceRoot === workspaceRoot) return registry
   const __t0 = Date.now()
-  const workspaceRoot = resolveWorkspaceRoot()
   sharedOps = sharedOps ?? (await buildSharedOps())
   const __t1 = Date.now()
   const ops = sharedOps
@@ -138,6 +181,7 @@ export async function getProjectRegistry(): Promise<ProjectRegistry> {
   reg.init()
   const __t3 = Date.now()
   registry = reg
+  registryWorkspaceRoot = workspaceRoot
   // First-ever call in this process only (subsequent calls return the cached
   // `registry` before reaching this line at all) — this is the true
   // "opening the first project" cold-start cost, wholly separate from the
@@ -162,7 +206,7 @@ export async function getRuntimeForProject(projectId: string): Promise<Runtime> 
 
 export async function getViewingProjectDir(): Promise<string> {
   const reg = await getProjectRegistry()
-  const ws = resolveWorkspaceRoot()
+  const ws = resolveProjectWorkspaceRoot()
   const id = reg.getViewingProjectId()
   const rec = id ? reg.getProject(id) : null
   const graphRel = rec?.manifest.storage.graphFile ?? join('state', 'graph.json')
@@ -179,7 +223,7 @@ export async function getProjectDir(id: string): Promise<string | null> {
   const reg = await getProjectRegistry()
   const rec = reg.getProject(id)
   if (!rec) return null
-  const ws = resolveWorkspaceRoot()
+  const ws = resolveProjectWorkspaceRoot()
   const graphRel = rec.manifest.storage.graphFile
   const graphAbs = isAbsolute(graphRel) ? graphRel : join(ws, graphRel)
   return dirname(dirname(graphAbs))

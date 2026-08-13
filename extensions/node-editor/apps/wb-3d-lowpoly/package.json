@@ -1,6 +1,6 @@
 {
   "name": "@forgeax-plugin/wb-3d-lowpoly",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "3D Lowpoly Generator — ForgeaX node-programming plugin built on @forgeax/node-runtime",
   "license": "Apache-2.0",
@@ -22,9 +22,6 @@
     "build:vendor": "node scripts/build-vendor.mjs",
     "dev": "node scripts/dev.mjs",
     "serve": "node scripts/serve-dist.mjs"
-  },
-  "dependencies": {
-    "@forgeax/node-runtime": "file:../../packages/node-runtime"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

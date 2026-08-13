@@ -59,6 +59,10 @@ describe('scene function catalog golden compile', () => {
       !contract.definitionId?.includes('.nested.') &&
       contract.sceneScriptStatus === 'equivalence-verified')).toHaveLength(52)
     expect(registry.get('addBaseGrid')?.definitionId).toBe('scene.template.add-base-grid')
+    expect(registry.get('addBaseGrid')?.outputs.find((port) => port.name === 'baseNode')?.description)
+      .toContain('parent region')
+    expect(registry.get('areaPartition')?.inputs.find((port) => port.name === 'scene')?.description)
+      .toContain('base.baseNode')
     expect(registry.get('retiredNameListPass')).toBeUndefined()
     expect(templates.every((contract) => !contract.capabilities?.agent?.includes('editDefinition'))).toBe(true)
     const parsed = parseSceneModule(goldenSource, { file: 'main.scene.ts', registry })
@@ -80,6 +84,30 @@ describe('scene function catalog golden compile', () => {
     expect(reparsed.module.statements.map((statement) => statement.statementId)).toEqual(
       parsed.module.statements.map((statement) => statement.statementId),
     )
+  })
+
+  it('binds inline literals through native template parameters without helper nodes', async () => {
+    const registry = await getSceneContractRegistry()
+    const source = `
+const root = emptyScene({})
+const base = addBaseGrid({
+  rootScene: root.scene,
+  baseName: "town_base",
+  width: 48,
+  height: 36,
+  baseAsset: "ground",
+})
+sceneOutput({ scene: base.rootScene })
+`
+    const parsed = parseSceneModule(source, { file: 'literal-template.scene.ts', registry })
+    const compiled = compileSceneModule(parsed.module, registry)
+    expect([...parsed.diagnostics, ...compiled.diagnostics]).toEqual([])
+    const nodes = compiled.ops.filter(
+      (op): op is Extract<(typeof compiled.ops)[number], { type: 'createNode' }> => op.type === 'createNode',
+    )
+    expect(nodes.find((node) => node.opId === 'rect_grid')?.params).toMatchObject({ width: 48, height: 36 })
+    expect(nodes.find((node) => node.opId === 'grid2node')?.params).toMatchObject({ name: 'town_base' })
+    expect(nodes.find((node) => node.opId === 'type_string')?.params).toMatchObject({ value: 'ground' })
   })
 
   it('compiles the atomic pilot with typed references and dynamic DataTree ports', async () => {

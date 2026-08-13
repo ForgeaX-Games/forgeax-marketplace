@@ -1,4 +1,5 @@
 import { portContractForType } from './portTypes.js'
+import { literalValueForAccess } from './literal-datatree.js'
 import type {
   ContractRegistry,
   NodeFunctionContract,
@@ -26,7 +27,7 @@ function definitionPortContract(name: string, descriptor: SceneGroupDefinition['
     ...(descriptor.defaultValue !== undefined ? { defaultValue: descriptor.defaultValue } : {}),
     ...(descriptor.order !== undefined ? { order: descriptor.order } : {}),
     ...(descriptor.labelEn ?? descriptor.label ? { label: descriptor.labelEn ?? descriptor.label } : {}),
-    ...(descriptor.label ? { description: descriptor.label } : {}),
+    ...(descriptor.description ?? descriptor.label ? { description: descriptor.description ?? descriptor.label } : {}),
   }
 }
 
@@ -58,6 +59,38 @@ function staticExpression(expression: SceneExpression): unknown {
     return Object.fromEntries(Object.entries(expression.properties).map(([key, value]) => [key, staticExpression(value)]))
   }
   return undefined
+}
+
+function resolveParameterTarget(
+  root: RawTemplateGroup,
+  port: NonNullable<RawTemplateGroup['exposedInputs']>[number],
+): { templateNodeId: string; param: string } | undefined {
+  const groups = new Map<string, RawTemplateGroup>()
+  const visit = (group: RawTemplateGroup): void => {
+    groups.set(group.id, group)
+    for (const nested of group._nestedGroups ?? []) visit(nested)
+  }
+  visit(root)
+
+  let group = root
+  let current = port
+  const visited = new Set<string>()
+  while (true) {
+    const node = group.nodes?.find((candidate) => candidate.id === current.sourceNodeId)
+    if (!node) return undefined
+    if (node.opId !== '__group__') {
+      return { templateNodeId: node.id, param: current.sourcePortName }
+    }
+    const nestedId = typeof node.params?.groupId === 'string' ? node.params.groupId : undefined
+    const key = `${group.id}:${node.id}:${current.sourcePortName}`
+    if (!nestedId || visited.has(key)) return undefined
+    visited.add(key)
+    const nested = groups.get(nestedId)
+    const nestedPort = nested?.exposedInputs?.find((candidate) => candidate.portName === current.sourcePortName)
+    if (!nested || !nestedPort) return undefined
+    group = nested
+    current = nestedPort
+  }
 }
 
 /**
@@ -102,7 +135,7 @@ export function compileSceneGroupDefinition(
       }
       if (referenceExpressions(expression).length) continue
       const input = contract.inputs.find((item) => item.name === argName)
-      params[input?.runtimePort ?? input?.name ?? argName] = staticExpression(expression)
+      params[input?.runtimePort ?? input?.name ?? argName] = literalValueForAccess(expression, input?.access)
     }
     if (contract.kind === 'group' && contract.definition) {
       const nestedId = `nested:${definition.definitionId}:${statement.statementId}`
@@ -211,7 +244,13 @@ export function compileSceneGroupDefinition(
       definitionId: definition.meta.id,
       definitionVersion: definition.meta.version,
       description: `Native Scene Script definition ${definition.exportName}.`,
-      inputs: Object.entries(definition.meta.inputs).map(([name, descriptor]) => definitionPortContract(name, descriptor)),
+      inputs: Object.entries(definition.meta.inputs).map(([name, descriptor]) => {
+        const contract = definitionPortContract(name, descriptor)
+        if (contract.mode !== 'parameter') return contract
+        const exposed = raw.exposedInputs?.find((port) => port.portName === (contract.runtimePort ?? contract.name))
+        const parameterTarget = exposed && resolveParameterTarget(raw, exposed)
+        return parameterTarget ? { ...contract, parameterTarget } : contract
+      }),
       outputs: Object.entries(definition.meta.outputs).map(([name, descriptor]) => definitionPortContract(name, descriptor)),
       definition: raw,
       deterministic: true,

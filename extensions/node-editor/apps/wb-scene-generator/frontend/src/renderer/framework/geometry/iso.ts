@@ -10,16 +10,16 @@
 //   * left   —— 左下平行四边形(camera 左边的立面)
 //   * right  —— 右下平行四边形(camera 右边的立面)
 //
-// 几何常量沿用 BASE_CELL_SIZE = 8(共享逻辑单位)。dimetric 下:
-//   cellW = BASE_CELL_SIZE * 2 = 16
-//   cellH = BASE_CELL_SIZE     = 8
+// 几何常量沿用 SCREEN_CELL_SIZE = 8 CSS px / cell。dimetric 下:
+//   cellW = SCREEN_CELL_SIZE * 2 = 16
+//   cellH = SCREEN_CELL_SIZE     = 8
 //
 // painter sort 用 (x + y + z) ASC:对角线越小越远(屏幕上越左上),晚 layer 后画。
 
-import { BASE_CELL_SIZE } from './constants'
+import { SCREEN_CELL_SIZE } from './constants'
 
-export const ISO_CELL_W = BASE_CELL_SIZE * 2
-export const ISO_CELL_H = BASE_CELL_SIZE
+export const ISO_CELL_W = SCREEN_CELL_SIZE * 2
+export const ISO_CELL_H = SCREEN_CELL_SIZE
 
 export interface IsoVoxelCellLite {
   x: number

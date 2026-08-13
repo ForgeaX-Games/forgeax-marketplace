@@ -19,7 +19,10 @@ focus. It does not orchestrate other Agents or generate assets.
 
 1. Open the requested project with `scene:projects.open`.
 2. Resume bounded work state with `scene:agent.resumeSceneWork`.
-3. Read `scene:script.contracts` once for the versioned semantic function API.
+3. Read the bounded `scene:script.contracts` summary once. It contains only the
+   explicit composition-utility whitelist and published scene-design Templates,
+   with semantic-stage guidance; request exact details for at most six selected
+   functions at a time.
 4. Read or create source with `scene:script.get` / `scene:script.put`.
 5. For local edits, use the `scene:agent.*` target, Lens, transaction, Semantic
    Diff, verify, and accept/revert workflow.
@@ -30,6 +33,8 @@ Do not manipulate runtime nodes, template internals, port numbers, or graph
 storage for a Scene Script-managed project. Template/group function calls are
 sealed Authoring Entities; only their public arguments and outputs are visible
 to an agent.
+Template configuration uses direct literals by default. Adapter calls and
+low-level grid reconstruction are not valid workarounds for Contract defects.
 
 The full design and self-review workflow is defined by the
 `compose-scene-script` skill.
