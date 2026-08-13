@@ -66,6 +66,7 @@ let currentWeapon:  ModernWeaponCategory = 'handgun'
 let currentSurface: ImpactSurface = 'concrete'
 
 const INJECT_ID = 'vfx2-inject-root'
+const CSS_ID = 'vfx2-bootstrap-css'
 let observer: MutationObserver | null = null
 let injectedOnce = false
 
@@ -882,7 +883,6 @@ function weaponLabel(k: ModernWeaponCategory) {
 
 // ── CSS  ─────────────────────────────────────────────────────────────────
 
-const CSS_ID = 'vfx2-bootstrap-css'
 function injectStyles(): void {
   if (document.getElementById(CSS_ID)) return
   const s = document.createElement('style')
