@@ -33,7 +33,7 @@ export const root = emptyScene({})
 `,
       },
     })
-    expect(module.statusCode, module.body).toBe(201)
+    expect(module.statusCode).toBe(201)
     const authored = await app.inject({
       method: 'PUT',
       url: `/api/v1/projects/${projectId}/scene-script`,

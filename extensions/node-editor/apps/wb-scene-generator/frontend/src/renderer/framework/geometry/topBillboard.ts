@@ -33,11 +33,11 @@
 // source-over 涌现**。ground+wall 同 (x,y) 不同 z 时,wall front 的透明像素也是
 // 这条规律透出 ground top。
 //
-// 几何常量沿用 SCREEN_CELL_SIZE = 8 CSS px / cell。
+// 几何常量沿用 BASE_CELL_SIZE = 8 CSS px / cell。
 // 多 voxel 跨层重叠 / 同一柱遮挡的处理在 modes/topBillboard/buildVoxelMaster 实施;
 // 本文件只提供几何投影 + voxel master canvas 尺寸计算。
 
-import { SCREEN_CELL_SIZE } from './constants'
+import { BASE_CELL_SIZE } from './constants'
 import { snapFootprintToBottomCenter, type GridFootprint } from './objectPlacement'
 
 export interface VoxelCellLite {
@@ -121,7 +121,7 @@ export function computeVoxelMasterBbox(
 export function billboardTopFaceCanvasXY(
   cell: VoxelCellLite,
   bbox: VoxelBbox,
-  cellSize: number = SCREEN_CELL_SIZE,
+  cellSize: number = BASE_CELL_SIZE,
 ): { x: number; y: number } {
   return {
     x: (cell.x - bbox.worldOffsetX) * cellSize,
@@ -133,7 +133,7 @@ export function billboardTopFaceCanvasXY(
 export function billboardFrontFaceCanvasXY(
   cell: VoxelCellLite,
   bbox: VoxelBbox,
-  cellSize: number = SCREEN_CELL_SIZE,
+  cellSize: number = BASE_CELL_SIZE,
 ): { x: number; y: number } {
   return {
     x: (cell.x - bbox.worldOffsetX) * cellSize,
@@ -408,7 +408,7 @@ export function billboardObjectFootprintPreviewIndexed(
 export function billboardObjectAnchorCanvasXY(
   cell: VoxelCellLite,
   bbox: VoxelBbox,
-  cellSize: number = SCREEN_CELL_SIZE,
+  cellSize: number = BASE_CELL_SIZE,
 ): { x: number; y: number } {
   return billboardFrontFaceCanvasXY(cell, bbox, cellSize)
 }

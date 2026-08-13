@@ -155,18 +155,20 @@
         },
         "exposedToAI": true,
         "description": {
-          "zh": "列出当前 active game 的 Scene Generator 项目",
-          "en": "List Scene Generator projects for the current active game"
+          "zh": "列出 Scene Generator 项目",
+          "en": "List Scene Generator projects"
         }
       },
       {
         "id": "scene:projects.create",
         "args": {
           "type": "object",
+          "required": [
+            "name"
+          ],
           "properties": {
             "name": {
-              "type": "string",
-              "description": "可选；缺省时使用当前 active game 的默认场景名 / optional; defaults from the active game"
+              "type": "string"
             },
             "type": {
               "type": "string"
@@ -185,8 +187,8 @@
         },
         "exposedToAI": true,
         "description": {
-          "zh": "在当前 active game 中创建空 Scene Project 并返回项目 id；name 可省略。不打开、不初始化、不执行场景；不接受 gameSlug。",
-          "en": "Create an empty Scene Project in the current active game and return its id; name is optional. This does not open, initialize, or execute the scene, and gameSlug is not accepted."
+          "zh": "创建 Scene Generator 项目",
+          "en": "Create a Scene Generator project"
         }
       },
       {
@@ -344,25 +346,15 @@
         "args": {
           "type": "object",
           "properties": {
-            "projectId": { "type": "string" },
-            "mode": {
-              "type": "string",
-              "enum": ["summary", "detail"],
-              "default": "summary"
-            },
-            "functionNames": {
-              "type": "array",
-              "maxItems": 6,
-              "items": { "type": "string" }
-            }
+            "projectId": { "type": "string" }
           },
           "additionalProperties": false
         },
         "returns": { "type": "object" },
         "exposedToAI": true,
         "description": {
-          "zh": "渐进式读取 Sino 可用的 Scene Contract。默认 summary 仅返回白名单工具电池与全部 Template 的紧凑摘要；选定调用后用 detail + 最多 6 个精确 functionNames 读取签名。禁止用 validate 猜函数。",
-          "en": "Progressively disclose Sino-approved Scene Contracts. summary returns compact utility-whitelist and Template summaries; after selecting calls, use detail with at most 6 exact functionNames. Never use validate for discovery."
+          "zh": "返回版本化 Scene Script 函数目录；模板与组只暴露公共端口和能力，不返回内部拓扑。",
+          "en": "Return the versioned Scene Script function catalog without sealed group internals."
         }
       },
       {
@@ -561,12 +553,7 @@
           "properties": {
             "projectId": { "type": "string" },
             "transactionId": { "type": "string" },
-            "humanApproved": { "type": "boolean" },
-            "layout": {
-              "type": "object",
-              "additionalProperties": true,
-              "description": "Optional bounded Layout checkpoint payload: layoutDelta, sceneDigest, probeDigest, reportDigest, capsuleDigest, and/or capsule."
-            }
+            "humanApproved": { "type": "boolean" }
           },
           "additionalProperties": false
         },
@@ -603,12 +590,7 @@
           "properties": {
             "projectId": { "type": "string" },
             "transactionId": { "type": "string" },
-            "profile": { "type": "string", "enum": ["local", "global"] },
-            "layout": {
-              "type": "object",
-              "additionalProperties": true,
-              "description": "Optional bounded Layout checkpoint payload: layoutDelta, sceneDigest, probeDigest, reportDigest, capsuleDigest, and/or capsule."
-            }
+            "profile": { "type": "string", "enum": ["local", "global"] }
           },
           "additionalProperties": false
         },
@@ -627,12 +609,7 @@
           "properties": {
             "projectId": { "type": "string" },
             "transactionId": { "type": "string" },
-            "decision": { "type": "string", "enum": ["accept", "revert"] },
-            "layout": {
-              "type": "object",
-              "additionalProperties": true,
-              "description": "Optional bounded Layout checkpoint payload: layoutDelta, sceneDigest, probeDigest, reportDigest, capsuleDigest, and/or capsule."
-            }
+            "decision": { "type": "string", "enum": ["accept", "revert"] }
           },
           "additionalProperties": false
         },

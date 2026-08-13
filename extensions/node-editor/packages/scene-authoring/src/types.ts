@@ -253,7 +253,6 @@ export interface SceneDefinitionPort {
   required?: boolean
   mode?: 'parameter' | 'value'
   label?: string
-  description?: string
   order?: number
   labelEn?: string
   defaultValue?: SceneLiteral
@@ -418,26 +417,13 @@ export interface ResultLineage {
   }
 }
 
-/** Backward-compatible capture descriptor (kind is explicit; no payload guessing). */
-export type ResultCaptureKind = 'sceneOutput'
-
-export interface ResultCapture {
-  entityId: string
-  kind: ResultCaptureKind
-  functionName: string
-  opId: string
-}
-
 export interface CompiledSceneModule {
   module: SceneModuleAst
   ops: Op[]
   sourceMap: SourceMapEntry[]
   diagnostics: SceneDiagnostic[]
   entityIds: string[]
-  /** Legacy entity id list derived from resultCaptures. */
   resultEntityIds: string[]
-  /** Explicit capture kinds for canonical scene output. */
-  resultCaptures: ResultCapture[]
 }
 
 export interface ContractRegistry {

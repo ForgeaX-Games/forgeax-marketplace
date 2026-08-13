@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "@forgeax-plugin/wb-3d-lowpoly",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "displayName": {
     "zh": "3D 低多边形生成器",
     "en": "3D Lowpoly Generator"

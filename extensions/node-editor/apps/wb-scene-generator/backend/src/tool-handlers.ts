@@ -192,25 +192,6 @@ function stripBatteryIcon(op: Record<string, unknown>): Record<string, unknown> 
   return stripInlineImages(op) as Record<string, unknown>
 }
 
-/** The REST authoring surface serves Studio as well as AI and therefore keeps
- * canonical source and Source Map details. Tool calls already supplied the
- * source and only need transaction/revision/diagnostic evidence back. */
-export function boundedSceneScriptMutationResult(payload: unknown): unknown {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload
-  const input = payload as Record<string, unknown>
-  const {
-    canonicalSource: _canonicalSource,
-    sourceMap,
-    sources: _sources,
-    runtimeGraph: _runtimeGraph,
-    ...bounded
-  } = input
-  return {
-    ...bounded,
-    ...(Array.isArray(sourceMap) ? { sourceMapEntries: sourceMap.length } : {}),
-  }
-}
-
 type WorkspaceSnapshot = {
   viewingProjectId?: string | null
   executingProjectIds?: string[]
@@ -258,20 +239,7 @@ function projectPath(projectId: string, suffix: string): string {
 export type ExecuteSummaryVerification = {
   ok?: boolean
   hints?: string[]
-  primaryFailure?: 'execution' | 'structural' | 'location-names'
-  finalOutput?: {
-    ok?: boolean
-    resultEntityIds?: string[]
-    totalSceneCells?: number
-    missingResultEntityIds?: string[]
-    emptyResultEntityIds?: string[]
-  }
-  executionFailures?: {
-    ok?: boolean
-    count?: number
-    failures?: Array<{ index: number; message: string }>
-    truncated?: boolean
-  }
+  primaryFailure?: 'structural' | 'location-names'
   locationNameAlignment?: {
     ok?: boolean
     missing?: Array<{ name: string }>
@@ -299,16 +267,6 @@ export function formatExecuteVerificationFailure(summary: {
   const structuralHints = hints.filter((h) => !h.startsWith('[stage3.location_names]'))
   const hasStructural = structuralHints.length > 0 || summary.verification.primaryFailure === 'structural'
   const hasLocation = loc?.ok === false
-  const execution = summary.verification.executionFailures
-
-  if (summary.verification.primaryFailure === 'execution' || execution?.ok === false) {
-    const failures = (execution?.failures ?? []).map((item) => `[${item.index + 1}] ${item.message}`).join('\n')
-    return (
-      `[primaryFailure: execution] pipeline.execute recorded ${execution?.count ?? 'one or more'} node execution failure(s); ` +
-      `status=completed is not acceptance. Fix the first failing Scene Script operation and re-execute.` +
-      (failures ? `\n${failures}` : '')
-    )
-  }
 
   if (hasStructural) {
     const locationSection = hasLocation
@@ -389,13 +347,7 @@ function executionVerificationResponse(payload: unknown): unknown {
 
 export const tools: Record<string, ToolHandler> = {
   'scene:projects.list': async (_args, ctx) => request(ctx, 'GET', '/api/v1/projects'),
-  'scene:projects.create': async (args, ctx) => {
-    const body = objectArgs(args)
-    if ('gameSlug' in body) {
-      throw new Error('gameSlug is selected by Studio active game; switch games before creating a Scene Project')
-    }
-    return request(ctx, 'POST', '/api/v1/projects', body)
-  },
+  'scene:projects.create': async (args, ctx) => request(ctx, 'POST', '/api/v1/projects', objectArgs(args)),
   // Shared session attach. Canonical source transactions claim the exclusive
   // write lease only when a mutation is committed.
   'scene:projects.open': async (args, ctx) => {
@@ -437,25 +389,7 @@ export const tools: Record<string, ToolHandler> = {
   'scene:script.contracts': async (args, ctx) => {
     const body = objectArgs(args)
     const projectId = await resolveProjectId(ctx, body)
-    const mode = body.mode === 'detail' ? 'detail' : 'summary'
-    const functionNames = Array.isArray(body.functionNames)
-      ? body.functionNames.filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
-      : []
-    if (mode === 'detail' && functionNames.length === 0) {
-      throw new Error('scene:script.contracts detail mode requires exact functionNames from the summary')
-    }
-    if (functionNames.length > 6) {
-      throw new Error('scene:script.contracts detail mode accepts at most 6 functionNames')
-    }
-    return request(
-      ctx,
-      'GET',
-      `${projectPath(projectId, '/scene-script/contracts')}${query({
-        audience: 'sino',
-        mode,
-        functionNames: functionNames.length ? functionNames.join(',') : undefined,
-      })}`,
-    )
+    return request(ctx, 'GET', projectPath(projectId, '/scene-script/contracts'))
   },
   'scene:script.get': async (args, ctx) => {
     const body = objectArgs(args)
@@ -466,17 +400,13 @@ export const tools: Record<string, ToolHandler> = {
     const body = objectArgs(args)
     const projectId = await resolveProjectId(ctx, body)
     const { projectId: _projectId, ...requestBody } = body
-    return boundedSceneScriptMutationResult(
-      await request(ctx, 'POST', projectPath(projectId, '/scene-script/validate'), requestBody),
-    )
+    return request(ctx, 'POST', projectPath(projectId, '/scene-script/validate'), requestBody)
   },
   'scene:script.put': async (args, ctx) => {
     const body = objectArgs(args)
     const projectId = await resolveProjectId(ctx, body)
     const { projectId: _projectId, ...requestBody } = body
-    return boundedSceneScriptMutationResult(
-      await request(ctx, 'PUT', projectPath(projectId, '/scene-script'), requestBody),
-    )
+    return request(ctx, 'PUT', projectPath(projectId, '/scene-script'), requestBody)
   },
   'scene:authoring.lens': async (args, ctx) => {
     const body = objectArgs(args)
@@ -524,11 +454,9 @@ export const tools: Record<string, ToolHandler> = {
     const body = objectArgs(args)
     const projectId = await resolveProjectId(ctx, body)
     const id = stringArg(body, 'transactionId')
-    const forward: Record<string, unknown> = {
+    return request(ctx, 'POST', projectPath(projectId, `/scene-agent/transactions/${encodeURIComponent(id)}/apply`), {
       humanApproved: body.humanApproved === true,
-    }
-    if ('layout' in body) forward.layout = body.layout
-    return request(ctx, 'POST', projectPath(projectId, `/scene-agent/transactions/${encodeURIComponent(id)}/apply`), forward)
+    })
   },
   'scene:agent.previewSemanticDiff': async (args, ctx) => {
     const body = objectArgs(args)
@@ -540,21 +468,17 @@ export const tools: Record<string, ToolHandler> = {
     const body = objectArgs(args)
     const projectId = await resolveProjectId(ctx, body)
     const id = stringArg(body, 'transactionId')
-    const forward: Record<string, unknown> = {
+    return request(ctx, 'POST', projectPath(projectId, `/scene-agent/transactions/${encodeURIComponent(id)}/verify`), {
       profile: body.profile,
-    }
-    if ('layout' in body) forward.layout = body.layout
-    return request(ctx, 'POST', projectPath(projectId, `/scene-agent/transactions/${encodeURIComponent(id)}/verify`), forward)
+    })
   },
   'scene:agent.acceptOrRevertSceneEdit': async (args, ctx) => {
     const body = objectArgs(args)
     const projectId = await resolveProjectId(ctx, body)
     const id = stringArg(body, 'transactionId')
-    const forward: Record<string, unknown> = {
+    return request(ctx, 'POST', projectPath(projectId, `/scene-agent/transactions/${encodeURIComponent(id)}/decision`), {
       decision: body.decision,
-    }
-    if ('layout' in body) forward.layout = body.layout
-    return request(ctx, 'POST', projectPath(projectId, `/scene-agent/transactions/${encodeURIComponent(id)}/decision`), forward)
+    })
   },
   // Strip inline-image fields so the catalog is always clean text (see
   // `stripBatteryIcon` / `stripInlineImages` above).
@@ -628,12 +552,15 @@ export const tools: Record<string, ToolHandler> = {
     }
     const forward: Record<string, unknown> = {}
     if (typeof body.nodeId === 'string') forward.nodeId = body.nodeId
-    if (!raw) forward.quietErrors = true
-    // Independent scene-design agents may originate the brief themselves, so
-    // there is no mandatory Director dispatch carrying location names. Keep
-    // name-alignment verification when names are available, but never block
-    // execution solely because that optional evidence is absent.
-    if (!raw && narrativeLocationNames.length > 0) {
+    if (!raw && ctx.caller.kind === 'ai') {
+      if (narrativeLocationNames.length === 0) {
+        throw new Error(
+          'pipeline.execute requires narrativeLocationNames:[...] (upstream location names). ' +
+          'Copy the JSON array from the dispatch message — do not execute without it.',
+        )
+      }
+      forward.narrativeLocationNames = narrativeLocationNames
+    } else if (!raw && narrativeLocationNames.length > 0) {
       forward.narrativeLocationNames = narrativeLocationNames
     }
     const path = raw ? projectPath(projectId, '/execute') : projectPath(projectId, '/execute/summary')

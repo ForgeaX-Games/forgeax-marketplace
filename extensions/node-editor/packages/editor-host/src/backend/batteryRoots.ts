@@ -15,9 +15,6 @@ function resolveSharedBatteriesDir(repoRoot: string): string | null {
     // fall through to legacy probes (pre-monorepo layout)
   }
   const candidates = [
-    // A standalone release keeps common batteries beside the app batteries
-    // rather than recreating the development workspace's node_modules links.
-    resolve(repoRoot, 'shared-batteries'),
     resolve(repoRoot, 'external', 'forgeax-wb-node-core', 'packages', 'batteries-common', 'batteries'),
     resolve(repoRoot, '..', 'forgeax-wb-node-core', 'packages', 'batteries-common', 'batteries'),
   ]

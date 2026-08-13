@@ -6,10 +6,8 @@ import { extname, join, normalize, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
-import { ensureWorkspacePackages } from '../../../scripts/ensure-workspace-packages.mjs'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-ensureWorkspacePackages(root)
 const frontendDist = resolve(root, 'frontend/dist')
 const backendEntry = resolve(root, 'backend/dist/main.js')
 const frontendPort = Number(process.env.VITE_DEV_PORT ?? 9565)

@@ -34,9 +34,6 @@ function fakeClient(): HttpApiClient {
   return {
     subscribe: () => () => {},
     subscribeRaw: () => () => {},
-    async ensureViewingProject() {
-      return 'main'
-    },
     async listOps() {
       return []
     },
@@ -46,9 +43,6 @@ function fakeClient(): HttpApiClient {
     async getNodeOutput() {
       return undefined
     },
-    async getNodeOutputsBatch() {
-      return {}
-    },
   } as unknown as HttpApiClient
 }
 
@@ -56,8 +50,6 @@ beforeEach(() => {
   ensureSceneI18n()
   localStorage.clear()
   useRenderStore.getState().reset()
-  // Do not change the product default viewMode here. Tests that need 2D chrome
-  // (Scene Preview label / zoom) explicitly select a 2D mode.
   for (const mode of ['top', 'topBillboard', 'iso', 'free3d', '3DMesh'] as const) {
     useRenderStore.getState().setViewGuideVisible(mode, false)
   }
@@ -93,21 +85,10 @@ async function openDrawer(container: HTMLElement, title: string): Promise<void> 
   await act(async () => { fireEvent.click(button) })
 }
 
-/** Let useNodePreviews finish its mount refresh (which GCs layers). */
-async function flushPreviewRefresh(): Promise<void> {
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-}
-
 describe('RendererSurface', () => {
   it('renders the canvas preview label and tool capsule drawers', () => {
-    // Product default is 3DMesh (no 2D preview chrome); select a 2D mode for this case.
-    useRenderStore.getState().setViewMode('top')
-    const { container, getByLabelText, queryByText } = render(<RendererSurface client={fakeClient()} />)
-    expect(getByLabelText('Scene Preview')).toBeTruthy()
-    expect(queryByText('Scene Preview')).toBeNull()
+    const { container, getByText } = render(<RendererSurface client={fakeClient()} />)
+    expect(getByText('Scene Preview')).toBeTruthy()
     expect(container.querySelector('.renderer-drawer-pill')).not.toBeNull()
     expect(container.querySelector('.renderer-preview-label__zoom output')?.textContent).toMatch(/%$/)
     expect(container.querySelector('.renderer-layers')).toBeNull()
@@ -119,45 +100,7 @@ describe('RendererSurface', () => {
     expect(container.querySelector('.renderer-toolbar')).toBeNull()
   })
 
-  it('hides the 2D zoom chrome completely in 3D modes', () => {
-    useRenderStore.getState().setViewMode('free3d')
-    const free3d = render(<RendererSurface client={fakeClient()} />)
-    expect(free3d.queryByLabelText('Scene Preview')).toBeNull()
-    free3d.unmount()
-
-    useRenderStore.getState().setViewMode('3DMesh')
-    const mesh = render(<RendererSurface client={fakeClient()} />)
-    expect(mesh.queryByLabelText('Scene Preview')).toBeNull()
-  })
-
-  it('opens the baked voxel GLB export dialog from Output', async () => {
-    const bakedLayers = [
-      {
-        nodePath: '/Floor',
-        nodeName: 'Floor',
-        value: 1,
-        assetName: '',
-        cells: [{ x: 0, y: 0, z: 0 }],
-        attributes: {},
-      },
-    ]
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ layers: bakedLayers }), { status: 200 })))
-    useRenderStore.getState().setBakedLayers(bakedLayers)
-
-    const { container, getByRole } = render(<RendererSurface client={fakeClient()} />)
-    await openDrawer(container, 'Output')
-    const button = getByRole('button', { name: 'Export voxel GLB' })
-    expect((button as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(button)
-
-    expect(getByRole('dialog', { name: 'Export voxel GLB' })).toBeTruthy()
-    expect((getByRole('textbox', { name: 'Project-relative destination directory' }) as HTMLInputElement).value).toBe('assets/3d')
-    expect((getByRole('textbox', { name: 'GLB filename' }) as HTMLInputElement).value).toBe('baked-voxel-scene.glb')
-  })
-
   it('opens the Effects drawer from the tool capsule and exposes view/draw controls', async () => {
-    // Guides toggle keys off the active 2D view mode; select top explicitly.
-    useRenderStore.getState().setViewMode('top')
     const { container } = render(<RendererSurface client={fakeClient()} />)
     const effectsButton = container.querySelector('.renderer-drawer-pill button[title="Effects"]') as HTMLButtonElement
     await act(async () => { fireEvent.click(effectsButton) })
@@ -174,52 +117,16 @@ describe('RendererSurface', () => {
     expect(useRenderStore.getState().viewGuides.top).toBe(true)
     fireEvent.click(drawerQueries.getByText('Billboard'))
     expect(guides.getAttribute('aria-pressed')).toBe('false')
-    expect(drawerQueries.getAllByText('Effects')).toHaveLength(1)
-    expect(drawerQueries.getAllByText('View')).toHaveLength(1)
-    expect(useRenderStore.getState().viewMode).toBe('topBillboard')
-    expect(drawerQueries.getByText('Billboard').classList.contains('is-active')).toBe(true)
-  })
-
-  it('closes an open drawer before requesting the Node Editor', async () => {
-    const { container } = render(<RendererSurface client={fakeClient()} />)
-    await openDrawer(container, 'Effects')
-    expect(container.querySelector('.renderer-drawer-panel.is-open')).not.toBeNull()
-
-    const editorButton = container.querySelector(
-      '.renderer-drawer-pill button[title="Node Editor"]',
-    ) as HTMLButtonElement
-    await act(async () => { fireEvent.click(editorButton) })
-
-    expect(container.querySelector('.renderer-drawer-panel.is-open')).toBeNull()
-  })
-
-  it('closes an unpinned drawer outside but keeps a pinned drawer open', async () => {
-    const { container, getByLabelText } = render(<RendererSurface client={fakeClient()} />)
-    await openDrawer(container, 'Effects')
-
-    fireEvent.pointerDown(document.body)
-    expect(container.querySelector('.renderer-drawer-panel.is-open')).toBeNull()
-
-    await openDrawer(container, 'Effects')
-    fireEvent.click(getByLabelText('Pin drawer'))
-    expect(getByLabelText('Unpin drawer').getAttribute('aria-pressed')).toBe('true')
-
-    fireEvent.pointerDown(document.body)
-    expect(container.querySelector('.renderer-drawer-panel.is-open')).not.toBeNull()
-
-    fireEvent.click(getByLabelText('Unpin drawer'))
-    fireEvent.pointerDown(document.body)
-    expect(container.querySelector('.renderer-drawer-panel.is-open')).toBeNull()
   })
 
   it('lists ONLY scene_output voxel layers — grid previews stay on canvas, never in the panel', async () => {
-    const { container } = render(<RendererSurface client={fakeClient()} />)
-    await flushPreviewRefresh()
-    // Seed both buckets after mount refresh GC: grid preview + voxel sink layer.
+    // Seed both buckets: a grid preview (intermediate node) and a voxel layer (sink).
     useRenderStore.getState().setPreviewLayer('noise', 'grid', 'cellular_noise', [[0, 1], [1, 0]], 'grid')
     useRenderStore.getState().setLayers('sink', 'scene_output',
       [{ nodePath: '/A', nodeName: 'Wall', value: 1, cells: [{ x: 0, y: 0, z: 0 }] }],
       [{ id: 1, name: 'wall', type: 'tile' }])
+
+    const { container } = render(<RendererSurface client={fakeClient()} />)
     await openDrawer(container, 'Output')
     const rows = container.querySelectorAll('.renderer-layers-drawer .renderer-layer-row')
     // Exactly one row — the voxel layer. The grid preview is rendered on canvas only.
@@ -283,11 +190,6 @@ describe('RendererSurface', () => {
     // X close dismisses the popover.
     fireEvent.click(getByLabelText('Close screenshot result'))
     expect(container.querySelector('.renderer-shot-popover')).toBeNull()
-
-    await act(async () => { fireEvent.click(shot) })
-    await waitFor(() => expect(container.querySelector('.renderer-shot-popover')).not.toBeNull())
-    fireEvent.pointerDown(document.body)
-    expect(container.querySelector('.renderer-shot-popover')).toBeNull()
   })
 
   it('returns an actual composed PNG for a workbench transaction capture request', async () => {
@@ -334,8 +236,6 @@ describe('RendererSurface', () => {
   })
 
   it('exports the current baked scene as scene.zip from the Output drawer', async () => {
-    // scene.zip export chrome is for non-3DMesh modes; product default is 3DMesh.
-    useRenderStore.getState().setViewMode('top')
     const writeTextMock = vi.fn(async () => {})
     const downloadUrl = 'http://192.168.50.20:9557/api/v1/scene-export/download/preview-export-2026-06-04T06-00-00Z'
     Object.defineProperty(window.navigator, 'clipboard', {
@@ -397,7 +297,6 @@ describe('RendererSurface', () => {
   })
 
   it('uses the backend-provided scene.zip download URL without redundant fallback controls', async () => {
-    useRenderStore.getState().setViewMode('top')
     const downloadUrl = 'http://10.11.12.13:9557/api/v1/scene-export/download/minimal-export'
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/v1/scene-export/cook' && init?.method === 'POST') {
@@ -435,7 +334,6 @@ describe('RendererSurface', () => {
   })
 
   it('shows export errors in the Output drawer without touching graph state', async () => {
-    useRenderStore.getState().setViewMode('top')
     const fetchMock = vi.fn(async (url: string) => {
       if (url === '/api/v1/scene-export/cook') return new Response(JSON.stringify({ error: 'missing asset: grass' }), { status: 400 })
       if (url === '/api/v1/baked/layers') return new Response(JSON.stringify({ layers: [] }), { status: 200 })
@@ -461,14 +359,10 @@ describe('RendererSurface', () => {
   it('opens mutually exclusive Editable and Output drawers from the capsule', async () => {
     const { container } = render(<RendererSurface client={fakeClient()} />)
     await openDrawer(container, 'Editable')
-    const editableDrawer = container.querySelector('.renderer-drawer-panel.is-open') as HTMLElement
-    expect(editableDrawer.querySelector('.renderer-layers__section--editable')).not.toBeNull()
-    expect(within(editableDrawer).getAllByText('Editable')).toHaveLength(1)
+    expect(container.querySelector('.renderer-drawer-panel.is-open .renderer-layers__section--editable')).not.toBeNull()
     await openDrawer(container, 'Output')
-    const outputDrawer = container.querySelector('.renderer-drawer-panel.is-open') as HTMLElement
-    expect(outputDrawer.querySelector('.renderer-layers__section--output')).not.toBeNull()
-    expect(outputDrawer.querySelector('.renderer-layers__section--editable')).toBeNull()
-    expect(within(outputDrawer).getAllByText('Output')).toHaveLength(1)
+    expect(container.querySelector('.renderer-drawer-panel.is-open .renderer-layers__section--output')).not.toBeNull()
+    expect(container.querySelector('.renderer-drawer-panel.is-open .renderer-layers__section--editable')).toBeNull()
   })
 
   it('provides a draggable grip to resize the shared drawer width', async () => {
@@ -590,20 +484,18 @@ describe('RendererSurface', () => {
   })
 
   it('highlights the editor-selected node row (green) from store state', async () => {
-    const { container } = render(<RendererSurface client={fakeClient()} />)
-    await flushPreviewRefresh()
     useRenderStore.getState().setLayers('sink', 'scene_output',
       [{ nodePath: '/A', nodeName: 'Wall', value: 1, cells: [{ x: 0, y: 0, z: 0 }] }],
       [{ id: 1, name: 'wall', type: 'tile' }])
     useRenderStore.getState().setSelectedEditorNodeIds(['sink'])
+
+    const { container } = render(<RendererSurface client={fakeClient()} />)
     await openDrawer(container, 'Output')
     const row = container.querySelector('.renderer-layers-drawer .renderer-layer-row')
     expect(row?.classList.contains('is-editor-selected')).toBe(true)
   })
 
   it('renders scene_output voxel layers as a scene-path hierarchy, not a flat list', async () => {
-    const { container } = render(<RendererSurface client={fakeClient()} />)
-    await flushPreviewRefresh()
     useRenderStore.getState().setLayers('sink', 'scene_output',
       [
         { nodePath: '/Root', nodeName: 'Root', value: 1, cells: [{ x: 0, y: 0, z: 0 }] },
@@ -615,6 +507,8 @@ describe('RendererSurface', () => {
         { id: 2, name: 'child', type: 'scene' },
         { id: 3, name: 'leaf', type: 'scene' },
       ])
+
+    const { container } = render(<RendererSurface client={fakeClient()} />)
     await openDrawer(container, 'Output')
     const rows = Array.from(container.querySelectorAll('.renderer-layers-drawer .renderer-layer-row'))
     expect(rows).toHaveLength(3)
@@ -629,14 +523,14 @@ describe('RendererSurface', () => {
   })
 
   it('collapses descendants for output rows whose parent is also a layer', async () => {
-    const { container } = render(<RendererSurface client={fakeClient()} />)
-    await flushPreviewRefresh()
     useRenderStore.getState().setLayers('sink', 'scene_output',
       [
         { nodePath: '/Root', nodeName: 'Root', value: 1, cells: [{ x: 0, y: 0, z: 0 }] },
         { nodePath: '/Root/Child', nodeName: 'Child', value: 2, cells: [{ x: 1, y: 0, z: 0 }] },
       ],
       [{ id: 1, name: 'root' }, { id: 2, name: 'child' }])
+
+    const { container } = render(<RendererSurface client={fakeClient()} />)
     await openDrawer(container, 'Output')
     const output = container.querySelector('.renderer-layers__section--output') as HTMLElement
     expect(output.querySelectorAll('.renderer-layer-row')).toHaveLength(2)
@@ -645,11 +539,11 @@ describe('RendererSurface', () => {
   })
 
   it('mirrors a workbench:editor-selection postMessage into the highlight (host→pane wiring)', async () => {
-    const { container } = render(<RendererSurface client={fakeClient()} />)
-    await flushPreviewRefresh()
     useRenderStore.getState().setLayers('sink', 'scene_output',
       [{ nodePath: '/A', nodeName: 'Wall', value: 1, cells: [{ x: 0, y: 0, z: 0 }] }],
       [{ id: 1, name: 'wall', type: 'tile' }])
+
+    const { container } = render(<RendererSurface client={fakeClient()} />)
     await openDrawer(container, 'Output')
     expect(container.querySelector('.renderer-layer-row')?.classList.contains('is-editor-selected')).toBe(false)
 

@@ -3,58 +3,34 @@
 // resolve their `shared/types/index.js` imports at runtime. Node's
 // type-stripping does not map .js specifiers to .ts, so this lib must be
 // emitted as real .js. Output lives under vendor/dist (gitignored).
-//
 import { execSync } from 'node:child_process'
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 // app root = this script's dir (scripts/) up one level — cwd-independent so this
 // works whether invoked from the app root or as the backend's prebuild step.
 const appRoot = resolve(import.meta.dirname, '..')
 
 const tsc = 'pnpm exec tsc'
-const sharedTypesOut = resolve(appRoot, 'vendor/dist/shared/types')
 const cmd = [
   tsc,
-  // Plain ESM emit (esnext + bundler) — nodenext without package "type":"module"
-  // previously produced CJS __exportStar(require(...)) which Rollup cannot tree-shake.
-  '--module esnext --moduleResolution bundler --target es2022',
+  '--module nodenext --moduleResolution nodenext --target es2022',
   '--skipLibCheck --declaration true --noEmitOnError false',
   '--rootDir vendor/shared/types --outDir vendor/dist/shared/types',
-  // index.ts = the v3 barrel (graph/volume/port/summary/projection).
-  // tree.ts is a second, deliberately NOT-barrel-exported entry point — the old
-  // nested-tree implementation is kept alive solely for backend/src/baked/store.ts.
+  // index.ts = the v3 barrel (graph/volume/port/summary/projection). tree.ts is a
+  // second, deliberately NOT-barrel-exported entry point — the old nested-tree
+  // implementation is kept alive solely for backend/src/baked/store.ts's
+  // independent baked-scene.json persistence format (out of v3 refactor scope,
+  // see scene-v3-refactor-spec canvas's "范围之外" callout). Listing it as its
+  // own tsc entry (rather than `export *`-ing it from index.ts) is what makes
+  // `vendor/dist/.../tree.js` exist for that one deep import, without exposing
+  // its old readNode/upsertCells/etc. names next to graph.ts's new primitives.
   'vendor/shared/types/index.ts',
   'vendor/shared/types/scene/tree.ts',
 ].join(' ')
 
 execSync(cmd, { stdio: 'inherit', cwd: appRoot })
-
-// Bundler emit may keep relative imports extensionless; Node ESM needs .js.
-const addJsExtensions = (dir) => {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = resolve(dir, entry.name)
-    if (entry.isDirectory()) { addJsExtensions(full); continue }
-    if (!entry.name.endsWith('.js')) continue
-    const src = readFileSync(full, 'utf8')
-    const fixed = src.replace(
-      /((?:from|import)\s*\(?\s*['"])(\.\.?\/[^'"]*?)(['"])/g,
-      (m, pre, spec, post) => (/\.[a-zA-Z0-9]+$/.test(spec) ? m : `${pre}${spec}.js${post}`),
-    )
-    if (fixed !== src) writeFileSync(full, fixed)
-  }
-}
-addJsExtensions(sharedTypesOut)
-writeFileSync(resolve(sharedTypesOut, 'package.json'), `${JSON.stringify({ type: 'module', private: true }, null, 2)}\n`)
-
-const sceneTypes = await import(
-  `${pathToFileURL(resolve(sharedTypesOut, 'scene', 'index.js')).href}?build=${Date.now()}`,
-)
-if (typeof sceneTypes.cellCount !== 'function') {
-  throw new Error('vendor scene barrel must expose cellCount as an ESM named export')
-}
-console.log('[build-vendor] OK — vendor/dist/shared/types compiled (ESM + scene smoke)')
+console.log('[build-vendor] OK — vendor/dist/shared/types compiled')
 
 // Vendor the renderer's PURE sprite resolver so the scene-export backend can
 // call the SAME pickFaceSprite the browser renderer uses (one implementation,
@@ -78,6 +54,22 @@ const resolverCmd = [
 ].join(' ')
 execSync(resolverCmd, { stdio: 'inherit', cwd: appRoot })
 
+// Add `.js` to emitted relative import/export specifiers (bundler emit keeps
+// them extensionless; Node ESM needs explicit extensions). Only rewrites
+// specifiers starting with './' or '../' that lack an extension.
+const addJsExtensions = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = resolve(dir, entry.name)
+    if (entry.isDirectory()) { addJsExtensions(full); continue }
+    if (!entry.name.endsWith('.js')) continue
+    const src = readFileSync(full, 'utf8')
+    const fixed = src.replace(
+      /((?:from|import)\s*\(?\s*['"])(\.\.?\/[^'"]*?)(['"])/g,
+      (m, pre, spec, post) => (/\.[a-zA-Z0-9]+$/.test(spec) ? m : `${pre}${spec}.js${post}`),
+    )
+    if (fixed !== src) writeFileSync(full, fixed)
+  }
+}
 addJsExtensions(resolverOut)
 // Mark the emitted tree as ESM so Node parses the .js as modules without the
 // MODULE_TYPELESS_PACKAGE_JSON reparse warning.

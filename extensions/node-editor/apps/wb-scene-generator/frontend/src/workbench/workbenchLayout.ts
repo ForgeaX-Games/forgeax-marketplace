@@ -37,7 +37,7 @@ export const DEFAULT_EDITOR_VISIBLE = true
  * and controls as a single composited layer.
  */
 export const EDITOR_OPACITY_MIN = 20
-export const EDITOR_OPACITY_DEFAULT = EDITOR_OPACITY_MIN
+export const EDITOR_OPACITY_DEFAULT = 92
 export const EDITOR_OPACITY_MAX = 100
 
 export type WorkspaceLayoutSnapshot = {

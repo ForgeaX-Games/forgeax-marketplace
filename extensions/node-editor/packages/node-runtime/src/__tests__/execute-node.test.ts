@@ -520,54 +520,6 @@ describe('executeNode access semantics (Layer 1)', () => {
     ])
   })
 
-  it('dispatches DataTree wire values stored in params by item/list/tree access', async () => {
-    const runtime = fresh()
-    const wire = [
-      { path: [0, 0], items: ['plaza'] },
-      { path: [0, 1], items: ['harbor'] },
-    ]
-    runtime.registry.register({
-      id: 'kernel.param-item',
-      inputs: [{ name: 'value', type: 'string', access: 'item' }],
-      outputs: [{ name: 'out', type: 'string', access: 'item' }],
-      params: [],
-      execute: (_ctx, args) => ({ out: `item:${String(args.value)}` }),
-    })
-    runtime.registry.register({
-      id: 'kernel.param-list',
-      inputs: [{ name: 'value', type: 'string', access: 'list' }],
-      outputs: [{ name: 'out', type: 'string', access: 'item' }],
-      params: [],
-      execute: (_ctx, args) => ({ out: `list:${(args.value as string[]).join(',')}` }),
-    })
-    runtime.registry.register({
-      id: 'kernel.param-tree',
-      inputs: [{ name: 'value', type: 'string', access: 'tree' }],
-      outputs: [{ name: 'out', type: 'number', access: 'item' }],
-      params: [],
-      execute: (_ctx, args) => ({
-        out: (args.value as DataTree<string>).toJSON().length,
-      }),
-    })
-
-    const run = (opId: string) => executeNodeL1(
-      runtime.registry,
-      { id: opId, opId, position: { x: 0, y: 0 }, params: { value: wire } },
-      {},
-      makeCtx(),
-    )
-    expect(entries((await run('kernel.param-item')).outputs.out)).toEqual([
-      { path: [0, 0], items: ['item:plaza'] },
-      { path: [0, 1], items: ['item:harbor'] },
-    ])
-    expect(entries((await run('kernel.param-list')).outputs.out)).toEqual([
-      { path: [0], items: ['list:plaza,harbor'] },
-    ])
-    expect(entries((await run('kernel.param-tree')).outputs.out)).toEqual([
-      { path: [0], items: [2] },
-    ])
-  })
-
   it('passes a promoted branch to list access as an ordered item array', async () => {
     const runtime = fresh()
     runtime.registry.register({
@@ -791,7 +743,7 @@ describe('executeNode group sub-graph', () => {
       {
         type: 'createGroup', groupId: 'g', name: 'Inner', memberNodeIds: ['m'], position: { x: 100, y: 0 },
         exposedPorts: {
-          inputs: [{ portName: 'in_0', access: 'tree', sourceNodeId: 'm', sourcePortName: 'in' }],
+          inputs: [{ portName: 'in_0', sourceNodeId: 'm', sourcePortName: 'in' }],
           outputs: [{ portName: 'out_0', sourceNodeId: 'm', sourcePortName: 'out' }],
         },
       },
@@ -799,7 +751,6 @@ describe('executeNode group sub-graph', () => {
 
     const graph = runtime.graph.load()!
     const grp = graph.groups!.g!
-    expect(grp.exposedInputs[0]?.access).toBe('tree')
     // Exposed output must keep the stable name, map to m.out, and carry the inner
     // op's real type (number) — never collapse to 'any'.
     expect(grp.exposedOutputs).toEqual([

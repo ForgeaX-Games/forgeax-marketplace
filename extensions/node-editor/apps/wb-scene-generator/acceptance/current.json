@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-12T15:03:06.738Z",
+  "generatedAt": "2026-08-11T02:56:57.300Z",
   "authoritativeManifest": "promoted.json",
   "inventory": "inventory/scene-script-battery-inventory.json",
   "counts": {
@@ -11,7 +11,7 @@
     "template": 36
   },
   "currentEvidence": [
-    ".checkpoints/ci-414.json"
+    ".checkpoints/full-414.json"
   ],
   "historicalEvidence": []
 }

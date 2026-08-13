@@ -2,7 +2,6 @@ node_modules/
 # This repository is a pnpm workspace; a local `bun install` must not make
 # the nested submodule dirty or bubble into forgeax-marketplace/Studio.
 bun.lock
-apps/*/bun.lock
 *.tsbuildinfo
 *.log
 
@@ -10,7 +9,6 @@ apps/*/bun.lock
 # step; ignored for now during the consolidation milestone.
 dist/
 vendor/dist/
-release/
 
 .DS_Store
 

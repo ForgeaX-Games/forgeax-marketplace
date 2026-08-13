@@ -80,19 +80,6 @@ describe('Sino Scene Script contract', () => {
     expect(exposedTools).toEqual([...(agent.tools as string[])].sort())
   })
 
-  it('declares an optional Layout checkpoint payload for transaction lifecycle tools', () => {
-    for (const toolId of [
-      'scene:agent.applySceneEdit',
-      'scene:agent.verifySceneEdit',
-      'scene:agent.acceptOrRevertSceneEdit',
-    ]) {
-      expect(contributedTools.get(toolId)?.args.properties.layout).toEqual(expect.objectContaining({
-        type: 'object',
-        additionalProperties: true,
-      }))
-    }
-  })
-
   it('keeps lower-level and external asset bridges outside the AI surface', () => {
     for (const toolId of [
       'scene:authoring.lens',

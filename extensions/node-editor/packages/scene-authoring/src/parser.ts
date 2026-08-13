@@ -276,7 +276,7 @@ function parsePortMap(
       if (!ts.isStringLiteral(runtimePort)) diagnostics.push(diagnostic('SCENE_DEFINE_PORT', 'runtimePort must be a string literal.', rangeOf(file, sourceFile, runtimePort)))
       else port.runtimePort = runtimePort.text
     }
-    for (const key of ['runtimeType', 'labelEn', 'description'] as const) {
+    for (const key of ['runtimeType', 'labelEn'] as const) {
       const value = values.get(key)
       if (!value) continue
       if (!ts.isStringLiteral(value)) diagnostics.push(diagnostic('SCENE_DEFINE_PORT', `${key} must be a string literal.`, rangeOf(file, sourceFile, value)))

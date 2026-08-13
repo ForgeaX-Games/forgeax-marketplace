@@ -488,7 +488,6 @@ body.bb-resizing {
   position: relative;        /* .bb-expanded-overlay 的定位基准 */
   flex: 1;
   min-height: 0;
-  margin-right: 8px;         /* 为外侧的宽度拖拽把手保留独立命中区 */
   padding: 4px 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -1034,7 +1033,7 @@ body.bb-resizing {
   padding-left: 8px;      /* 覆盖层模式去掉三级缩进，因为有自己的网格 */
 }
 
-/* ── 右侧宽度拖拽把手（位于纵向滚动条外侧） ───────────────────────────── */
+/* ── 右侧宽度拖拽把手（贴在 aside 右边缘全高） ───────────────────────── */
 .bb-resize-handle {
   position: absolute;
   top: 0;

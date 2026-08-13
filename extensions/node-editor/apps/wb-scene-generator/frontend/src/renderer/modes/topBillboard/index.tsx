@@ -19,7 +19,7 @@ import { useRenderStore, consumeLastPaintDelta } from '../../store'
 import { voxelLayerCellSource, type CellSource } from '../../framework/cellSource'
 import { mergeRenderableVoxelLayerKeys, orderBakedKeysForRender } from '../../framework/layerKeys'
 import { registerRenderPlugin, type PluginHandle } from '../../framework/plugin'
-import { SCREEN_CELL_SIZE, TEXTURE_PPU } from '../../framework/geometry/constants'
+import { BASE_CELL_SIZE, TEXTURE_PPU } from '../../framework/geometry/constants'
 import { topMasterOrigin } from '../../framework/geometry/top'
 import {
   billboardEditVoxelFromFrontFaceCell,
@@ -527,7 +527,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
       canvas,
       voxelMaster: master,
       maxRows: mr, maxCols: mc,
-      cellSize: SCREEN_CELL_SIZE,
+      cellSize: BASE_CELL_SIZE,
       offsetX: viewportRef.current.offsetX,
       offsetY: viewportRef.current.offsetY,
       scale: viewportRef.current.scale,
@@ -561,7 +561,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
       voxelMaster: appended,
       maxRows: forceFull ? aMaxRows : maxRows,
       maxCols: forceFull ? aMaxCols : maxCols,
-      cellSize: SCREEN_CELL_SIZE,
+      cellSize: BASE_CELL_SIZE,
       offsetX: viewportRef.current.offsetX,
       offsetY: viewportRef.current.offsetY,
       scale: viewportRef.current.scale,
@@ -744,7 +744,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     ctx.scale(viewportRef.current.scale, viewportRef.current.scale)
     ctx.translate(-cx, -cy)
     ctx.imageSmoothingEnabled = false
-    const cellSize = SCREEN_CELL_SIZE
+    const cellSize = BASE_CELL_SIZE
     // Fresh from masterRef.current (not the render-scope maxRows/maxCols dep
     // below) for the same reason `compose` is: a pan/zoom no longer re-renders
     // this plugin, so a render-scope snapshot could be stale relative to an
@@ -1078,7 +1078,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     screenToCell: (cssX, cssY) => {
       const canvas = canvasRef.current
       if (!canvas) return null
-      const cellSize = SCREEN_CELL_SIZE
+      const cellSize = BASE_CELL_SIZE
       const { maxRows, maxCols } = deriveGridExtent(masterRef.current)
       const viewport = viewportRef.current
       const sizeSource = canvas.parentElement ?? canvas
@@ -1101,7 +1101,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     voxelStackAtScreen: (cssX, cssY) => {
       const canvas = canvasRef.current
       if (!canvas) return []
-      const cellSize = SCREEN_CELL_SIZE
+      const cellSize = BASE_CELL_SIZE
       const { maxRows, maxCols } = deriveGridExtent(masterRef.current)
       const viewport = viewportRef.current
       const sizeSource = canvas.parentElement ?? canvas
@@ -1120,7 +1120,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     cellToScreen: (col, row) => {
       const canvas = canvasRef.current
       if (!canvas) return null
-      const cellSize = SCREEN_CELL_SIZE
+      const cellSize = BASE_CELL_SIZE
       const { maxRows, maxCols } = deriveGridExtent(masterRef.current)
       const viewport = viewportRef.current
       const sizeSource = canvas.parentElement ?? canvas
@@ -1143,7 +1143,7 @@ const ModeTopBillboardPlugin = forwardRef<PluginHandle, object>(function ModeTop
     screenToEditCell: (cssX, cssY, z) => {
       const canvas = canvasRef.current
       if (!canvas) return null
-      const cellSize = SCREEN_CELL_SIZE
+      const cellSize = BASE_CELL_SIZE
       const { maxRows, maxCols } = deriveGridExtent(masterRef.current)
       const viewport = viewportRef.current
       const sizeSource = canvas.parentElement ?? canvas

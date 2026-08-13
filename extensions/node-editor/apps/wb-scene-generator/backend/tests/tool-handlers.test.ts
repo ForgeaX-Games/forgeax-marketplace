@@ -1,19 +1,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/main.js'
-import {
-  boundedSceneScriptMutationResult,
-  formatExecuteVerificationFailure,
-  summarizeProjectOpen,
-  tools,
-} from '../src/tool-handlers.js'
-import {
-  SINO_TEMPLATE_GUIDANCE,
-  SINO_UTILITY_FUNCTIONS,
-} from '../src/scene-script/agentContractCatalog.js'
+import { formatExecuteVerificationFailure, summarizeProjectOpen, tools } from '../src/tool-handlers.js'
 import { applyBatch } from '@forgeax/node-runtime'
 import { getRuntimeForProject } from '../src/runtime.js'
 
@@ -48,22 +38,6 @@ function ctx(toolId: string, agentId?: string, kind: 'ai' | 'user' = 'ai') {
 }
 
 describe('ToolRegistry scene handlers', () => {
-  it('bounds Scene Script mutation payloads for Agent context', () => {
-    expect(boundedSceneScriptMutationResult({
-      valid: true,
-      canonicalSource: 'x'.repeat(20_000),
-      sourceMap: [{ statementId: 's1' }, { statementId: 's2' }],
-      sources: { main: 'large' },
-      transaction: { applied: true, undoToken: 'b1' },
-      revision: 4,
-    })).toEqual({
-      valid: true,
-      transaction: { applied: true, undoToken: 'b1' },
-      revision: 4,
-      sourceMapEntries: 2,
-    })
-  })
-
   it('keeps AI project-open results to project and pipeline state', () => {
     expect(summarizeProjectOpen({
       project: { id: 'p1', name: 'Town', type: 'scene', description: 'large' },
@@ -95,54 +69,6 @@ describe('ToolRegistry scene handlers', () => {
       expect(result).toEqual([
         expect.objectContaining({ id: 'main', type: 'scene', name: 'Default Scene' }),
       ])
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('progressively discloses only Sino-approved Scene Contracts', async () => {
-    const app = await buildApp()
-    await app.listen({ host: '127.0.0.1', port: 0 })
-    const addr = app.server.address()
-    const port = typeof addr === 'object' && addr ? addr.port : 0
-    writeFileSync(
-      portsFile,
-      JSON.stringify({ plugins: { '@forgeax-plugin/wb-scene-generator': { backendPort: port } } }),
-    )
-
-    try {
-      const summary = await tools['scene:script.contracts'](
-        { projectId: 'main' },
-        ctx('scene:script.contracts'),
-      ) as { mode: string; functions: Array<{ functionName: string }>; total: number }
-      const approvedNames = new Set<string>([
-        ...SINO_UTILITY_FUNCTIONS,
-        ...Object.keys(SINO_TEMPLATE_GUIDANCE),
-      ])
-      expect(summary.mode).toBe('summary')
-      expect(summary.total).toBe(summary.functions.length)
-      expect(summary.functions.every((item) => approvedNames.has(item.functionName))).toBe(true)
-      expect(Buffer.byteLength(JSON.stringify(summary))).toBeLessThan(20 * 1024)
-      expect(summary.functions.some((item) => item.functionName === 'addBaseGrid')).toBe(true)
-      expect(summary.functions.some((item) => item.functionName === 'rectangularGrid')).toBe(false)
-      expect(summary.functions.some((item) => item.functionName === 'cellularNoise')).toBe(false)
-      expect(summary.functions.some((item) => item.functionName === 'fieldGrow')).toBe(false)
-
-      const detail = await tools['scene:script.contracts'](
-        {
-          projectId: 'main',
-          mode: 'detail',
-          functionNames: ['addBaseGrid', 'areaPartition', 'sceneOutput', 'rectangularGrid'],
-        },
-        ctx('scene:script.contracts'),
-      ) as { mode: string; functions: Array<{ functionName: string; inputs: unknown[] }> }
-      expect(detail.mode).toBe('detail')
-      expect(detail.functions.map((item) => item.functionName)).toEqual([
-        'addBaseGrid',
-        'areaPartition',
-        'sceneOutput',
-      ])
-      expect(detail.functions.every((item) => item.inputs.length > 0)).toBe(true)
     } finally {
       await app.close()
     }
@@ -231,7 +157,7 @@ describe('ToolRegistry scene handlers', () => {
     }
   })
 
-  it('accepts explicit projectId on pipeline.execute without Director-provided location names', async () => {
+  it('accepts explicit projectId on pipeline.execute after open', async () => {
     const app = await buildApp()
     await app.listen({ host: '127.0.0.1', port: 0 })
     const addr = app.server.address()
@@ -245,7 +171,7 @@ describe('ToolRegistry scene handlers', () => {
       const agentId = 'test-agent'
       await tools['scene:projects.open']({ id: 'main' }, ctx('scene:projects.open', agentId))
       const summary = await tools['scene:pipeline.execute'](
-        { projectId: 'main' },
+        { projectId: 'main', narrativeLocationNames: ['Default Scene'] },
         ctx('scene:pipeline.execute', agentId),
       ) as { status?: string; outputs?: unknown }
       expect(summary.status).toBeDefined()
@@ -453,26 +379,16 @@ describe('ToolRegistry scene handlers', () => {
     })
   })
 
-  describe('formatExecuteVerificationFailure (root-cause priority)', () => {
-    it('treats execFailures as primary even when runtime status says completed', () => {
-      const msg = formatExecuteVerificationFailure({
-        status: 'completed',
-        verification: {
-          ok: false,
-          primaryFailure: 'execution',
-          executionFailures: {
-            ok: false,
-            count: 1,
-            failures: [{ index: 0, message: 'areaPartition failed: empty region' }],
-          },
-          hints: ['[execution.failures] one node failed'],
-        },
-      })
-      expect(msg).toMatch(/^\[primaryFailure: execution\]/)
-      expect(msg).toContain('status=completed is not acceptance')
-      expect(msg).toContain('areaPartition failed')
-    })
+  it('rejects AI pipeline.execute without narrativeLocationNames when no run dir', async () => {
+    await expect(
+      tools['scene:pipeline.execute'](
+        { projectId: 'p_unknown_project' },
+        ctx('scene:pipeline.execute', 'no-names-agent'),
+      ),
+    ).rejects.toThrow(/narrativeLocationNames/)
+  })
 
+  describe('formatExecuteVerificationFailure (root-cause priority)', () => {
     it('prefers structural over locationNameAlignment when both fail', () => {
       const msg = formatExecuteVerificationFailure({
         status: 'completed',

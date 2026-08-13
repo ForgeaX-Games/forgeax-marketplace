@@ -17,11 +17,6 @@
   "scripts": {
     "build": "pnpm -r build",
     "build:vendor": "pnpm --filter './apps/*/backend' run --if-present build:vendor",
-    "build:release": "node scripts/build-standalone-releases.mjs",
-    "check:release": "node scripts/check-standalone-releases.mjs",
-    "verify:release": "node scripts/verify-standalone-releases.mjs",
-    "test:packaging": "node --test scripts/standalone-plugin-dependencies.test.mjs scripts/ensure-workspace-packages.test.mjs",
-    "test:cold-start": "node --test --test-timeout=90000 scripts/cold-start-health.test.mjs",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "verify:scene-script": "pnpm --dir apps/wb-scene-generator verify:scene-script",

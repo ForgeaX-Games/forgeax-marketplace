@@ -7,10 +7,10 @@ import { broadcastToClients } from '../routes/ws.js'
 // which live renderer clients apply to their render store (see the renderer's
 // useRendererCommands bridge — mirrors the screenshot:request WS pattern).
 //
-// View modes are the renderer's own (top / topBillboard / iso / free3d / 3DMesh); legacy
+// View modes are the renderer's own (top / topBillboard / iso / free3d); legacy
 // 2d/3d aliases map onto them so existing callers keep working.
 
-const VIEW_MODES = ['top', 'topBillboard', 'iso', 'free3d', '3DMesh'] as const
+const VIEW_MODES = ['top', 'topBillboard', 'iso', 'free3d'] as const
 type ViewMode = (typeof VIEW_MODES)[number]
 const LEGACY_VIEW_ALIASES: Record<string, ViewMode> = {
   '2d': 'top',
@@ -19,8 +19,6 @@ const LEGACY_VIEW_ALIASES: Record<string, ViewMode> = {
   billboard: 'topBillboard',
   iso: 'iso',
   free3d: 'free3d',
-  '3DMesh': '3DMesh',
-  mesh3d: '3DMesh',
 }
 
 interface ViewModeBody {

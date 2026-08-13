@@ -14,8 +14,8 @@ describe('atomic Scene Contract loader', () => {
       resolve(appRoot, 'batteries'),
     ])
 
-    const opIds = new Set(contracts.map((item) => item.opId))
-    expect(opIds.size).toBeGreaterThan(0)
+    expect(new Set(contracts.map((item) => item.opId)).size).toBe(362)
+    expect(contracts.length).toBeGreaterThan(362)
     expect(contracts.find((item) => item.opId === 'range_list')?.functionName).toBe('rangeList')
     expect(contracts.filter((item) => item.opId === 'tree_merge')).toHaveLength(4)
   })

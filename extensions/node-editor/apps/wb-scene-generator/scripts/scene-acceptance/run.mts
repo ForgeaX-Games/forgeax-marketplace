@@ -250,14 +250,12 @@ async function main(): Promise<void> {
   const priorExecute = options.resume
     ? await readJson(executeCachePath, 'execute evidence cache').catch(() => ({}))
     : {}
-  console.log(`scene acceptance: loading ${selectedIds.size} selected cell(s)`)
-  const { registry: opRegistry, scan } = await loadAtomicOpRegistry(extensionRoot, inventory)
-  console.log(`scene acceptance: loaded ${String(scan.added)} atomic operation(s)`)
-  const roundTripEvidence = await buildRoundTripEvidence(inventory, registry)
-  console.log('scene acceptance: round-trip evidence ready')
-  const sourceMapEvidence = await buildSourceMapEvidence(inventory, registry, extensionRoot)
-  console.log('scene acceptance: source-map evidence ready')
-  const visualEvidence = await buildVisualEvidence(visualEvidencePath, selectedIds)
+  const [{ registry: opRegistry, scan }, roundTripEvidence, sourceMapEvidence, visualEvidence] = await Promise.all([
+    loadAtomicOpRegistry(extensionRoot, inventory),
+    buildRoundTripEvidence(inventory, registry),
+    buildSourceMapEvidence(inventory, registry, extensionRoot),
+    buildVisualEvidence(visualEvidencePath, selectedIds),
+  ])
   let persisted = 0
   const executeEvidence = await runAtomicExecuteBatch({
     inventory,

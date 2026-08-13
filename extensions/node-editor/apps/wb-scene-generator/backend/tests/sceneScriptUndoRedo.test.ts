@@ -29,8 +29,6 @@ describe('canonical Scene Script undo/redo', () => {
         source: `// @scene-module-id module.main
 // @scene-id value
 const value = numberValue({ value: 1 })
-const root = emptyScene({})
-sceneOutput({ scene: root.scene })
 `,
       },
     })

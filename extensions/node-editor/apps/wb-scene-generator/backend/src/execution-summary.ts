@@ -218,24 +218,6 @@ interface PortSummary {
   truncated?: boolean
 }
 
-/** Count cells emitted by scene_output's voxel_layers port without retaining payloads. */
-function countVoxelLayerCells(item: unknown): number {
-  const layers = Array.isArray(item) ? item : [item]
-  return layers.reduce((total, layer) => {
-    if (!isRecord(layer) || !Array.isArray(layer.cells)) return total
-    return total + layer.cells.length
-  }, 0)
-}
-
-function formatExecFailure(item: unknown): string {
-  if (typeof item === 'string') return item
-  try {
-    return JSON.stringify(item) ?? String(item)
-  } catch {
-    return String(item)
-  }
-}
-
 /** Summarize one port wire value (DataTreeEntry[] toJSON form). Never throws. */
 function summarizePort(value: unknown): unknown {
   // Expected shape: DataTreeEntry[] = [{ path, items }, ...]
@@ -257,8 +239,6 @@ function summarizePort(value: unknown): unknown {
       if (port) {
         const node = getNode(port.graph, port.focus)
         if (node) totalCellCount += countSubtreeCells(port.graph, node)
-      } else {
-        totalCellCount += countVoxelLayerCells(item)
       }
       if (summaries.length < MAX_INLINE_ITEMS) {
         const path = isRecord(entry) && Array.isArray(entry.path) ? entry.path : undefined
@@ -341,7 +321,6 @@ export function summarizeExecutionResult(
   full: unknown,
   expectedLocationNames?: readonly string[],
   currentGraph?: { edges: readonly TopologyGraphEdge[]; nodeById: Map<string, TopologyGraphNode> },
-  resultEntityIds?: readonly string[],
 ): unknown {
   if (!isRecord(full)) return full
   const summarizedOutputs: Record<string, Record<string, unknown>> = {}
@@ -364,56 +343,11 @@ export function summarizeExecutionResult(
 
   const status = full.status
   const structuralHints: string[] = []
-  const executionHints: string[] = []
   /** Non-blocking notes (do NOT flip verification.ok). Concurrent construction
    *  leaves orphan/_explore scratch groups and other agents' WIP on the same
    *  project; those must not make an unrelated task's execute look failed. */
   const advisoryHints: string[] = []
   const graphEdges = currentGraph?.edges
-  const canonicalSceneScript = resultEntityIds !== undefined
-  const finalResultEntityIds = [...new Set(resultEntityIds ?? [])]
-  const missingResultEntityIds = finalResultEntityIds.filter((nodeId) => !(nodeId in summarizedOutputs))
-  const emptyResultEntityIds = finalResultEntityIds.filter((nodeId) => {
-    const ports = summarizedOutputs[nodeId]
-    return ports ? Object.values(ports).every((summary) => {
-      const count = (summary as Partial<PortSummary>).totalCellCount
-      return typeof count !== 'number' || count === 0
-    }) : false
-  })
-  const finalSceneCells = finalResultEntityIds.reduce<number>((total, nodeId) => {
-    const ports = summarizedOutputs[nodeId]
-    return total + (ports ? Object.values(ports).reduce<number>((portTotal, summary) => {
-      const count = (summary as Partial<PortSummary>).totalCellCount
-      return portTotal + (typeof count === 'number' ? count : 0)
-    }, 0) : 0)
-  }, 0)
-  const finalOutputOk = finalResultEntityIds.length > 0
-    && emptyResultEntityIds.length === 0
-    && missingResultEntityIds.length === 0
-    && finalSceneCells > 0
-  const rawExecFailures = Array.isArray((full as { execFailures?: unknown[] }).execFailures)
-    ? (full as { execFailures: unknown[] }).execFailures
-    : []
-  const execFailures = rawExecFailures
-    .map(formatExecFailure)
-    .map((item) => item.slice(0, 512))
-  if (execFailures.length > 0) {
-    executionHints.push(
-      `[execution.failures] ${execFailures.length} node execution failure(s) were recorded; completed status is not acceptance. ` +
-      'Fix the first failing Scene Script operation and re-execute.',
-    )
-  }
-  if (canonicalSceneScript && finalResultEntityIds.length === 0) {
-    structuralHints.push(
-      '[scene-script.capture] Canonical Scene Script compiled without sceneOutput/resultEntityIds. ' +
-      'Add sceneOutput({ scene: finalScene.scene }) and validate again.',
-    )
-  } else if (canonicalSceneScript && status === 'completed' && !finalOutputOk) {
-    structuralHints.push(
-      `[scene-script.final-output] Compiled sceneOutput capture(s) produced zero cells ` +
-      `(resultEntityIds=${finalResultEntityIds.join(', ') || 'none'}). Intermediate port cells do not satisfy acceptance.`,
-    )
-  }
 
   const pushEmptyHint = (nodeId: string, message: string): void => {
     // No graph context → keep legacy blocking behavior.
@@ -434,13 +368,13 @@ export function summarizeExecutionResult(
     structuralHints.push(message)
   }
 
-  if (!canonicalSceneScript && status === 'completed' && totalSceneCells === 0) {
+  if (status === 'completed' && totalSceneCells === 0) {
     structuralHints.push(
       'execute completed but totalCellCount=0 across all ports. This is NOT template whitelist blocking. ' +
       'Required scene inputs are likely disconnected (悬空端口) or Rest wiring is wrong. ' +
       'Run pipeline.get, verify edges into template group in_* ports, fix Rest chain (fast-loop.md), re-execute.',
     )
-  } else if (!canonicalSceneScript && status === 'completed') {
+  } else if (status === 'completed') {
     for (const [nodeId, ports] of Object.entries(summarizedOutputs)) {
       const portEntries = Object.entries(ports)
       if (portEntries.length === 0) {
@@ -497,13 +431,12 @@ export function summarizeExecutionResult(
     )
   }
 
-  const hints = [...executionHints, ...structuralHints, ...locationHints, ...advisoryHints]
+  const hints = [...structuralHints, ...locationHints, ...advisoryHints]
   const locationNamesOk = !locationRejection?.missing?.length
   const hasStructuralFailure = structuralHints.length > 0
-  const hasExecutionFailure = execFailures.length > 0
   const hasLocationFailure = Boolean(locationRejection?.missing?.length)
-  const primaryFailure: 'execution' | 'structural' | 'location-names' | undefined =
-    hasExecutionFailure ? 'execution' : hasStructuralFailure ? 'structural' : hasLocationFailure ? 'location-names' : undefined
+  const primaryFailure: 'structural' | 'location-names' | undefined =
+    hasStructuralFailure ? 'structural' : hasLocationFailure ? 'location-names' : undefined
 
   const topologyIssues = currentGraph ? buildTopologyIssues(currentGraph.edges, currentGraph.nodeById) : undefined
 
@@ -512,39 +445,15 @@ export function summarizeExecutionResult(
     status: full.status,
     durationMs: full.durationMs,
     ...(full.error !== undefined ? { error: full.error } : {}),
-    ...(rawExecFailures.length > 0
-      ? { execFailures: rawExecFailures }
+    ...(Array.isArray((full as { execFailures?: string[] }).execFailures)
+      ? { execFailures: (full as { execFailures: string[] }).execFailures }
       : {}),
     summarized: true,
     verification: {
       // topologyIssues / advisoryHints 不参与 ok 判定。ok=false 只看「接入 merge
       // 的组空输出」与地点名对齐——孤立 _explore_* 或他阶段 WIP 不得拖垮本任务。
-      ok: status === 'completed'
-        && !hasExecutionFailure
-        && structuralHints.length === 0
-        && (!hasExpectedNames || locationNamesOk),
+      ok: structuralHints.length === 0 && (!hasExpectedNames || locationNamesOk),
       totalSceneCells,
-      ...(canonicalSceneScript
-        ? {
-            finalOutput: {
-              ok: finalOutputOk,
-              resultEntityIds: finalResultEntityIds,
-              totalSceneCells: finalSceneCells,
-              missingResultEntityIds,
-              emptyResultEntityIds,
-            },
-          }
-        : {}),
-      ...(hasExecutionFailure
-        ? {
-            executionFailures: {
-              ok: false,
-              count: execFailures.length,
-              failures: execFailures.slice(0, 20).map((message, index) => ({ index, message })),
-              ...(execFailures.length > 20 ? { truncated: true } : {}),
-            },
-          }
-        : {}),
       ...(primaryFailure ? { primaryFailure } : {}),
       ...(hasExpectedNames
         ? {

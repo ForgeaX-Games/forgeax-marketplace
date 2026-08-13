@@ -49,9 +49,9 @@ export interface ExposedPortPatch {
  * in the template), NOT a name re-derived from the (volatile) inner node id.
  *
  * The kernel binds `portName` → `(sourceNodeId, sourcePortName)` and rewrites
- * boundary edges to this `portName`. The contract may explicitly preserve the
- * boundary portType/access; omitted fields are resolved from the inner member's
- * OpSpec. The presentation overlay fields ride along.
+ * boundary edges to this `portName`; the wiring tier (portType / access) is
+ * still resolved from the inner member's OpSpec so the boundary mirrors the
+ * inner battery exactly. The presentation overlay fields ride along.
  *
  * `sourceNodeId` must reference a (post-remap) member node and `sourcePortName`
  * one of its ports; an entry that resolves to neither is dropped (the contract
@@ -70,7 +70,6 @@ export interface ExposedPortContract {
    * `unsaved*`).
    */
   portType?: string
-  access?: OpAccess
   hidden?: boolean
   order?: number
   customLabel?: string
@@ -159,9 +158,9 @@ export type Op =
       // post-remap) inner node ids. This is what lets a group behave like a
       // first-class battery: its outward port names never shift when it is
       // re-instantiated from a template (the original "drop a saved group →
-      // ports disconnect / no result" bug). Explicit portType/access fields
-      // preserve the template contract; omitted fields are resolved from the
-      // inner OpSpec. Presentation overlay (hidden/order/customLabel*) rides
+      // ports disconnect / no result" bug). The wiring tier (portType/access)
+      // is still resolved from the inner OpSpec so the boundary mirrors the
+      // inner battery; presentation overlay (hidden/order/customLabel*) rides
       // along. Entries whose (sourceNodeId, sourcePortName) resolves to no
       // live member port are dropped (advisory, never fatal). Members/ports
       // present in the topology but absent from the contract still get a
@@ -831,10 +830,9 @@ function applyCreateGroup(
   // CONTRACT is AUTHORITATIVE: when present, MATERIALIZE every contract port up
   // front (not just rename derived ones). A freshly-dropped template has NO
   // boundary edges, so `derived` is empty — yet its ports must still surface.
-  // Each contract entry's omitted wiring tier is resolved from the inner
-  // member's OpSpec; explicit template portType/access remains authoritative.
-  // A stale entry whose sourceNodeId is not a member is dropped (advisory). We
-  // record the mapping key -> portName so the
+  // Each contract entry's wiring tier is resolved from the inner member's OpSpec
+  // (never trusted off the contract); a stale entry whose sourceNodeId is not a
+  // member is dropped (advisory). We record the mapping key -> portName so the
   // derived boundary pass below reuses the contract name (no dupes) for ports
   // that DO have a boundary edge.
   const contractInName = new Map<string, string>() // `${sourceNodeId}\0${sourcePortName}` -> portName
@@ -850,7 +848,7 @@ function applyCreateGroup(
       exposedInputs.push({
         portName: c.portName,
         portType: c.portType ?? tier.portType,
-        ...((c.access ?? tier.access) !== undefined ? { access: c.access ?? tier.access } : {}),
+        ...(tier.access !== undefined ? { access: tier.access } : {}),
         sourceNodeId: c.sourceNodeId,
         sourcePortName: c.sourcePortName,
       })
@@ -865,7 +863,7 @@ function applyCreateGroup(
       exposedOutputs.push({
         portName: c.portName,
         portType: c.portType ?? tier.portType,
-        ...((c.access ?? tier.access) !== undefined ? { access: c.access ?? tier.access } : {}),
+        ...(tier.access !== undefined ? { access: tier.access } : {}),
         sourceNodeId: c.sourceNodeId,
         sourcePortName: c.sourcePortName,
       })

@@ -110,7 +110,7 @@ describe('Scene Script', () => {
     id: "wrapper",
     version: "1.0.0",
     inputs: { value: { type: NumberValue, runtimePort: "in_2", access: "item", required: true, mode: "parameter", label: "Value", order: 2, defaultValue: 3 } },
-    outputs: { value: { type: NumberValue, runtimePort: "out_1", access: "item", hidden: true, label: "Result", description: "Wrapped numeric result.", order: 1 } },
+    outputs: { value: { type: NumberValue, runtimePort: "out_1", access: "item", hidden: true, label: "Result", order: 1 } },
   },
   ({ value }) => {
     const inner = numberValue({ value })
@@ -131,121 +131,12 @@ describe('Scene Script', () => {
       order: 2,
       customLabel: 'Value',
     }))
-    expect(result.contract?.inputs[0].parameterTarget).toEqual(expect.objectContaining({
-      templateNodeId: expect.any(String),
-      param: 'value',
-    }))
     expect(result.contract?.definition?.exposedOutputs?.[0]).toEqual(expect.objectContaining({
       portName: 'out_1',
       hidden: true,
       order: 1,
       customLabel: 'Result',
     }))
-    expect(result.contract?.outputs[0].description).toBe('Wrapped numeric result.')
-    const invocationRegistry = new SceneContractRegistry([...contracts, result.contract!])
-    const invocation = parseSceneModule('const wrapped = Wrapper({ value: 7 })', {
-      file: 'main.scene.ts',
-      registry: invocationRegistry,
-    })
-    const compiled = compileSceneModule(invocation.module, invocationRegistry)
-    expect(compiled.diagnostics).toEqual([])
-    expect(compiled.ops).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        type: 'createNode',
-        params: expect.objectContaining({ value: 7 }),
-      }),
-    ]))
-  })
-
-  it('compiles Group array literals as DataTrees according to item/list/tree contracts', () => {
-    const definitionRegistry = new SceneContractRegistry([
-      {
-        functionName: 'gridNames',
-        kind: 'atomic',
-        contractVersion: '1',
-        opId: 'grid2node',
-        description: 'Area-partition-style item consumer.',
-        definitionScope: 'group-body',
-        inputs: [
-          { name: 'name', type: 'string', access: 'item', mode: 'parameter' },
-          { name: 'label', type: 'string', access: 'item', mode: 'parameter' },
-        ],
-        outputs: [{ name: 'scene', type: 'scene', access: 'tree' }],
-      },
-      {
-        functionName: 'assetNames',
-        kind: 'atomic',
-        contractVersion: '1',
-        opId: 'asset_names',
-        description: 'Area-partition-style list consumer.',
-        definitionScope: 'group-body',
-        inputs: [{ name: 'assets', type: 'string', access: 'list', mode: 'parameter' }],
-        outputs: [{ name: 'scene', type: 'scene', access: 'tree' }],
-      },
-    ])
-    const source = `export const AreaLike = defineGroup(
-  {
-    id: "scene.template.area-like",
-    version: "1.0.0",
-    inputs: {
-      zoneNames: { type: StringValue, access: "tree", mode: "parameter" },
-      zoneAssets: { type: StringList, access: "list", mode: "parameter" },
-      label: { type: StringValue, access: "item", mode: "parameter" },
-    },
-    outputs: { scene: { type: Scene, access: "tree" } },
-  },
-  ({ zoneNames, zoneAssets, label }) => {
-    const grids = gridNames({ name: zoneNames, label })
-    const assets = assetNames({ assets: zoneAssets })
-    return { scene: assets.scene }
-  },
-)`
-    const parsedDefinition = parseSceneModule(source, {
-      file: 'groups/area-like.scene.ts',
-      registry: definitionRegistry,
-    })
-    expect(parsedDefinition.diagnostics).toEqual([])
-    const lowered = compileSceneGroupDefinition(parsedDefinition.module.definitions[0]!, definitionRegistry)
-    expect(lowered.diagnostics).toEqual([])
-
-    const invocationRegistry = new SceneContractRegistry([
-      ...definitionRegistry.list(),
-      lowered.contract!,
-    ])
-    const invocation = parseSceneModule(
-      `const result = AreaLike({
-  zoneNames: ["plaza", "harbor"],
-  zoneAssets: ["stone", "water"],
-  label: "districts",
-})`,
-      { file: 'main.scene.ts', registry: invocationRegistry },
-    )
-    expect(invocation.diagnostics).toEqual([])
-    const compiled = compileSceneModule(invocation.module, invocationRegistry)
-    expect(compiled.diagnostics).toEqual([])
-
-    const createdNodes = compiled.ops.filter(
-      (op): op is Extract<(typeof compiled.ops)[number], { type: 'createNode' }> => op.type === 'createNode',
-    )
-    expect(createdNodes.find((op) => op.opId === 'grid2node')?.params).toEqual({
-      name: [
-        { path: [0, 0], items: ['plaza'] },
-        { path: [0, 1], items: ['harbor'] },
-      ],
-      label: 'districts',
-    })
-    expect(createdNodes.find((op) => op.opId === 'asset_names')?.params.assets).toEqual([
-      { path: [0, 0], items: ['stone'] },
-      { path: [0, 1], items: ['water'] },
-    ])
-    const groupOp = compiled.ops.find(
-      (op): op is Extract<(typeof compiled.ops)[number], { type: 'createGroup' }> => op.type === 'createGroup',
-    )
-    expect(groupOp?.exposedPorts?.inputs?.map((port) => [port.portName, port.access])).toEqual([
-      ['zoneNames', 'tree'],
-      ['zoneAssets', 'list'],
-      ['label', 'item'],
-    ])
   })
 
   it('rejects raw graph payloads in Definitions', () => {

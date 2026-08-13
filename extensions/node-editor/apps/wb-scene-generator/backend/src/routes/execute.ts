@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance } from 'fastify'
 import { executeNode, getGroup, getPipeline, type ExecuteNodeRequest } from '@forgeax/node-runtime'
 import { getProjectDir, getRuntimeForProject } from '../runtime.js'
 import { ensureMutationAccess } from './projects.js'
@@ -6,10 +6,7 @@ import { summarizeExecutionResult } from '../execution-summary.js'
 import { syncTrace } from '../debug/syncTrace.js'
 import type { TopologyGraphEdge, TopologyGraphNode } from '../lib/topologyGate.js'
 import { buildExecutionLineage } from '../scene-script/lineage.js'
-import { compileStoredSceneProject } from '../scene-script/projectCompiler.js'
-import { getSceneContractRegistry } from '../scene-script/contracts.js'
-import { readAuthoringState, readSceneModule, writeResultLineage } from '../scene-script/store.js'
-import { createSceneDiagnostic, toPublicSceneDiagnostics, type SceneDiagnostic } from '@forgeax/scene-authoring'
+import { readAuthoringState, writeResultLineage } from '../scene-script/store.js'
 
 /** Adapt `getPipeline`'s PipelineSnapshot (nodes may be an array or a map) into the edges+nodeById shape `summarizeExecutionResult`'s topology check expects. */
 function currentGraphForTopologyCheck(
@@ -53,88 +50,6 @@ function parseExecuteBody(body: unknown): ExecuteNodeRequest {
   }
 }
 
-async function canonicalExecutionCapture(
-  projectId: string,
-): Promise<{
-  resultEntityIds: string[]
-  resultCaptures: Array<{ entityId: string; kind: string; functionName: string; opId: string }>
-  diagnostics: SceneDiagnostic[]
-} | undefined> {
-  const projectDir = await getProjectDir(projectId)
-  if (!projectDir) return undefined
-  const stored = await readSceneModule(projectDir)
-  if (!stored.source.trim()) return undefined
-  const project = await compileStoredSceneProject(projectDir, {
-    entryFile: stored.file,
-    entrySource: stored.source,
-    projectId,
-    registry: await getSceneContractRegistry(),
-  })
-  return {
-    resultEntityIds: project.compiled.resultEntityIds,
-    resultCaptures: project.compiled.resultCaptures ?? [],
-    diagnostics: project.diagnostics,
-  }
-}
-
-function rejectInvalidCanonicalExecution(
-  reply: FastifyReply,
-  capture: {
-    resultEntityIds: string[]
-    resultCaptures: Array<{ entityId: string; kind: string }>
-    diagnostics: SceneDiagnostic[]
-  } | undefined,
-): unknown {
-  if (!capture) return null
-  const compileErrors = capture.diagnostics.filter((item) => item.severity === 'error')
-  const missingCapture = compileErrors.length === 0 && capture.resultEntityIds.length === 0
-  const sceneOutputs = capture.resultCaptures.filter((c) => c.kind === 'sceneOutput')
-  const pairingErrors: SceneDiagnostic[] = []
-  if (compileErrors.length === 0 && sceneOutputs.length !== 1) {
-    pairingErrors.push(createSceneDiagnostic({
-      code: 'SCENE_RESULT_CAPTURE_BLOCKOUT',
-      phase: 'compile',
-      severity: 'error',
-      message: 'Canonical projects must declare exactly one sceneOutput.',
-      expected: 'Exactly one sceneOutput',
-      actual: `sceneOutput=${sceneOutputs.length}`,
-      operation: 'sceneOutput',
-    }))
-  }
-  const errors = compileErrors.length > 0
-    ? compileErrors
-    : missingCapture
-      ? [createSceneDiagnostic({
-          code: 'SCENE_RESULT_CAPTURE_REQUIRED',
-          phase: 'compile',
-          severity: 'error',
-          message: 'Canonical Scene Script projects must declare a sceneOutput({ scene }) capture before execution.',
-          expected: 'At least one compiled resultEntityId.',
-          actual: 'No compiled resultEntityIds.',
-          operation: 'sceneOutput',
-          howToFix: [
-            'Add sceneOutput({ scene: finalScene.scene }), then validate and put again.',
-          ],
-        })]
-      : pairingErrors
-  if (errors.length === 0) return null
-  return reply.code(422).send({
-    status: 'rejected',
-    code: missingCapture ? 'scene-script-result-capture-required' : 'scene-script-execution-invalid',
-    reason: errors[0]?.message ?? 'Canonical Scene Script is not executable.',
-    diagnostics: toPublicSceneDiagnostics(errors, { applied: false, rolledBack: false }),
-    verification: {
-      ok: false,
-      primaryFailure: 'structural',
-      finalOutput: {
-        ok: false,
-        resultEntityIds: capture.resultEntityIds,
-        totalSceneCells: 0,
-      },
-    },
-  })
-}
-
 export async function registerExecuteRoutes(app: FastifyInstance): Promise<void> {
   const prefix = '/api/v1/projects/:projectId'
 
@@ -144,9 +59,6 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
     syncTrace('backend:execute', { projectId, nodeId: (body as { nodeId?: string }).nodeId ?? '(full)', quietErrors: body.quietErrors })
     const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const capture = await canonicalExecutionCapture(projectId)
-    const rejected = rejectInvalidCanonicalExecution(reply, capture)
-    if (rejected) return rejected
     const __t0 = Date.now()
     const runtime = await getRuntimeForProject(projectId)
     const handle = await executeNode(runtime, body)
@@ -196,9 +108,6 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
     const { projectId } = req.params
     const access = await ensureMutationAccess(req, projectId)
     if (!access.ok) return reply.code(403).send({ reason: access.reason, code: access.code, projectId: access.projectId })
-    const capture = await canonicalExecutionCapture(projectId)
-    const rejected = rejectInvalidCanonicalExecution(reply, capture)
-    if (rejected) return rejected
     const runtime = await getRuntimeForProject(projectId)
     const handle = await executeNode(runtime, parseExecuteBody(req.body))
     const full = await handle.done
@@ -213,7 +122,6 @@ export async function registerExecuteRoutes(app: FastifyInstance): Promise<void>
       full,
       Array.isArray(narrativeLocationNames) ? narrativeLocationNames.filter((n): n is string => typeof n === 'string') : undefined,
       currentGraphForTopologyCheck(runtime),
-      capture?.resultEntityIds,
     )
   })
 }

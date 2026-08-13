@@ -29,37 +29,6 @@ function logNodeFailure(ctx: ExecutionContext, message: string): void {
   ctx.log('error', message)
 }
 
-function mergeIndexedListInputs(
-  opInputs: ReadonlyArray<{ name: string; access?: OpAccess }>,
-  inputValues: Record<string, unknown>,
-): Record<string, unknown> {
-  const merged = { ...inputValues }
-  for (const port of opInputs) {
-    if (port.access !== 'list' || merged[port.name] !== undefined) continue
-    const prefix = `${port.name}_`
-    const indexed = Object.entries(merged)
-      .filter(([name]) => name.startsWith(prefix) && /^\d+$/.test(name.slice(prefix.length)))
-      .sort(([left], [right]) => Number(left.slice(prefix.length)) - Number(right.slice(prefix.length)))
-    if (indexed.length === 0) continue
-    const items: unknown[] = []
-    for (const [name, value] of indexed) {
-      const tree = value instanceof DataTree
-        ? value
-        : DataTree.isDataTree(value)
-          ? DataTree.fromEntries((value as { toJSON(): ReadonlyArray<DataTreeEntry<unknown>> }).toJSON())
-          : Array.isArray(value)
-            ? DataTree.fromJSON(value as DataTreeEntry<unknown>[])
-            : DataTree.fromItem(value)
-      for (const entry of tree.toJSON()) items.push(...entry.items)
-      delete merged[name]
-    }
-    merged[port.name] = DataTree.fromEntries(
-      items.map((item, index) => ({ path: [0, index], items: [item] })),
-    ).toJSON()
-  }
-  return merged
-}
-
 // ── Diagnostics ──────────────────────────────────────────────────────────────
 // Compact, bounded shape descriptor for a wire value (DataTreeEntry[] = [{path,
 // items}]). Surfaces the signals that explain WHY a scene op (e.g. add_child)
@@ -121,15 +90,6 @@ export type NodeInputValues = Record<string, unknown>
 // Snapshot of cached outputs for one node, keyed by port name.
 export type NodeOutputCache = Record<string, Record<string, unknown>>
 
-function isDataTreeWireValue(value: unknown): value is DataTreeEntry<unknown>[] {
-  return Array.isArray(value) && value.every((entry) =>
-    entry !== null &&
-    typeof entry === 'object' &&
-    Array.isArray((entry as DataTreeEntry<unknown>).path) &&
-    Array.isArray((entry as DataTreeEntry<unknown>).items),
-  )
-}
-
 // Execute one node by op id. The plugin pre-registered the OpSpec with its execute
 // closure, so the kernel just resolves the spec and hands it to the dispatcher.
 export async function executeNode(
@@ -153,19 +113,12 @@ export async function executeNode(
   // (controlInputs). dataInputs precedence overrides node.params overrides
   // op input defaults.
   const dataInputs: Record<string, unknown> = {}
-  const normalizedInputValues = mergeIndexedListInputs(op.inputs, inputValues)
-  for (const [key, val] of Object.entries(normalizedInputValues)) {
+  for (const [key, val] of Object.entries(inputValues)) {
     if (val !== undefined) dataInputs[key] = val
   }
   const controlInputs: Record<string, unknown> = {}
   for (const [key, val] of Object.entries(node.params ?? {})) {
-    if (val === undefined || key in dataInputs) continue
-    // Scene Script array literals are persisted in DataTreeEntry[] wire form.
-    // Route them through the dispatcher so the destination port's item/list/tree
-    // contract peels the collection correctly. Ordinary scalar params retain
-    // their historical raw-control-input behavior.
-    if (isDataTreeWireValue(val)) dataInputs[key] = val
-    else controlInputs[key] = val
+    if (val !== undefined && !(key in dataInputs)) controlInputs[key] = val
   }
   for (const inp of op.inputs) {
     if (

@@ -1,6 +1,5 @@
 import '@forgeax/node-runtime-react/styles.css'
 import '@forgeax/node-runtime-react/editor.css'
-import './sceneChrome.css'
 // Scene Generator — frontend entry. Routes by ?pane= for ForgeaX host iframe modes.
 import React from 'react'
 import ReactDOM from 'react-dom/client'

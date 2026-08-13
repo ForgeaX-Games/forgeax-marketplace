@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   Editor,
   subscribeLocalParamEdit,
@@ -9,13 +9,7 @@ import {
 import { HttpApiClient } from '../api/HttpApiClient.js'
 import { scenePanelTypes } from '../panels/scenePanels.js'
 import { paneUrl } from './paneUrls.js'
-import {
-  isWorkbenchMessage,
-  workbenchParentOrigin,
-  workbenchTargetOrigin,
-  type EditorAssetImportResultMessage,
-  type WorkbenchFocus,
-} from './protocol.js'
+import { isWorkbenchMessage, workbenchTargetOrigin, type WorkbenchFocus } from './protocol.js'
 import { sceneValueFormatter } from './sceneValueFormatter.js'
 import { scenePortTypes } from './scenePortTypes.js'
 import { syncTrace, syncTraceHintOnce, summarizeNodeOutputs } from '../debug/syncTrace.js'
@@ -34,7 +28,6 @@ import { sceneT, useSceneLocale } from '../sceneI18n.js'
 import { SceneScriptStudio } from './SceneScriptStudio.js'
 import { SceneWorkGraphOverlay } from './SceneWorkGraphOverlay.js'
 import type { PreviewCapture } from './sceneScriptDiff.js'
-import { Pin } from '../surfaces/icons.js'
 import './WorkbenchHost.css'
 
 const sceneValueFormatters = [sceneValueFormatter]
@@ -50,7 +43,6 @@ const sceneValueFormatters = [sceneValueFormatter]
 // them through localStorage, mirrored via a same-origin `storage` listener.
 // Must match the center <Editor editorSyncKey> ↔ left <SceneGeneratorControlsPanel syncKey>.
 const EDITOR_SYNC_KEY = 'wb-scene-generator-editor'
-const MemoizedEditor = memo(Editor)
 
 function readBool(key: string, fallback: boolean): boolean {
   if (typeof localStorage === 'undefined') return fallback
@@ -120,7 +112,6 @@ export function WorkbenchHost(): JSX.Element {
   const [sceneScriptOpen, setSceneScriptOpen] = useState(true)
   const [sceneScriptExpanded, setSceneScriptExpanded] = useState(false)
   const [workGraphOpen, setWorkGraphOpen] = useState(false)
-  const [editorPinned, setEditorPinned] = useState(false)
   const [editorSurfaceOpacity, setEditorSurfaceOpacity] = useState(EDITOR_OPACITY_DEFAULT)
   const [focus, setFocus] = useState<WorkbenchFocus>(null)
   const [showRestore, setShowRestore] = useState(() => !isDefaultWorkspaceLayout())
@@ -149,13 +140,7 @@ export function WorkbenchHost(): JSX.Element {
     reject: (error: Error) => void
     timer: ReturnType<typeof setTimeout>
   }>())
-  const editorImportPendingRef = useRef(new Map<string, {
-    resolve: (result: unknown) => void
-    reject: (error: Error) => void
-    timer: ReturnType<typeof setTimeout>
-  }>())
   const workbenchOrigin = workbenchTargetOrigin()
-  const parentOrigin = workbenchParentOrigin()
 
   const postToRenderer = useCallback((msg: unknown) => {
     rendererIframeRef.current?.contentWindow?.postMessage(msg, workbenchOrigin)
@@ -179,61 +164,13 @@ export function WorkbenchHost(): JSX.Element {
       pending.reject(new Error('Workbench closed during preview capture.'))
     }
     previewCapturePendingRef.current.clear()
-    for (const pending of editorImportPendingRef.current.values()) {
-      clearTimeout(pending.timer)
-      pending.reject(new Error('Workbench closed before Studio asset import completed.'))
-    }
-    editorImportPendingRef.current.clear()
   }, [])
-
-  const requestEditorAssetImport = useCallback((input: {
-    requestId: string
-    destPath: string
-    sourceName: string
-    base64: string
-  }): Promise<unknown> => {
-    const parent = window.parent
-    if (!parent || parent === window) {
-      return Promise.reject(new Error('Open Scene Generator in Studio before importing a GLB.'))
-    }
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        editorImportPendingRef.current.delete(input.requestId)
-        reject(new Error('Studio did not respond to the GLB import request.'))
-      }, 120_000)
-      editorImportPendingRef.current.set(input.requestId, { resolve, reject, timer })
-      try {
-        parent.postMessage({ type: 'workbench:editor-asset-import', ...input }, parentOrigin)
-      } catch (error) {
-        clearTimeout(timer)
-        editorImportPendingRef.current.delete(input.requestId)
-        reject(error instanceof Error ? error : new Error(String(error)))
-      }
-    })
-  }, [parentOrigin])
-
-  useEffect(() => {
-    const handleEditorImportResult = (event: MessageEvent): void => {
-      if (event.origin !== parentOrigin || event.source !== window.parent) return
-      const data = event.data as Partial<EditorAssetImportResultMessage> | null
-      if (!data || data.type !== 'workbench:editor-asset-import-result' || typeof data.requestId !== 'string') return
-      const pending = editorImportPendingRef.current.get(data.requestId)
-      if (!pending) return
-      clearTimeout(pending.timer)
-      editorImportPendingRef.current.delete(data.requestId)
-      if (data.ok === true) pending.resolve(data.result)
-      else pending.reject(new Error(typeof data.error === 'string' ? data.error : 'Studio asset import failed.'))
-    }
-    window.addEventListener('message', handleEditorImportResult)
-    return () => window.removeEventListener('message', handleEditorImportResult)
-  }, [parentOrigin])
 
   const broadcastEditorVisibility = useCallback((visible: boolean) => {
     postToRenderer({ type: 'workbench:editor-visibility-changed', visible })
   }, [postToRenderer])
 
   const toggleEditorVisibility = useCallback(() => {
-    setEditorPinned(false)
     setEditorCardOpen((open) => {
       const next = !open
       broadcastEditorVisibility(editorInline && next)
@@ -241,22 +178,11 @@ export function WorkbenchHost(): JSX.Element {
     })
   }, [broadcastEditorVisibility, editorInline])
 
-  const closeEditorFromOutside = useCallback((force = false) => {
-    if (editorPinned && !force) return
-    setEditorPinned(false)
-    setEditorCardOpen((open) => {
-      if (!open) return open
-      broadcastEditorVisibility(false)
-      return false
-    })
-  }, [broadcastEditorVisibility, editorPinned])
-
   const restoreWorkspaceLayout = useCallback(() => {
     restoreDefaultWorkspace()
     setRendererInline(true)
     setEditorInline(true)
     setEditorCardOpen(false)
-    setEditorPinned(false)
     setEditorSurfaceOpacity(EDITOR_OPACITY_DEFAULT)
     setFocus(null)
     setShowRestore(false)
@@ -289,10 +215,7 @@ export function WorkbenchHost(): JSX.Element {
       else if (e.key === LS_EDITOR) {
         const visible = readBool(LS_EDITOR, true)
         setEditorInline(visible)
-        if (!visible) {
-          setEditorCardOpen(false)
-          setEditorPinned(false)
-        }
+        if (!visible) setEditorCardOpen(false)
         broadcastEditorVisibility(visible && editorCardOpen)
       } else if (e.key === 'wb-scene-generator.preview-drawer-width') {
         setShowRestore(!isDefaultWorkspaceLayout() || focus !== null)
@@ -356,8 +279,6 @@ export function WorkbenchHost(): JSX.Element {
         rendererWindow.postMessage({ type: 'workbench:focus-changed', focus }, workbenchOrigin)
       } else if (data.type === 'workbench:toggle-editor') {
         toggleEditorVisibility()
-      } else if (data.type === 'workbench:request-close-editor') {
-        closeEditorFromOutside(data.force)
       } else if (data.type === 'workbench:query-editor-visibility') {
         rendererWindow.postMessage(
           { type: 'workbench:editor-visibility-changed', visible: editorInline && editorCardOpen },
@@ -365,36 +286,6 @@ export function WorkbenchHost(): JSX.Element {
         )
       } else if (data.type === 'workbench:loading-status') {
         setRendererTasks(data.tasks)
-      } else if (data.type === 'workbench:renderer-direct-import') {
-        const reply = (ok: boolean, result?: unknown, error?: string): void => {
-          rendererWindow.postMessage({
-            type: 'workbench:renderer-direct-import-result',
-            requestId: data.requestId,
-            ok,
-            ...(result === undefined ? {} : { result }),
-            ...(error === undefined ? {} : { error }),
-          }, workbenchOrigin)
-        }
-        if (
-          typeof data.requestId !== 'string'
-          || typeof data.directory !== 'string'
-          || typeof data.name !== 'string'
-          || typeof data.base64 !== 'string'
-        ) {
-          reply(false, undefined, 'GLB import request is missing a directory, filename, or binary payload.')
-          return
-        }
-        const directory = data.directory.replace(/[\\/]+$/u, '')
-        const sourceName = data.name.replace(/^[\\/]+/u, '')
-        void requestEditorAssetImport({
-          requestId: data.requestId,
-          destPath: `${directory}/${sourceName}`,
-          sourceName,
-          base64: data.base64,
-        }).then(
-          (result) => reply(true, result),
-          (error: unknown) => reply(false, undefined, error instanceof Error ? error.message : String(error)),
-        )
       } else if (data.type === 'workbench:preview-lineage-selection') {
         const projectId = useProjectStore.getState().viewingProjectId
         if (!projectId) return
@@ -412,7 +303,7 @@ export function WorkbenchHost(): JSX.Element {
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [client, closeEditorFromOutside, focus, editorCardOpen, editorInline, requestEditorAssetImport, toggleEditorVisibility, workbenchOrigin])
+  }, [client, focus, editorCardOpen, editorInline, toggleEditorVisibility, workbenchOrigin])
 
   // Broadcast focus changes so child buttons reflect fullscreen state.
   useEffect(() => {
@@ -632,7 +523,7 @@ export function WorkbenchHost(): JSX.Element {
   )
 
   const editorToolbarActions = useMemo(() => (
-    <div className="scene-editor-toolbar-actions">
+    <>
       <button
         type="button"
         className={`scene-script-toggle${sceneScriptOpen ? ' is-active' : ''}`}
@@ -664,18 +555,8 @@ export function WorkbenchHost(): JSX.Element {
         />
         <output className="scene-editor-opacity__value">{editorSurfaceOpacity}%</output>
       </label>
-      <button
-        type="button"
-        className={`scene-editor-pin${editorPinned ? ' is-active' : ''}`}
-        title={sceneT(editorPinned ? 'editor.unpin' : 'editor.pin')}
-        aria-label={sceneT(editorPinned ? 'editor.unpin' : 'editor.pin')}
-        aria-pressed={editorPinned}
-        onClick={() => setEditorPinned((pinned) => !pinned)}
-      >
-        <Pin size={13} />
-      </button>
-    </div>
-  ), [editorPinned, editorSurfaceOpacity, onEditorOpacityChange, sceneScriptOpen, workGraphOpen])
+    </>
+  ), [editorSurfaceOpacity, onEditorOpacityChange, sceneScriptOpen, workGraphOpen])
 
   return (
     <div
@@ -734,9 +615,9 @@ export function WorkbenchHost(): JSX.Element {
             ].filter(Boolean).join(' ')}
           >
             <div className="scene-workbench__node-editor">
-              <MemoizedEditor
+              <Editor
                 apiClient={client}
-                title={sceneT('editor.title')}
+                title={sceneT('workbench.title')}
                 showRunControl={false}
                 showSettingsButton={false}
                 toolbarActions={editorToolbarActions}

@@ -36,8 +36,6 @@ const batchOf = (category: string, kind: string): Batch => {
   if (family === 'alg_store') return 'alg-store'
   if (family === 'components') return 'components'
   if (family === 'scene30') return 'scene30'
-  // Layout batteries render through the scene-capable representative project.
-  if (family === 'layout') return 'scene'
   const candidate = family as Batch
   if (!BATCHES.includes(candidate)) throw new Error(`unsupported visual batch category: ${category}`)
   return candidate
@@ -203,7 +201,7 @@ async function main(): Promise<void> {
   const inventory = await readFile(inventoryPath, 'utf8').then(JSON.parse)
   const eligible = (inventory.entries ?? []).filter((entry: any) => entry.status !== 'retired-test-oracle')
   const selected = new Set(eligible.map((entry: any) => entry.cellId ?? entry.opId))
-  if (selected.size !== 449) throw new Error(`expected all 449 eligible cells, found ${selected.size}`)
+  if (selected.size !== 414) throw new Error(`expected all 414 eligible cells, found ${selected.size}`)
   const byBatch = Object.fromEntries(BATCHES.map((batch) => [batch, []])) as Record<Batch, any[]>
   for (const entry of inventory.entries ?? []) {
     if (selected.has(entry.cellId)) {
@@ -218,7 +216,7 @@ async function main(): Promise<void> {
   const liveProjects = await requestJson(`${pluginBase}/api/v1/projects`)
   const projectIds = {} as Record<Batch, string>
   for (const batch of BATCHES) {
-    const name = `Visual 449 · ${batch}`
+    const name = `Visual 414 · ${batch}`
     const existing = liveProjects.find((project: any) => project.name === name)
     const project = existing ?? await requestJson(`${pluginBase}/api/v1/projects`, {
       method: 'POST',

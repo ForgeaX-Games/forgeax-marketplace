@@ -129,19 +129,7 @@ export function createBatteryLoader(
         copyFileSync(entryPath, importPath)
       }
       try {
-        let timer: NodeJS.Timeout | undefined
-        try {
-          entryModule = await Promise.race([
-            import(/* @vite-ignore */ pathToFileURL(importPath).href) as Promise<Record<string, unknown>>,
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(() => {
-                reject(new Error(`dynamic import timed out after 15s: ${entryPath}`))
-              }, 15_000)
-            }),
-          ])
-        } finally {
-          if (timer) clearTimeout(timer)
-        }
+        entryModule = (await import(/* @vite-ignore */ pathToFileURL(importPath).href)) as Record<string, unknown>
       } finally {
         if (importPath !== entryPath) {
           try {

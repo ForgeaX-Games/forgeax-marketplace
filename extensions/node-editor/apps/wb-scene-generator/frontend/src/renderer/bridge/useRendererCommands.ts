@@ -14,7 +14,7 @@ import type { ViewMode } from '../types'
 // `workbench:renderer-command` postMessage, so an LLM/CLI command can reach the
 // store either directly (renderer's own socket) or via the host iframe hop.
 
-const VIEW_MODES: ViewMode[] = ['top', 'topBillboard', 'iso', 'free3d', '3DMesh']
+const VIEW_MODES: ViewMode[] = ['top', 'topBillboard', 'iso', 'free3d']
 
 type RendererCommand =
   | { kind: 'set-view-mode'; mode?: unknown }

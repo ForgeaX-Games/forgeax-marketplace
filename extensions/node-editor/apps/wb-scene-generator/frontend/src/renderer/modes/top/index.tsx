@@ -21,7 +21,7 @@ import { useRenderStore } from '../../store'
 import { gridLayerCellSource, voxelLayerCellSource, type CellSource } from '../../framework/cellSource'
 import type { DrawMode } from '../../types'
 import { registerRenderPlugin, type PluginHandle } from '../../framework/plugin'
-import { SCREEN_CELL_SIZE } from '../../framework/geometry/constants'
+import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
 import { topMasterOrigin } from '../../framework/geometry/top'
 import { subscribeToAssetReadiness } from '../../framework/asset/imageCache'
 import { subscribeToRuleReadiness } from '../../framework/asset/ruleCache'
@@ -161,7 +161,7 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
       layers: sortedSurfaces,
       maxRows,
       maxCols,
-      cellSize: SCREEN_CELL_SIZE,
+      cellSize: BASE_CELL_SIZE,
       offsetX: viewportRef.current.offsetX,
       offsetY: viewportRef.current.offsetY,
       scale: viewportRef.current.scale,
@@ -226,9 +226,9 @@ const ModeTopPlugin = forwardRef<PluginHandle, object>(function ModeTopPlugin(_,
   // 写 ref,handle 闭包同步读 ref。viewport 单独从 viewportRef 读(rAF 节流路径
   // 同步写入,不依赖 React 渲染),避免 pan/zoom 期间这里读到过期值。
   const stateRef = useRef({
-    maxRows, maxCols, cellSize: SCREEN_CELL_SIZE,
+    maxRows, maxCols, cellSize: BASE_CELL_SIZE,
   })
-  stateRef.current = { maxRows, maxCols, cellSize: SCREEN_CELL_SIZE }
+  stateRef.current = { maxRows, maxCols, cellSize: BASE_CELL_SIZE }
 
   useImperativeHandle(ref, () => ({
     getFrameCanvas: () => canvasRef.current,
