@@ -7,7 +7,7 @@ import { basename, resolve } from 'node:path'
 import { getPipeline } from '@forgeax/node-runtime'
 import type { CallerIdentity, ImportGraphFormat, ImportGraphInput } from '@forgeax/node-runtime'
 import { stableEntityId } from '@forgeax/scene-authoring'
-import { getProjectRegistry, getProjectDir, resolveWorkspaceRoot } from '../runtime.js'
+import { getProjectRegistry, getProjectDir, resolveActiveGameSlug, resolveWorkspaceRoot } from '../runtime.js'
 import { reloadGameTexturesBinding } from '../library/gameSandboxStore.js'
 import { countLivePrivateAssets } from '../library/privateStore.js'
 import { broadcastToClients, rebindWsSubscriptions } from './ws.js'
@@ -146,14 +146,18 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
       fromTemplate?: string
       gameSlug?: string
     }
-    if (!body.name || !body.name.trim()) {
-      return reply.code(400).send({ reason: 'project name is required' })
-    }
+    const activeGameSlug = resolveActiveGameSlug()
+    const projectName = body.name?.trim() || `${activeGameSlug ?? 'Untitled'} Scene`
     if (body.fromTemplate) {
       return reply.code(410).send({
         status: 'rejected',
         code: 'runtime-template-project-creation-removed',
         reason: 'New projects must start from a canonical Scene Project, not a Runtime Graph template.',
+      })
+    }
+    if (body.gameSlug !== undefined && body.gameSlug !== activeGameSlug) {
+      return reply.code(400).send({
+        reason: 'gameSlug must match the Studio active game; switch the active game before creating a project',
       })
     }
     let fromTemplate: ImportGraphInput | undefined
@@ -164,10 +168,10 @@ export async function registerProjectRoutes(app: FastifyInstance): Promise<void>
     }
     try {
       const meta = await reg.createProject({
-        name: body.name,
+        name: projectName,
         ...(body.type ? { type: body.type } : {}),
         ...(body.description !== undefined ? { description: body.description } : {}),
-        ...(body.gameSlug !== undefined ? { gameSlug: body.gameSlug } : {}),
+        ...(activeGameSlug ? { gameSlug: activeGameSlug } : {}),
         ...(fromTemplate ? { fromTemplate } : {}),
       })
       const projectDir = await getProjectDir(meta.id)

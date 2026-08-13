@@ -7,8 +7,10 @@ import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
 
+import { ensureWorkspacePackages } from '../../../scripts/ensure-workspace-packages.mjs'
+
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const monorepoRoot = resolve(root, '../..')
+ensureWorkspacePackages(root)
 const frontendDist = resolve(root, 'frontend/dist')
 const backendEntry = resolve(root, 'backend/dist/main.js')
 const frontendPort = Number(process.env.VITE_DEV_PORT ?? 9565)
@@ -38,11 +40,6 @@ if (!existsSync(join(frontendDist, 'index.html'))) {
 if (!existsSync(backendEntry)) {
   runBuild('backend/dist', ['-C', 'backend', 'build'])
 }
-// Compiled backend imports @forgeax/node-runtime from dist (no `source` condition).
-// Kernel dist is gitignored, so rebuild it on every serve-dist start — otherwise
-// a stale dispatcher.js can mis-treat processImage batteries' error:'' sentinel
-// as failure (preview shows staging output while port tooltips say "no result").
-runBuild('@forgeax/node-runtime dist', ['--filter', '@forgeax/node-runtime', 'build'], monorepoRoot)
 
 const backend = spawn(process.execPath, [backendEntry], {
   cwd: root,

@@ -47,6 +47,7 @@ function printPortMap(ports: Record<string, SceneDefinitionPort>, indent: number
       port.mode ? `mode: ${JSON.stringify(port.mode)}` : '',
       port.label ? `label: ${JSON.stringify(port.label)}` : '',
       port.labelEn ? `labelEn: ${JSON.stringify(port.labelEn)}` : '',
+      port.description ? `description: ${JSON.stringify(port.description)}` : '',
       port.order !== undefined ? `order: ${port.order}` : '',
       port.defaultValue !== undefined ? `defaultValue: ${JSON.stringify(port.defaultValue)}` : '',
     ].filter(Boolean)

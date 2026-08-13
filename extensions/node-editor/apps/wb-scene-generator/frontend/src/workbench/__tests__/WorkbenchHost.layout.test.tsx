@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ensureSceneI18n } from '../../sceneI18n.js'
 
-const { postMessage, contentWindow, bootstrap } = vi.hoisted(() => {
+const { postMessage, contentWindow, bootstrap, editorRender } = vi.hoisted(() => {
   const postMessage = vi.fn()
   const contentWindow = { postMessage } as unknown as Window
   const bootstrap = vi.fn()
-  return { postMessage, contentWindow, bootstrap }
+  const editorRender = vi.fn()
+  return { postMessage, contentWindow, bootstrap, editorRender }
 })
 
 vi.mock('@forgeax/node-runtime-react/editor', async (importOriginal) => {
@@ -47,13 +48,16 @@ vi.mock('@forgeax/node-runtime-react/editor', async (importOriginal) => {
     }: {
       toolbarActions?: React.ReactNode
       title?: React.ReactNode
-    }) => (
-      <div data-testid="editor-mock">
-        <div data-testid="editor-title">{title}</div>
-        <div data-testid="editor-toolbar-actions">{toolbarActions}</div>
-        <button type="button">Editor focusable</button>
-      </div>
-    ),
+    }) => {
+      editorRender()
+      return (
+        <div data-testid="editor-mock">
+          <div data-testid="editor-title">{title}</div>
+          <div data-testid="editor-toolbar-actions">{toolbarActions}</div>
+          <button type="button">Editor focusable</button>
+        </div>
+      )
+    },
     useProjectStore,
     usePipelineStore,
     stripTooLargeSummaries: (bag: Record<string, unknown>) => bag,
@@ -126,6 +130,7 @@ beforeEach(() => {
   ensureSceneI18n()
   postMessage.mockReset()
   bootstrap.mockReset()
+  editorRender.mockReset()
   vi.stubGlobal('location', { ...window.location, origin: 'http://localhost' })
 })
 
@@ -154,6 +159,13 @@ describe('WorkbenchHost layout controls', () => {
     expect(screen.getByRole('button', { name: 'Restore split Scene Script view' })).toBeTruthy()
   })
 
+  it('labels the expanded editor as Node Editor instead of Scene Generator', () => {
+    localStorage.setItem(LS_EDITOR, 'true')
+    mountWithRendererIframe()
+
+    expect(screen.getByTestId('editor-title').textContent).toBe('Node Editor')
+  })
+
   it('exposes an accessible opacity slider on the floating editor toolbar', async () => {
     localStorage.setItem(LS_RENDERER, 'true')
     localStorage.setItem(LS_EDITOR, 'true')
@@ -167,9 +179,9 @@ describe('WorkbenchHost layout controls', () => {
 
     const slider = await screen.findByRole('slider', { name: 'Opacity' }) as HTMLInputElement
     expect(slider.min).toBe('20')
-    expect(slider.value).toBe('92')
+    expect(slider.value).toBe('20')
     expect(document.querySelector('.scene-workbench__editor')?.getAttribute('style'))
-      .toContain('--editor-surface-opacity: 0.92')
+      .toContain('--editor-surface-opacity: 0.2')
 
     fireEvent.change(slider, { target: { value: '20' } })
     await waitFor(() => expect(slider.value).toBe('20'))
@@ -237,6 +249,9 @@ describe('workbench editor visibility protocol', () => {
     localStorage.setItem(LS_RENDERER, 'true')
     localStorage.setItem(LS_EDITOR, 'false')
     mountWithRendererIframe()
+    const rendersBeforeToggle = editorRender.mock.calls.length
+    const onResize = vi.fn()
+    window.addEventListener('resize', onResize)
 
     window.dispatchEvent(new MessageEvent('message', {
       origin: 'http://localhost',
@@ -248,6 +263,55 @@ describe('workbench editor visibility protocol', () => {
       expect(localStorage.getItem(LS_EDITOR)).toBe('false')
       expect(screen.getByTestId('editor-mock')).toBeTruthy()
       expect(document.querySelector('.scene-workbench__editor')?.classList.contains('is-collapsed')).toBe(false)
+    })
+    expect(editorRender).toHaveBeenCalledTimes(rendersBeforeToggle)
+    expect(onResize).not.toHaveBeenCalled()
+    window.removeEventListener('resize', onResize)
+  })
+
+  it('keeps the editor open when pinned and closes it when unpinned', async () => {
+    localStorage.setItem(LS_RENDERER, 'true')
+    localStorage.setItem(LS_EDITOR, 'true')
+    mountWithRendererIframe()
+
+    const dispatchRendererMessage = (type: string) => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://localhost',
+        source: contentWindow,
+        data: { type },
+      }))
+    }
+
+    dispatchRendererMessage('workbench:toggle-editor')
+    await waitFor(() => {
+      expect(document.querySelector('.scene-workbench__editor')?.classList.contains('is-collapsed')).toBe(false)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin node editor' }))
+    expect(screen.getByRole('button', { name: 'Unpin node editor' }).getAttribute('aria-pressed')).toBe('true')
+
+    dispatchRendererMessage('workbench:request-close-editor')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(document.querySelector('.scene-workbench__editor')?.classList.contains('is-collapsed')).toBe(false)
+
+    window.dispatchEvent(new MessageEvent('message', {
+      origin: 'http://localhost',
+      source: contentWindow,
+      data: { type: 'workbench:request-close-editor', force: true },
+    }))
+    await waitFor(() => {
+      expect(document.querySelector('.scene-workbench__editor')?.classList.contains('is-collapsed')).toBe(true)
+    })
+
+    dispatchRendererMessage('workbench:toggle-editor')
+    await waitFor(() => {
+      expect(document.querySelector('.scene-workbench__editor')?.classList.contains('is-collapsed')).toBe(false)
+    })
+    expect(screen.getByRole('button', { name: 'Pin node editor' }).getAttribute('aria-pressed')).toBe('false')
+
+    dispatchRendererMessage('workbench:request-close-editor')
+    await waitFor(() => {
+      expect(document.querySelector('.scene-workbench__editor')?.classList.contains('is-collapsed')).toBe(true)
     })
   })
 

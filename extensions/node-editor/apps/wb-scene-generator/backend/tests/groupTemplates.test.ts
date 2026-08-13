@@ -26,6 +26,7 @@ describe('native-only Group/Template catalog', () => {
     expect(items).toHaveLength(52)
     expect(items.every((item) => item.sourcePath.endsWith('.scene.ts'))).toBe(true)
     expect(items.every((item) => item.nativeDefinition && !('definition' in item.nativeDefinition))).toBe(true)
+    expect(items.some((item) => item.nativeDefinition?.functionName === 'linearSequence')).toBe(false)
   })
 
   it('keeps group and template scopes separate', async () => {

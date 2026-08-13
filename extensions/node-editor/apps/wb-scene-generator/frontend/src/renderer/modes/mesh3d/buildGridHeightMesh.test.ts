@@ -72,7 +72,9 @@ describe('buildGridHeightMesh', () => {
 
     const positions = mesh!.geometry.getAttribute('position')
     const normals = mesh!.geometry.getAttribute('normal')
-    const internalX = 0
+    // Grid cell coordinates map directly to metre coordinates: the shared
+    // boundary after column 0 is x=1m, not the content-centred origin.
+    const internalX = 1
     const internalWallZ: number[] = []
     for (let i = 0; i < positions.count; i++) {
       if (positions.getX(i) === internalX && Math.abs(normals.getX(i)) === 1) {

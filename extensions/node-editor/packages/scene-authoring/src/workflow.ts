@@ -178,6 +178,12 @@ export interface SceneWorkArtifactRefs {
   checkpoint: string
 }
 
+export interface SceneWorkCheckpoint {
+  id: string
+  projectRevision: string
+  createdAt: string
+}
+
 export interface SceneWorkNode {
   id: string
   kind: SceneWorkNodeKind
@@ -186,7 +192,7 @@ export interface SceneWorkNode {
   scope: string[]
   artifacts: SceneWorkArtifactRefs
   diagnostics: SceneDiagnostic[]
-  checkpoint?: { id: string; projectRevision: string; createdAt: string }
+  checkpoint?: SceneWorkCheckpoint
   humanGate?: SceneEditTransaction['humanGate']
   budget: {
     maxCommands: number

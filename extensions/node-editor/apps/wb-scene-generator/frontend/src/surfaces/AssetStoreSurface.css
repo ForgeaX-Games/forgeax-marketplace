@@ -14,13 +14,15 @@
 
 /* ===== Titlebar ===== */
 .assetstore-titlebar {
+  box-sizing: border-box;
   position: relative;
   z-index: 10;
   display: flex;
   align-items: center;
   gap: 8px;
-  height: var(--titlebar-height, 32px);
-  padding: 0 8px;
+  height: var(--scene-titlebar-height, 30px);
+  min-height: var(--scene-titlebar-height, 30px);
+  padding: 0 var(--scene-titlebar-padding-inline, 12px);
   flex-shrink: 0;
   user-select: none;
   background: linear-gradient(
@@ -39,14 +41,11 @@
 }
 
 .assetstore-title {
-  font-size: var(--font-size-sm, 0.875rem);
-  font-weight: 700;
+  color: var(--scene-titlebar-color);
+  font-size: var(--scene-titlebar-title-size, 14px);
+  font-weight: var(--scene-titlebar-title-weight, 700);
   letter-spacing: 0.01em;
   white-space: nowrap;
-  background: linear-gradient(135deg, #f5ffd1 0%, var(--color-accent, #d4ff48) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 
 /* ===== Dropdown shell (zone / view) ===== */

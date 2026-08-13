@@ -88,6 +88,11 @@ function fixtureProducer(
       const candidates = contracts.filter((candidate) =>
         !nextTrail.has(candidate.functionName) &&
         candidate.outputs.some((output) => output.type === input.type))
+        .sort((left, right) => {
+          const leftDependencies = left.inputs.filter((port) => port.required && port.mode !== 'parameter').length
+          const rightDependencies = right.inputs.filter((port) => port.required && port.mode !== 'parameter').length
+          return leftDependencies - rightDependencies || left.functionName.localeCompare(right.functionName)
+        })
       let produced: { binding: string; output?: string } | undefined
       const failures: string[] = []
       for (const candidate of candidates) {

@@ -1,6 +1,7 @@
 // 💡 Collect object-layer placements for GLB instancing (mode-local).
 
 import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
+import { gridCellCenterToWorld } from '../../framework/geometry/worldCoordinates'
 import { pickModelVariant } from './modelVariants'
 import { cellKey, type SurfaceField } from './surfaceOwner'
 
@@ -99,16 +100,15 @@ export function buildObjectPlacements(
 export function worldXY(
   cellX: number,
   cellY: number,
-  minX: number,
-  maxX: number,
-  minY: number,
-  maxY: number,
+  _minX: number,
+  _maxX: number,
+  _minY: number,
+  _maxY: number,
   cellSize = BASE_CELL_SIZE,
 ): { wx: number; wy: number } {
-  const cols = maxX - minX + 1
-  const rows = maxY - minY + 1
+  const world = gridCellCenterToWorld(cellX, cellY)
   return {
-    wx: (cellX - minX - cols / 2 + 0.5) * cellSize,
-    wy: (rows / 2 - (cellY - minY) - 0.5) * cellSize,
+    wx: world.x * cellSize,
+    wy: world.y * cellSize,
   }
 }

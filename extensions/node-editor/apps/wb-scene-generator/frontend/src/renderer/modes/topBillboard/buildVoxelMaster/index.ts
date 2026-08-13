@@ -10,10 +10,10 @@
 //
 // ── master canvas 像素密度 ──────────────────────────────────────────────
 //
-// master canvas 内部用 maxPpu(已绑定 rule 的 ppu 取最大,无 rule 时 = BASE_CELL_SIZE)
-// 作为每 cell 像素数,而不是直接用 BASE_CELL_SIZE。原因:源 sprite ppu(16) 高于
-// BASE_CELL_SIZE(8)时,master 用更高像素密度避免在 master 阶段就 nearest 下采样
-// 丢一半细节;compose 那侧 dst 永远用 BASE_CELL_SIZE logical。
+// master canvas 内部用 maxPpu(已绑定 rule 的 ppu 取最大,无 rule 时 = SCREEN_CELL_SIZE)
+// 作为每 cell 像素数,而不是直接用 SCREEN_CELL_SIZE。原因:源 sprite ppu(16) 高于
+// SCREEN_CELL_SIZE(8)时,master 用更高像素密度避免在 master 阶段就 nearest 下采样
+// 丢一半细节;compose 那侧 dst 永远用 SCREEN_CELL_SIZE logical。
 //
 // 公共类型(VoxelLayerInput / BuildVoxelMasterOpts / VoxelMaster)从 ./types re-export。
 
@@ -23,7 +23,7 @@ import {
   type VoxelVisualBoundsLite,
 } from '../../../framework/geometry/topBillboard'
 import { createSurface } from '../../../framework/canvas2d'
-import { BASE_CELL_SIZE } from '../../../framework/geometry/constants'
+import { SCREEN_CELL_SIZE } from '../../../framework/geometry/constants'
 import { matchAssetEntry, type AliasMeta } from '../../../framework/asset/matchAssetEntry'
 import { getRegisteredAssetUrl, getLoadTick, getOrLoadImage } from '../../../framework/asset/imageCache'
 import { getRuleLoadTick } from '../../../framework/asset/ruleCache'
@@ -62,7 +62,7 @@ export function buildVoxelMaster(
     : null
 
   // master cell 像素密度:取已绑定 rule 的 ppu 最大值;asset 模式无 rule / 其它模式
-  // 按 BASE_CELL_SIZE。compose 那侧 dst 永远用 BASE_CELL_SIZE logical。
+  // 按 SCREEN_CELL_SIZE。compose 那侧 dst 永远用 SCREEN_CELL_SIZE logical。
   const cellSize = pickMasterCellSize(assetByLayer)
   const objectGroups = collectObjectInstanceGroups(visible, assetByLayer)
   const objectColumnCells = new Set<CollectedCell>()
@@ -199,19 +199,19 @@ function chooseLayerFootprintAnchor(cells: CollectedCell[]): CollectedCell {
 }
 
 /**
- * 取已绑定 rule 的最大 ppu;无 rule(color/wire 模式 / asset 未匹配)= BASE_CELL_SIZE。
+ * 取已绑定 rule 的最大 ppu;无 rule(color/wire 模式 / asset 未匹配)= SCREEN_CELL_SIZE。
  * 多 rule 不同 ppu 时取 max:小 ppu 的 sprite 在 master 阶段被 nearest 上采样到大
  * ppu(无损,只是分辨率冗余);用 min 反而把大 ppu 的细节强行下采样丢。
  */
 function pickMasterCellSize(
   assetByLayer: Map<number, LayerAssetBinding | null> | null,
 ): number {
-  if (!assetByLayer) return BASE_CELL_SIZE
+  if (!assetByLayer) return SCREEN_CELL_SIZE
   let maxPpu = 0
   for (const binding of assetByLayer.values()) {
     if (binding?.rule && binding.rule.ppu > maxPpu) maxPpu = binding.rule.ppu
   }
-  return maxPpu > 0 ? maxPpu : BASE_CELL_SIZE
+  return maxPpu > 0 ? maxPpu : SCREEN_CELL_SIZE
 }
 
 function collectObjectVisuals(

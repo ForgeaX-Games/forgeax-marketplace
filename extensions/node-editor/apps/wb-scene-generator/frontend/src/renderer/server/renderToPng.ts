@@ -12,7 +12,7 @@
 import { createCanvas } from '@napi-rs/canvas'
 import { setCanvas2DBackend, type Surface2D } from '../framework/canvas2d'
 import { voxelLayerCellSource } from '../framework/cellSource'
-import { BASE_CELL_SIZE } from '../framework/geometry/constants'
+import { SCREEN_CELL_SIZE } from '../framework/geometry/constants'
 import { buildIsoSurface, type IsoLayerInput } from '../modes/iso/buildIsoSurface'
 import { buildSurfaceForSource } from '../modes/top/buildSurface'
 import { buildVoxelMaster, type VoxelLayerInput } from '../modes/topBillboard/buildVoxelMaster'
@@ -116,12 +116,12 @@ function renderIso(layers: RendererVoxelLayer[], opts: RenderOpts): Buffer {
 // becomes a CellSource → buildSurfaceForSource (same color/wire/asset code the
 // browser runs). The browser composeFrame is DPR / parent-rect / getComputedStyle
 // coupled, so we composite directly instead: we lay every layer surface onto a
-// single tight master canvas at its world offset (worldOffsetX/Y * BASE_CELL_SIZE),
+// single tight master canvas at its world offset (worldOffsetX/Y * SCREEN_CELL_SIZE),
 // matching compose.ts's worldAlign branch. asset with no server resolver degrades
 // to color inside buildSurfaceForSource; wire/color need no images.
 
 function renderTop(layers: RendererVoxelLayer[], opts: RenderOpts): Buffer {
-  const cellSize = BASE_CELL_SIZE
+  const cellSize = SCREEN_CELL_SIZE
 
   interface Placed { surface: Surface2D; cols: number; rows: number; ox: number; oy: number; updatedAt: number }
   const placed: Placed[] = []
@@ -185,7 +185,7 @@ function renderTop(layers: RendererVoxelLayer[], opts: RenderOpts): Buffer {
 // passed (and no server image resolver in this call), so build degrades to color.
 
 function renderTopBillboard(layers: RendererVoxelLayer[], opts: RenderOpts): Buffer {
-  const cellSize = BASE_CELL_SIZE
+  const cellSize = SCREEN_CELL_SIZE
   const inputs: VoxelLayerInput[] = []
   layers.forEach((layer, idx) => {
     if (!layer.visible) return

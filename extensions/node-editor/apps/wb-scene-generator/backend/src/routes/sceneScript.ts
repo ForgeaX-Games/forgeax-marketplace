@@ -4,6 +4,7 @@ import {
   applyAuthoringCommands,
   applyProjectAuthoringCommands,
   artifactHash,
+  createSceneDiagnostic,
   createSceneArtifact,
   compiledOpsToKernelGraph,
   liftLegacyRuntimeGraph,
@@ -28,6 +29,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 
 import { getProjectDir, getRuntimeForProject } from '../runtime.js'
+import { projectSinoContractCatalog } from '../scene-script/agentContractCatalog.js'
 import { getProjectSceneContractRegistry, getSceneContractRegistry } from '../scene-script/contracts.js'
 import {
   NOT_APPLIED,
@@ -116,6 +118,48 @@ function uniqueBinding(functionName: string, existing: Set<string>): string {
 
 function hasErrors(diagnostics: readonly SceneDiagnostic[]): boolean {
   return diagnostics.some((item) => item.severity === 'error')
+}
+
+function requireResultCapture(
+  diagnostics: readonly SceneDiagnostic[],
+  resultEntityIds: readonly string[],
+  resultCaptures?: ReadonlyArray<{ kind: string; entityId: string }>,
+): SceneDiagnostic[] {
+  const next = [...diagnostics]
+  if (!hasErrors(diagnostics) && resultEntityIds.length === 0) {
+    next.push(createSceneDiagnostic({
+      code: 'SCENE_RESULT_CAPTURE_REQUIRED',
+      phase: 'compile',
+      severity: 'error',
+      message: 'Canonical Scene Script projects must declare one sceneOutput({ scene }) capture.',
+      expected: 'One sceneOutput capture in the canonical entry project.',
+      actual: 'No compiled resultEntityIds.',
+      operation: 'sceneOutput',
+      fixes: [{
+        fixId: 'add-scene-output-capture',
+        title: 'Capture the final scene',
+        edits: [],
+      }],
+      howToFix: [
+        'Add sceneOutput({ scene: finalScene.scene }) once to the canonical project.',
+      ],
+    }))
+  }
+  if (!resultCaptures || hasErrors(next)) return next
+  const sceneOutputs = resultCaptures.filter((c) => c.kind === 'sceneOutput')
+  if (sceneOutputs.length !== 1) {
+    next.push(createSceneDiagnostic({
+      code: 'SCENE_RESULT_CAPTURE_BLOCKOUT',
+      phase: 'compile',
+      severity: 'error',
+      message: 'Canonical projects must declare exactly one sceneOutput capture.',
+      expected: 'Exactly one sceneOutput({ scene }).',
+      actual: `sceneOutput count=${sceneOutputs.length}`,
+      operation: 'sceneOutput',
+      howToFix: ['Keep a single sceneOutput sink for the canonical Blockout project.'],
+    }))
+  }
+  return next
 }
 
 function applyStoredLayout(
@@ -522,10 +566,23 @@ export async function registerSceneScriptRoutes(app: FastifyInstance): Promise<v
     }
   })
 
-  app.get<{ Params: ProjectParams }>(`${prefix}/contracts`, async (req, reply) => {
+  app.get<{
+    Params: ProjectParams
+    Querystring: {
+      audience?: string
+      mode?: 'summary' | 'detail'
+      functionNames?: string
+    }
+  }>(`${prefix}/contracts`, async (req, reply) => {
     const projectDir = await getProjectDir(req.params.projectId)
     if (!projectDir) return reply.code(404).send({ reason: `project not found: ${req.params.projectId}` })
     const registry = await getProjectSceneContractRegistry(projectDir)
+    if (req.query.audience === 'sino') {
+      return projectSinoContractCatalog(registry.list(), {
+        mode: req.query.mode,
+        functionNames: req.query.functionNames?.split(',').map((name) => name.trim()).filter(Boolean),
+      })
+    }
     return {
       version: '0.1',
       functions: registry.list()
@@ -763,12 +820,18 @@ export async function registerSceneScriptRoutes(app: FastifyInstance): Promise<v
     if (!projectDir) return reply.code(404).send({ reason: `project not found: ${req.params.projectId}` })
     const registry = await getSceneContractRegistry()
     const parsed = parseSceneModule(source, { file, registry })
-    const { compiled, diagnostics } = await compileStoredSceneProject(projectDir, {
+    const projectCompile = await compileStoredSceneProject(projectDir, {
       entryFile: file,
       entrySource: source,
       projectId: req.params.projectId,
       registry,
     })
+    const { compiled } = projectCompile
+    const diagnostics = requireResultCapture(
+      projectCompile.diagnostics,
+      compiled.resultEntityIds,
+      compiled.resultCaptures,
+    )
     const parseFailed = diagnostics.some((item) => item.phase === 'parse' && item.severity === 'error')
     return {
       valid: !hasErrors(diagnostics),
@@ -823,7 +886,11 @@ export async function registerSceneScriptRoutes(app: FastifyInstance): Promise<v
       registry,
     })
     const compiled = projectCompile.compiled
-    const diagnostics = projectCompile.diagnostics
+    const diagnostics = requireResultCapture(
+      projectCompile.diagnostics,
+      compiled.resultEntityIds,
+      compiled.resultCaptures,
+    )
     if (hasErrors(diagnostics)) {
       return reply.code(422).send(rejectedSceneScriptPayload(
         'Scene Script has structured diagnostics.',
@@ -1058,7 +1125,11 @@ export async function registerSceneScriptRoutes(app: FastifyInstance): Promise<v
       registry: baseRegistry,
     })
     const compiled = projectCompile.compiled
-    const diagnostics = [...transformed.diagnostics, ...projectCompile.diagnostics]
+    const diagnostics = requireResultCapture(
+      [...transformed.diagnostics, ...projectCompile.diagnostics],
+      compiled.resultEntityIds,
+      compiled.resultCaptures,
+    )
     if (hasErrors(diagnostics)) {
       return reply.code(422).send(rejectedSceneScriptPayload(
         'Authoring transaction was rejected.',

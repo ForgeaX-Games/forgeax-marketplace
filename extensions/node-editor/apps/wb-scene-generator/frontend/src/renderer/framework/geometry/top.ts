@@ -6,7 +6,7 @@
 // 屏幕坐标系约定:
 //   * CSS 像素,左上 (0,0),X 向右、Y 向下
 //   * 主网格基准原点 originX/Y 由 host 计算并通过 params 传入
-//   * 单元格大小 cellSize:本仓库统一 BASE_CELL_SIZE = 8 CSS px
+//   * 单元格大小 cellSize:屏幕模式统一 SCREEN_CELL_SIZE = 8 CSS px
 //
 // 图层对齐策略:
 //   * 主 grid 尺寸 = 所有可见图层 bounding box 的 max(rows, cols)(host 算)
@@ -21,7 +21,7 @@ export interface TopGeometryParams {
   /** 主网格在 canvas 中的左上角 CSS 像素坐标 */
   originX: number
   originY: number
-  /** 1 cell = N CSS px(BASE_CELL_SIZE) */
+  /** 1 cell = N CSS px(SCREEN_CELL_SIZE) */
   cellSize: number
 }
 

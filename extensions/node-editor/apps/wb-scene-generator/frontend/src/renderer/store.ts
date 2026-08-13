@@ -1,5 +1,13 @@
 import { create } from 'zustand'
-import type { DrawMode, GridLayer, NameListEntry, Point3D, RendererVoxelLayer, ViewMode, VoxelLayer } from './types'
+import type {
+  DrawMode,
+  GridLayer,
+  NameListEntry,
+  Point3D,
+  RendererVoxelLayer,
+  ViewMode,
+  VoxelLayer,
+} from './types'
 import type { AliasMeta } from './framework/asset/matchAssetEntry'
 import type { BakedLayerDTO } from './bridge/bakedApi'
 import type { PreviewEditTool } from '../surfaces/library/editToolbarBus'
@@ -215,7 +223,8 @@ interface RenderState {
   reset: () => void
 }
 
-const initialViewport = { ...DEFAULT_VIEWPORT_2D }
+export const SCENE_DEFAULT_VIEWPORT_2D = { ...DEFAULT_VIEWPORT_2D, scale: 0.7 }
+const initialViewport = { ...SCENE_DEFAULT_VIEWPORT_2D }
 const dirtyBakedLayerKeys = new Set<string>()
 const persistingBakedLayerKeys = new Set<string>()
 let bakedRefreshDeferred = false
@@ -375,7 +384,7 @@ function unionVisibleCells(
 export const useRenderStore = create<RenderState>((set) => ({
   layers: {},
   previewLayers: {},
-  viewMode: 'top',
+  viewMode: '3DMesh',
   drawMode: 'color',
   viewGuides: loadViewGuides(),
   aliasMetas: [],
@@ -586,7 +595,7 @@ export const useRenderStore = create<RenderState>((set) => ({
   setAliasMetas: (metas) => set({ aliasMetas: metas }),
   setViewport2d: (v) => set((s) => ({ viewport2d: { ...s.viewport2d, ...v } })),
   panViewport2d: (dx, dy) => set((s) => ({ viewport2d: panViewport(s.viewport2d, dx, dy) })),
-  resetViewport2d: () => set({ viewport2d: { ...DEFAULT_VIEWPORT_2D } }),
+  resetViewport2d: () => set({ viewport2d: { ...SCENE_DEFAULT_VIEWPORT_2D } }),
   setSelectedEditorNodeIds: (ids) =>
     set((s) => {
       // Identity-stable no-op when the selection is unchanged, so subscribers
@@ -795,6 +804,27 @@ export const useRenderStore = create<RenderState>((set) => ({
     bakedRefreshDeferred = false
     lastPaintDelta = null
     lastVersionStamp = 0
-    set({ layers: {}, previewLayers: {}, viewMode: 'top', drawMode: 'color', aliasMetas: [], viewport2d: { ...initialViewport }, selectedEditorNodeIds: [], previewOverrides: {}, selectedLayerKey: null, selectedSubValue: null, voxelSelection: null, bakedLayers: {}, editMode: false, brushMode: 'free', editTool: 'paint', editZ: 0, editHoverCell: null, editBox: null, activePaintTargetKey: null, activeBakedLayerKey: null })
+    set({
+      layers: {},
+      previewLayers: {},
+      viewMode: '3DMesh',
+      drawMode: 'color',
+      aliasMetas: [],
+      viewport2d: { ...initialViewport },
+      selectedEditorNodeIds: [],
+      previewOverrides: {},
+      selectedLayerKey: null,
+      selectedSubValue: null,
+      voxelSelection: null,
+      bakedLayers: {},
+      editMode: false,
+      brushMode: 'free',
+      editTool: 'paint',
+      editZ: 0,
+      editHoverCell: null,
+      editBox: null,
+      activePaintTargetKey: null,
+      activeBakedLayerKey: null,
+    })
   },
 }))

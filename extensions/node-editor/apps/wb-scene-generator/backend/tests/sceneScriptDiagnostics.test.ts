@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { buildApp } from '../src/main.js'
+import { getProjectDir } from '../src/runtime.js'
+import { writeSceneModule } from '../src/scene-script/store.js'
 
 const workspaceRoot = mkdtempSync(join(tmpdir(), 'wb-scene-diagnostics-'))
 process.env.FORGEAX_PROJECT_ROOT = workspaceRoot
@@ -145,6 +147,81 @@ describe('Scene Script unified diagnostics', () => {
     expectNotApplied(body)
     expect(body.diagnostics.some((item: { phase: string }) => item.phase === 'compile')).toBe(true)
     expect(await pipeline()).toEqual(before)
+  })
+
+  it('rejects validate and put when a canonical project has no sceneOutput capture', async () => {
+    const source = 'const root = emptyScene({})\n'
+    const validated = await app.inject({
+      method: 'POST',
+      url: `/api/v1/projects/${projectId}/scene-script/validate`,
+      payload: { source },
+    })
+    expect(validated.statusCode).toBe(200)
+    expect(validated.json()).toEqual(expect.objectContaining({
+      valid: false,
+      diagnostics: [
+        expect.objectContaining({
+          code: 'SCENE_RESULT_CAPTURE_REQUIRED',
+          severity: 'error',
+          expected: expect.any(String),
+          actual: expect.any(String),
+        }),
+      ],
+      transaction: { applied: false, rolledBack: false },
+    }))
+
+    const before = await pipeline()
+    const committed = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/projects/${projectId}/scene-script`,
+      headers: aiHeaders,
+      payload: { source, expectedRevision: revision },
+    })
+    expect(committed.statusCode).toBe(422)
+    expect(committed.json()).toEqual(expect.objectContaining({
+      status: 'rejected',
+      diagnostics: [
+        expect.objectContaining({ code: 'SCENE_RESULT_CAPTURE_REQUIRED' }),
+      ],
+      transaction: { applied: false, rolledBack: false },
+    }))
+    expect(await pipeline()).toEqual(before)
+  })
+
+  it('rejects execution of an older canonical source that has no sceneOutput capture', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/projects',
+      payload: { name: 'Legacy capture-less canonical source' },
+    })
+    const capturelessProjectId = (created.json() as { id: string }).id
+    const projectDir = await getProjectDir(capturelessProjectId)
+    expect(projectDir).toBeTruthy()
+    await writeSceneModule(
+      projectDir!,
+      'main.scene.ts',
+      'const root = emptyScene({})\n',
+      [],
+    )
+
+    const executed = await app.inject({
+      method: 'POST',
+      url: `/api/v1/projects/${capturelessProjectId}/execute/summary`,
+      payload: {},
+    })
+    expect(executed.statusCode).toBe(422)
+    expect(executed.json()).toEqual(expect.objectContaining({
+      status: 'rejected',
+      code: 'scene-script-result-capture-required',
+      verification: expect.objectContaining({
+        ok: false,
+        finalOutput: expect.objectContaining({
+          ok: false,
+          resultEntityIds: [],
+          totalSceneCells: 0,
+        }),
+      }),
+    }))
   })
 
   it('returns capability policy for sealed internals without applying commands', async () => {

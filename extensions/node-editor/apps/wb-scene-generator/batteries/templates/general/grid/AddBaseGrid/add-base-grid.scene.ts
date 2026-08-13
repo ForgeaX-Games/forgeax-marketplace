@@ -70,8 +70,8 @@ export const addBaseGrid = defineGroup(
       baseAsset: { type: StringValue, runtimeType: "string", runtimePort: "in_4", access: "tree", order: 8, labelEn: "BaseAsset" },
     },
     outputs: {
-      baseNode: { type: Scene, runtimeType: "scene", runtimePort: "out_1", access: "item", order: 1, labelEn: "BaseNode" },
-      rootScene: { type: Scene, runtimeType: "scene", runtimePort: "out_2", access: "tree", order: 0, labelEn: "RootScene" },
+      baseNode: { type: Scene, runtimeType: "scene", runtimePort: "out_1", access: "item", order: 1, labelEn: "BaseNode", description: "Focused base region with grid voxels. Pass this to templates that operate on or partition a parent region." },
+      rootScene: { type: Scene, runtimeType: "scene", runtimePort: "out_2", access: "tree", order: 0, labelEn: "RootScene", description: "Whole root scene containing the base. Use for final composition or output, not as a voxel-bearing parent region." },
       baseNodePath: { type: StringValue, runtimeType: "string", runtimePort: "out_3", access: "tree", order: 2, labelEn: "BaseNodePath" },
       output3: { type: Scene, runtimeType: "scene", runtimePort: "out_0", access: "item", hidden: true, order: 3 },
     },

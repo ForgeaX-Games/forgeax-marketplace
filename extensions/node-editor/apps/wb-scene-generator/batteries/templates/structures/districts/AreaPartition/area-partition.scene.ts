@@ -59,7 +59,7 @@ export const areaPartition = defineGroup(
     id: "scene.template.area-partition",
     version: "1.0.0",
     inputs: {
-      scene: { type: Scene, runtimeType: "scene", runtimePort: "in_0", access: "tree", labelEn: "Scene" },
+      scene: { type: Scene, runtimeType: "scene", runtimePort: "in_0", access: "tree", labelEn: "Scene", description: "Voxel-bearing parent region to partition. For the first partition after addBaseGrid, pass base.baseNode rather than base.rootScene." },
       points: { type: Point2d, runtimeType: "point2d", runtimePort: "in_1", access: "list", labelEn: "Points" },
       areas: { type: NumberList, runtimeType: "number", runtimePort: "in_2", access: "list", labelEn: "Areas" },
       zoneNames: { type: StringValue, runtimeType: "string", runtimePort: "in_3", access: "tree", labelEn: "ZoneNames" },

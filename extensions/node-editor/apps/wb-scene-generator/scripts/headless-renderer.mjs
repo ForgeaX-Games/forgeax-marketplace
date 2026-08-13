@@ -32,7 +32,18 @@ const PORT =
   process.env.VITE_DEV_PORT ||
   '9555';
 const PROTO = (process.env.VITE_DEV_HTTPS_CERT && process.env.VITE_DEV_HTTPS_KEY) ? 'https' : 'http';
-const URL = process.env.SCENE_RENDERER_URL || `${PROTO}://localhost:${PORT}/?pane=renderer`;
+const INTERFACE_PORT = process.env.FORGEAX_INTERFACE_PORT;
+const INTERFACE_ORIGIN = process.env.FORGEAX_INTERFACE_ORIGIN
+  || (INTERFACE_PORT ? `http://127.0.0.1:${INTERFACE_PORT}` : null);
+// In Studio dev mode Vite builds the plugin with a /__fx-plugin/... BASE_URL.
+// Opening the frontend port directly therefore makes pluginUrl('/ws') point at
+// :9555/__fx-plugin/.../ws, which bypasses both proxy rewrite layers and never
+// reaches the backend. Use the Studio proxy origin whenever it is available so
+// fetch and WebSocket requests follow the exact same route as the embedded pane.
+const URL = process.env.SCENE_RENDERER_URL
+  || (INTERFACE_ORIGIN
+    ? `${INTERFACE_ORIGIN}/__fx-plugin/wb-scene-generator/?pane=renderer`
+    : `${PROTO}://localhost:${PORT}/?pane=renderer`);
 
 if (process.env.FORGEAX_LOWPOLY_HEADLESS_RENDERER === '0') {
   console.log('[scene-renderer] disabled via FORGEAX_LOWPOLY_HEADLESS_RENDERER=0');

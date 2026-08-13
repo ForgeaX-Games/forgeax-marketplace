@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- **Slug-root `package.json` no longer declares `workspace:*`, so Studio `bun install` can install this directory.** `@forgeax/node-runtime` stays `workspace:*` on `backend`/`frontend` only. Tests: `scripts/standalone-plugin-dependencies.test.mjs`, `scripts/serve-dist.test.mjs`. Cold start: `scripts/dev.mjs` / `serve-dist.mjs` call `ensureWorkspacePackages`. SSOT: [`docs/development-and-release.md`](../../docs/development-and-release.md). *为什么：* Studio `prepare.ts` bun-installs the marketplace symlink to this slug root and cannot be changed this round.
+- **Correction: `file:` in this app's `package.json` is not the install path.** The Unreleased bullet below that switched `@forgeax/node-runtime` to `file:../../packages/node-runtime` for Studio `bun install` is superseded. Apps keep `workspace:*`; Studio installs `@forgeax-extension/wb-3d-lowpoly` from `release/`. SSOT: [`docs/development-and-release.md`](../../docs/development-and-release.md). *为什么：* relative `file:` dies outside this tree; mixing a pnpm workspace member with a Bun-installable extension already failed twice.
 - **Op-directory generation now imports its registry through a file URL.**
   `scripts/gen-op-directory.mjs` converts the generated registry path with
   `pathToFileURL(...).href`; regression:

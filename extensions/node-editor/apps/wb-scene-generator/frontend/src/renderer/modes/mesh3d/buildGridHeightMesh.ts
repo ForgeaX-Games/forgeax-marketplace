@@ -8,6 +8,7 @@
 
 import * as THREE from 'three'
 import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
+import { gridCornerToWorld } from '../../framework/geometry/worldCoordinates'
 import { colorForValue, type RGBA } from '../../framework/palette'
 import type { GridLayer } from '../../types'
 
@@ -82,12 +83,9 @@ function wallBetween(
   }
 }
 
-function worldX(cellX: number, cols: number, cellSize: number): number {
-  return (cellX - cols / 2) * cellSize
-}
-
-function worldY(cellY: number, rows: number, cellSize: number): number {
-  return (rows / 2 - cellY) * cellSize
+function worldXY(cellX: number, cellY: number, cellSize: number): { x: number; y: number } {
+  const world = gridCornerToWorld(cellX, cellY)
+  return { x: world.x * cellSize, y: world.y * cellSize }
 }
 
 /**
@@ -168,10 +166,8 @@ export function buildGridHeightMesh(opts: BuildGridHeightMeshOpts): THREE.Mesh |
         }
       }
 
-      const x0 = worldX(col, cols, cellSize)
-      const x1 = worldX(col + width, cols, cellSize)
-      const y0 = worldY(row + height, rows, cellSize)
-      const y1 = worldY(row, rows, cellSize)
+      const { x: x0, y: y1 } = worldXY(col, row, cellSize)
+      const { x: x1, y: y0 } = worldXY(col + width, row + height, cellSize)
       const z = value * heightScale
       pushQuad(
         [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]],
@@ -208,9 +204,8 @@ export function buildGridHeightMesh(opts: BuildGridHeightMeshOpts): THREE.Mesh |
         endRow++
       }
 
-      const x = worldX(boundary, cols, cellSize)
-      const y0 = worldY(endRow, rows, cellSize)
-      const y1 = worldY(row, rows, cellSize)
+      const { x, y: y1 } = worldXY(boundary, row, cellSize)
+      const { y: y0 } = worldXY(boundary, endRow, cellSize)
       pushQuad(
         [[x, y0, wall.z0], [x, y1, wall.z0], [x, y1, wall.z1], [x, y0, wall.z1]],
         [wall.normalSign, 0, 0],
@@ -247,9 +242,8 @@ export function buildGridHeightMesh(opts: BuildGridHeightMeshOpts): THREE.Mesh |
         endCol++
       }
 
-      const x0 = worldX(col, cols, cellSize)
-      const x1 = worldX(endCol, cols, cellSize)
-      const y = worldY(boundary, rows, cellSize)
+      const { x: x0, y } = worldXY(col, boundary, cellSize)
+      const { x: x1 } = worldXY(endCol, boundary, cellSize)
       pushQuad(
         [[x0, y, wall.z0], [x1, y, wall.z0], [x1, y, wall.z1], [x0, y, wall.z1]],
         [0, -wall.normalSign, 0],

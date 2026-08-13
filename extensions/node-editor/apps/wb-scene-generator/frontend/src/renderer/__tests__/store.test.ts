@@ -18,10 +18,11 @@ describe('render store', () => {
     expect(layers[0].assetName).toBe('wall')
     expect(layers[0].cells).toHaveLength(1)
   })
-  it('default viewMode is top, drawMode is color', () => {
+  it('default viewMode is 3DMesh, drawMode is color', () => {
     const s = useRenderStore.getState()
-    expect(s.viewMode).toBe('top')
+    expect(s.viewMode).toBe('3DMesh')
     expect(s.drawMode).toBe('color')
+    expect(s.viewport2d).toEqual({ offsetX: 0, offsetY: 0, scale: 0.7 })
   })
   it('stores view-guide visibility independently per render mode', () => {
     const s = useRenderStore.getState()

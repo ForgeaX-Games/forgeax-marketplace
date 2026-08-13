@@ -14,6 +14,15 @@ import { bakedApi } from '../renderer/bridge/bakedApi.js'
 import { syncTrace } from '../debug/syncTrace.js'
 import { sceneExportApi, type SceneExportCookResult } from '../renderer/bridge/sceneExportApi.js'
 import { mesh3dExportApi, type Mesh3dExportCookResult } from '../renderer/bridge/mesh3dExportApi.js'
+import { buildBakedVoxelGlbBlob } from '../renderer/export/bakedVoxelGlb.js'
+import {
+  blobToBase64,
+  createStudioImportRequestId,
+  DEFAULT_STUDIO_ASSET_DIRECTORY,
+  normalizeStudioAssetDirectory,
+  normalizeStudioGlbFilename,
+  requestDirectStudioImport,
+} from '../renderer/export/directStudioImport.js'
 import { defaultPaintTargetName } from '../renderer/framework/paintTarget.js'
 import { buildPathTree, pathParent, type PathTreeNode } from '../renderer/framework/pathTree.js'
 import { colorForValueCss } from '../renderer/framework/palette.js'
@@ -38,7 +47,7 @@ import {
 } from './library/editToolbarBus.js'
 import { libraryApi } from './library/libraryApi.js'
 import {
-  Box, Camera, ChevronDown, ChevronRight, Eye, EyeOff, Layers, NodeEditor, Pencil, Plus, Trash,
+  Box, Camera, ChevronDown, ChevronRight, Eye, EyeOff, Layers, NodeEditor, Pencil, Pin, Plus, SlidersHorizontal, Trash,
 } from './icons.js'
 import {
   clampDrawerWidth,
@@ -86,6 +95,12 @@ type SceneExportState =
   | { status: 'success'; kind: 'sceneZip'; result: SceneExportCookResult }
   | { status: 'success'; kind: 'mesh3d'; result: Mesh3dExportCookResult }
   | { status: 'error'; kind: 'sceneZip' | 'mesh3d'; message: string }
+
+type StudioGlbExportState =
+  | { status: 'idle' }
+  | { status: 'pending' }
+  | { status: 'success'; target: string }
+  | { status: 'error'; message: string }
 
 // Screenshot result presented in a popover for manual copy. The sandboxed studio
 // iframe blocks both the image-blob clipboard write AND the `<a download>` click,
@@ -142,6 +157,10 @@ export function RendererSurface({
   const bakedKeys = useBakedLayerKeys()
   const bakedLayersMap = useRenderStore((s) => s.bakedLayers)
   const bakedTree = useMemo(() => buildPathTree(bakedKeys, (key) => bakedLayersMap[key]), [bakedKeys, bakedLayersMap])
+  const bakedCellCount = useMemo(
+    () => bakedKeys.reduce((total, key) => total + (bakedLayersMap[key]?.cellCount ?? bakedLayersMap[key]?.cells.length ?? 0), 0),
+    [bakedKeys, bakedLayersMap],
+  )
   const editMode = useRenderStore((s) => s.editMode)
   const setEditMode = useRenderStore((s) => s.setEditMode)
   const setBrushMode = useRenderStore((s) => s.setBrushMode)
@@ -190,10 +209,12 @@ export function RendererSurface({
 
   // Pure VIEW state (no graph/runtime mutation) — kept local to the renderer.
   const [activeDrawer, setActiveDrawer] = useState<PreviewDrawer | null>(null)
+  const [pinnedDrawer, setPinnedDrawer] = useState<PreviewDrawer | null>(null)
   // Card visibility belongs to the host's `editorCardOpen` state. Availability
   // persistence is deliberately not consulted here; the initial query below
   // establishes the authoritative state over the workbench protocol.
   const [editorVisible, setEditorVisible] = useState(false)
+  const editorVisibleRef = useRef(false)
   const [drawerMaxHeight, setDrawerMaxHeight] = useState(430)
   const [drawerUserWidth, setDrawerUserWidth] = useState(loadPreviewDrawerWidth)
   const [drawerContainerWidth, setDrawerContainerWidth] = useState(0)
@@ -201,7 +222,19 @@ export function RendererSurface({
   const canvasWrapRef = useRef<HTMLDivElement>(null)
   const drawerWidth = effectiveDrawerWidth(drawerUserWidth, drawerContainerWidth)
   const [sceneExport, setSceneExport] = useState<SceneExportState>({ status: 'idle' })
+  const [studioGlbExport, setStudioGlbExport] = useState<StudioGlbExportState>({ status: 'idle' })
+  const [studioGlbDialogOpen, setStudioGlbDialogOpen] = useState(false)
+  const [studioGlbDirectory, setStudioGlbDirectory] = useState(DEFAULT_STUDIO_ASSET_DIRECTORY)
+  const [studioGlbName, setStudioGlbName] = useState('baked-voxel-scene.glb')
   const [screenshot, setScreenshot] = useState<ScreenshotState>({ status: 'idle' })
+  const openDrawer = useCallback((drawer: PreviewDrawer): void => {
+    setScreenshot({ status: 'idle' })
+    if (editorVisibleRef.current) {
+      postToHost({ type: 'workbench:request-close-editor', force: true })
+    }
+    setPinnedDrawer(null)
+    setActiveDrawer(drawer)
+  }, [postToHost])
   // Selected Layers-panel row lives in the store so the AI/Agent `select-layer`
   // control command (useRendererCommands) drives the same highlight a user click
   // does. Toggle off on re-click of the already-selected row.
@@ -271,7 +304,7 @@ export function RendererSurface({
 
   const revealBakedLayerForRename = useCallback((path: string) => {
     const key = `baked:${path}`
-    setActiveDrawer('editable')
+    openDrawer('editable')
     setActiveBakedLayer(key)
     setSelectedBakedKeys(new Set([key]))
     bakedAnchorRef.current = key
@@ -284,7 +317,7 @@ export function RendererSurface({
       return changed ? next : prev
     })
     setRenamingBakedKey(key)
-  }, [setActiveBakedLayer])
+  }, [openDrawer, setActiveBakedLayer])
 
   const [pendingPaintTarget, setPendingPaintTarget] = useState<(PaintTargetRequest & { resolve: (key: string | null) => void }) | null>(null)
   const [paintTargetName, setPaintTargetName] = useState('')
@@ -402,13 +435,42 @@ export function RendererSurface({
   }, [editorVisible])
 
   useEffect(() => {
-    if (!activeDrawer) return
+    if (!activeDrawer || pinnedDrawer === activeDrawer) return
     const closeOnOutsideClick = (event: PointerEvent): void => {
       if (!drawerDockRef.current?.contains(event.target as Node)) setActiveDrawer(null)
     }
     document.addEventListener('pointerdown', closeOnOutsideClick)
     return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
-  }, [activeDrawer])
+  }, [activeDrawer, pinnedDrawer])
+
+  useEffect(() => {
+    if (pinnedDrawer && pinnedDrawer !== activeDrawer) setPinnedDrawer(null)
+  }, [activeDrawer, pinnedDrawer])
+
+  useEffect(() => {
+    if (screenshot.status === 'idle') return
+    const closeScreenshotOnOutsideClick = (event: PointerEvent): void => {
+      if (!drawerDockRef.current?.contains(event.target as Node)) {
+        setScreenshot({ status: 'idle' })
+      }
+    }
+    document.addEventListener('pointerdown', closeScreenshotOnOutsideClick)
+    return () => document.removeEventListener('pointerdown', closeScreenshotOnOutsideClick)
+  }, [screenshot.status])
+
+  useEffect(() => {
+    if (!editorVisible) return
+    const requestEditorClose = (event: PointerEvent): void => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (!canvasWrapRef.current?.contains(target)) return
+      if (drawerDockRef.current?.contains(target)) return
+      if (target.closest('.renderer-preview-label, button, input, select, textarea, a')) return
+      postToHost({ type: 'workbench:request-close-editor' })
+    }
+    document.addEventListener('pointerdown', requestEditorClose)
+    return () => document.removeEventListener('pointerdown', requestEditorClose)
+  }, [editorVisible, postToHost])
 
   // Editor-selection bridge: the workbench host forwards the kernel editor's
   // current node selection over `workbench:editor-selection`. We mirror it into
@@ -473,7 +535,13 @@ export function RendererSurface({
         for (const id of data.previewDisabledNodeIds) overrides[id] = false
         useRenderStore.getState().setPreviewOverrides(overrides)
       } else if (data.type === 'workbench:editor-visibility-changed') {
+        editorVisibleRef.current = data.visible
         setEditorVisible(data.visible)
+        if (data.visible) {
+          setActiveDrawer(null)
+          setPinnedDrawer(null)
+          setScreenshot({ status: 'idle' })
+        }
       } else if (data.type === 'workbench:restore-layout') {
         setActiveDrawer(null)
         setDrawerUserWidth(loadPreviewDrawerWidth())
@@ -529,6 +597,42 @@ export function RendererSurface({
     else void exportSceneZip()
   }
   const dismissSceneExport = () => setSceneExport({ status: 'idle' })
+  const openStudioGlbDialog = () => {
+    setStudioGlbDirectory(DEFAULT_STUDIO_ASSET_DIRECTORY)
+    setStudioGlbName('baked-voxel-scene.glb')
+    setStudioGlbExport({ status: 'idle' })
+    setStudioGlbDialogOpen(true)
+  }
+  const closeStudioGlbDialog = () => {
+    if (studioGlbExport.status !== 'pending') setStudioGlbDialogOpen(false)
+  }
+  const exportBakedVoxelGlbToStudio = async () => {
+    let directory: string
+    let name: string
+    try {
+      directory = normalizeStudioAssetDirectory(studioGlbDirectory)
+      name = normalizeStudioGlbFilename(studioGlbName)
+    } catch (error) {
+      setStudioGlbExport({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+      return
+    }
+    setStudioGlbDirectory(directory)
+    setStudioGlbName(name)
+    setStudioGlbExport({ status: 'pending' })
+    try {
+      await refreshBakedLayers({ deferIfLocalPending: false, mode: 'full' })
+      const blob = await buildBakedVoxelGlbBlob(useRenderStore.getState().bakedLayers)
+      await requestDirectStudioImport({
+        requestId: createStudioImportRequestId(),
+        directory,
+        name,
+        base64: await blobToBase64(blob),
+      })
+      setStudioGlbExport({ status: 'success', target: `${directory}/${name}` })
+    } catch (error) {
+      setStudioGlbExport({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+    }
+  }
   const selectExportUrl = (e: React.FocusEvent<HTMLInputElement> | React.MouseEvent<HTMLInputElement>) => {
     e.currentTarget.select()
   }
@@ -754,7 +858,7 @@ export function RendererSurface({
       setSelectedBakedKeys((prev) => (prev.size === 1 && prev.has(bakedKey) ? prev : new Set([bakedKey])))
       setSelectedOutputKeys((prev) => (prev.size === 0 ? prev : new Set()))
       bakedAnchorRef.current = bakedKey
-      setActiveDrawer('editable')
+      openDrawer('editable')
       postToHost({
         type: 'workbench:preview-lineage-selection',
         bakedLayerId: bakedLayersMap[bakedKey]!.nodePath,
@@ -763,7 +867,7 @@ export function RendererSurface({
       setSelectedOutputKeys((prev) => (prev.size === 1 && prev.has(outputKey) ? prev : new Set([outputKey])))
       setSelectedBakedKeys((prev) => (prev.size === 0 ? prev : new Set()))
       selectAnchorRef.current = outputKey
-      setActiveDrawer('output')
+      openDrawer('output')
       postToHost({
         type: 'workbench:preview-lineage-selection',
         path: layers[outputKey]!.nodePath,
@@ -771,7 +875,7 @@ export function RendererSurface({
     }
     // If the key matches neither bucket yet (layers still loading), leave the
     // sets alone; the publish effect's selectedKey fallback still emits it.
-  }, [selectedKey, bakedLayersMap, layers, postToHost])
+  }, [selectedKey, bakedLayersMap, layers, openDrawer, postToHost])
 
   // Publish all selected baked + output layers to the left-pane inspector bus.
   useEffect(() => {
@@ -819,7 +923,10 @@ export function RendererSurface({
 
   const captureScreenshot = () => {
     setActiveDrawer(null)
-    if (editorVisible) postToHost({ type: 'workbench:toggle-editor' })
+    setPinnedDrawer(null)
+    if (editorVisibleRef.current) {
+      postToHost({ type: 'workbench:request-close-editor', force: true })
+    }
     // Reuse the existing low-level render API (the plugin's §7.3 screenshot
     // protocol): force one synchronous compose, then read the live frame canvas.
     // This is the SAME render path the headless `useScreenshotCapture` WS loop
@@ -847,14 +954,29 @@ export function RendererSurface({
     e.currentTarget.select()
   }
   const toggleDrawer = (drawer: PreviewDrawer): void => {
-    dismissScreenshot()
-    if (editorVisible) postToHost({ type: 'workbench:toggle-editor' })
-    setActiveDrawer((current) => current === drawer ? null : drawer)
+    if (activeDrawer === drawer) {
+      dismissScreenshot()
+      setPinnedDrawer(null)
+      setActiveDrawer(null)
+      return
+    }
+    openDrawer(drawer)
   }
   const toggleEffectsDrawer = (): void => toggleDrawer('effects')
   const toggleEditor = (): void => {
+    dismissScreenshot()
+    setActiveDrawer(null)
+    setPinnedDrawer(null)
     postToHost({ type: 'workbench:toggle-editor' })
   }
+  const activeDrawerTitle = activeDrawer === 'effects'
+    ? sceneT('drawer.effects')
+    : activeDrawer === 'editable'
+      ? sceneT('layers.editable')
+      : activeDrawer === 'output'
+        ? sceneT('layers.output')
+        : ''
+  const drawerPinned = activeDrawer !== null && pinnedDrawer === activeDrawer
 
   return (
     <div className="renderer-surface">
@@ -867,15 +989,17 @@ export function RendererSurface({
                 type="button"
                 className={`renderer-drawer-pill__button${activeDrawer === 'effects' ? ' is-active' : ''}`}
                 title={sceneT('drawer.effects')}
+                aria-label={sceneT('drawer.effects')}
                 aria-pressed={activeDrawer === 'effects'}
                 onClick={toggleEffectsDrawer}
               >
-                <Pencil size={17} />
+                <SlidersHorizontal size={17} />
               </button>
               <button
                 type="button"
                 className={`renderer-drawer-pill__button${editorVisible ? ' is-active' : ''}`}
                 title={sceneT('editor.title')}
+                aria-label={sceneT('editor.title')}
                 aria-pressed={editorVisible}
                 onClick={toggleEditor}
               >
@@ -885,6 +1009,7 @@ export function RendererSurface({
                 type="button"
                 className={`renderer-drawer-pill__button${activeDrawer === 'output' ? ' is-active' : ''}`}
                 title={sceneT('layers.output')}
+                aria-label={sceneT('layers.output')}
                 aria-pressed={activeDrawer === 'output'}
                 onClick={() => toggleDrawer('output')}
               >
@@ -894,6 +1019,7 @@ export function RendererSurface({
                 type="button"
                 className={`renderer-drawer-pill__button${activeDrawer === 'editable' ? ' is-active' : ''}`}
                 title={sceneT('layers.editable')}
+                aria-label={sceneT('layers.editable')}
                 aria-pressed={activeDrawer === 'editable'}
                 onClick={() => toggleDrawer('editable')}
               >
@@ -904,6 +1030,7 @@ export function RendererSurface({
                 type="button"
                 className="renderer-drawer-pill__button"
                 title={sceneT('preview.saveScreenshot')}
+                aria-label={sceneT('preview.saveScreenshot')}
                 onClick={captureScreenshot}
               >
                 <Camera size={17} />
@@ -919,7 +1046,7 @@ export function RendererSurface({
                     aria-label={sceneT('preview.closeScreenshot')}
                     onClick={dismissScreenshot}
                   >
-                    X
+                    ×
                   </button>
                   <div className="renderer-export-popover__title">{sceneT('preview.screenshotReady')}</div>
                   <img
@@ -953,7 +1080,7 @@ export function RendererSurface({
                     aria-label={sceneT('preview.closeScreenshot')}
                     onClick={dismissScreenshot}
                   >
-                    X
+                    ×
                   </button>
                   <div className="renderer-export-popover__title">{sceneT('preview.screenshotFailed')}</div>
                   <div className="renderer-export-popover__message" title={screenshot.message}>
@@ -981,9 +1108,23 @@ export function RendererSurface({
                 />
               )}
               <div className="renderer-drawer-panel__inner">
+                {activeDrawer && (
+                  <div className="renderer-drawer-panel__title">
+                    <span>{activeDrawerTitle}</span>
+                    <button
+                      type="button"
+                      className={`renderer-drawer-panel__pin${drawerPinned ? ' is-active' : ''}`}
+                      title={sceneT(drawerPinned ? 'drawer.unpin' : 'drawer.pin')}
+                      aria-label={sceneT(drawerPinned ? 'drawer.unpin' : 'drawer.pin')}
+                      aria-pressed={drawerPinned}
+                      onClick={() => setPinnedDrawer(drawerPinned ? null : activeDrawer)}
+                    >
+                      <Pin size={13} />
+                    </button>
+                  </div>
+                )}
                 {activeDrawer === 'effects' && (
                   <div className="renderer-effects-panel">
-                    <div className="renderer-drawer-panel__title">{sceneT('preview.view')}</div>
                     <section className="renderer-effects-section">
                       <h3>{sceneT('preview.view')}</h3>
                       <div className="renderer-effects-grid">
@@ -1027,9 +1168,7 @@ export function RendererSurface({
 
                 {activeDrawer === 'editable' && (
                   <div className="renderer-layers-drawer renderer-layers__section renderer-layers__section--editable">
-                    <div className="renderer-drawer-panel__title">{sceneT('layers.editable')}</div>
                     <div className="renderer-layers__section-head">
-                      <span>{sceneT('layers.editable')}</span>
                       <span className="renderer-layers__head-actions">
                         <button
                           type="button"
@@ -1089,9 +1228,7 @@ export function RendererSurface({
 
                 {activeDrawer === 'output' && (
                   <div className="renderer-layers-drawer renderer-layers__section renderer-layers__section--output">
-                    <div className="renderer-drawer-panel__title">{sceneT('layers.output')}</div>
                     <div className="renderer-layers__section-head">
-                      <span>{sceneT('layers.output')}</span>
                       <span className="renderer-layers__head-actions">
                         <button
                           type="button"
@@ -1118,8 +1255,80 @@ export function RendererSurface({
                               ? sceneT('preview.export3d')
                               : sceneT('preview.exportScene')}
                         </button>
+                        <button
+                          type="button"
+                          className="renderer-layers__add"
+                          title={sceneT('preview.exportVoxelGlbTitle')}
+                          disabled={bakedCellCount === 0 || studioGlbExport.status === 'pending'}
+                          onClick={openStudioGlbDialog}
+                        >
+                          {sceneT('preview.exportVoxelGlb')}
+                        </button>
                       </span>
                     </div>
+                    {studioGlbDialogOpen && (
+                      <div className="renderer-studio-glb-dialog" role="dialog" aria-modal="true" aria-label={sceneT('preview.exportVoxelGlb')}>
+                        <button
+                          type="button"
+                          className="renderer-export-popover__close"
+                          aria-label={sceneT('preview.closeVoxelGlbExport')}
+                          disabled={studioGlbExport.status === 'pending'}
+                          onClick={closeStudioGlbDialog}
+                        >
+                          ×
+                        </button>
+                        <strong>{sceneT('preview.exportVoxelGlb')}</strong>
+                        <p>{sceneT('preview.exportVoxelGlbDescription', { count: bakedCellCount })}</p>
+                        <label className="renderer-export-popover__field">
+                          <span>{sceneT('preview.studioDirectory')}</span>
+                          <input
+                            aria-label={sceneT('preview.studioDirectory')}
+                            disabled={studioGlbExport.status === 'pending'}
+                            value={studioGlbDirectory}
+                            onChange={(event) => setStudioGlbDirectory(event.target.value)}
+                          />
+                        </label>
+                        <label className="renderer-export-popover__field">
+                          <span>{sceneT('preview.studioFilename')}</span>
+                          <input
+                            aria-label={sceneT('preview.studioFilename')}
+                            disabled={studioGlbExport.status === 'pending'}
+                            value={studioGlbName}
+                            onChange={(event) => setStudioGlbName(event.target.value)}
+                          />
+                        </label>
+                        <div className="renderer-studio-glb-dialog__presets">
+                          {['assets/3d', 'assets', 'assets/models'].map((directory) => (
+                            <button
+                              key={directory}
+                              type="button"
+                              disabled={studioGlbExport.status === 'pending'}
+                              onClick={() => setStudioGlbDirectory(directory)}
+                            >
+                              {directory}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="renderer-layers__add"
+                          disabled={studioGlbExport.status === 'pending'}
+                          onClick={() => void exportBakedVoxelGlbToStudio()}
+                        >
+                          {studioGlbExport.status === 'pending' ? sceneT('preview.exporting') : sceneT('preview.exportVoxelGlbAction')}
+                        </button>
+                        {studioGlbExport.status === 'success' && (
+                          <div className="renderer-studio-glb-dialog__status is-success" role="status">
+                            {sceneT('preview.exportVoxelGlbReady', { target: studioGlbExport.target })}
+                          </div>
+                        )}
+                        {studioGlbExport.status === 'error' && (
+                          <div className="renderer-studio-glb-dialog__status is-error" role="status">
+                            {studioGlbExport.message}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {sceneExport.status === 'success' && sceneExport.kind === 'sceneZip' && (
                       <div className="renderer-drawer-export-result" role="status">
                         <button type="button" aria-label={sceneT('preview.closeExport')} onClick={dismissSceneExport}>×</button>
@@ -1234,9 +1443,10 @@ export function RendererSurface({
   )
 }
 
-function PreviewHeader({ title, viewMode }: { title: string; viewMode: ViewMode }): JSX.Element {
+function PreviewHeader({ title, viewMode }: { title: string; viewMode: ViewMode }): JSX.Element | null {
   const scale = useRenderStore((state) => state.viewport2d.scale)
   const zoomAvailable = viewMode !== 'free3d' && viewMode !== '3DMesh'
+  if (!zoomAvailable) return null
   const zoom = (direction: 'in' | 'out'): void => {
     const store = useRenderStore.getState()
     const next = zoomViewportCentered(store.viewport2d, direction)
@@ -1246,14 +1456,11 @@ function PreviewHeader({ title, viewMode }: { title: string; viewMode: ViewMode 
   return (
     <div className="renderer-preview-label" aria-label={title}>
       <span className="renderer-preview-label__status" aria-hidden />
-      <span className="renderer-preview-label__title">{title}</span>
-      {zoomAvailable && (
-        <span className="renderer-preview-label__zoom">
-          <button type="button" aria-label={sceneT('preview.zoomOut')} onClick={() => zoom('out')}>−</button>
-          <output>{Math.round(scale * 100)}%</output>
-          <button type="button" aria-label={sceneT('preview.zoomIn')} onClick={() => zoom('in')}>+</button>
-        </span>
-      )}
+      <span className="renderer-preview-label__zoom">
+        <button type="button" aria-label={sceneT('preview.zoomOut')} onClick={() => zoom('out')}>−</button>
+        <output>{Math.round(scale * 100)}%</output>
+        <button type="button" aria-label={sceneT('preview.zoomIn')} onClick={() => zoom('in')}>+</button>
+      </span>
     </div>
   )
 }
@@ -1676,7 +1883,8 @@ function BakedLayerRow({
         <button
           type="button"
           className="renderer-layer-caret"
-          title={collapsed ? 'Expand' : 'Collapse'}
+          title={sceneT(collapsed ? 'layers.expand' : 'layers.collapse')}
+          aria-label={sceneT(collapsed ? 'layers.expand' : 'layers.collapse')}
           aria-expanded={!collapsed}
           onClick={(e) => { e.stopPropagation(); onToggleCollapsed() }}
         >

@@ -7,6 +7,7 @@
 
 import * as THREE from 'three'
 import { BASE_CELL_SIZE } from '../../framework/geometry/constants'
+import { gridCornerToWorld } from '../../framework/geometry/worldCoordinates'
 import { colorForValue, type RGBA } from '../../framework/palette'
 import { splatUvAtCorner, type SplatField } from './buildSplatField'
 import { createSplatMaterial } from './createSplatMaterial'
@@ -110,14 +111,9 @@ function cornerColor(
   return null
 }
 
-function worldX(cellX: number, minX: number, maxX: number, cellSize: number): number {
-  const cols = maxX - minX + 1
-  return (cellX - minX - cols / 2) * cellSize
-}
-
-function worldY(cellY: number, minY: number, maxY: number, cellSize: number): number {
-  const rows = maxY - minY + 1
-  return (rows / 2 - (cellY - minY)) * cellSize
+function worldXY(cellX: number, cellY: number, cellSize: number): { x: number; y: number } {
+  const world = gridCornerToWorld(cellX, cellY)
+  return { x: world.x * cellSize, y: world.y * cellSize }
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -313,8 +309,7 @@ export function buildTerrainMesh(opts: BuildTerrainMeshOpts): THREE.Mesh | null 
     const c = colors[linear] ?? { r: 180, g: 180, b: 180, a: 255 }
     const cellXF = minX + i / subdiv
     const cellYF = minY + j / subdiv
-    const wx = worldX(cellXF, minX, maxX, cellSize)
-    const wy = worldY(cellYF, minY, maxY, cellSize)
+    const { x: wx, y: wy } = worldXY(cellXF, cellYF, cellSize)
     const meshIdx = positions.length / 3
     positions.push(wx, wy, h)
     uvs.push(wx / cellSize, wy / cellSize)
